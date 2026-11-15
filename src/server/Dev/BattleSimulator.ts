@@ -1,4 +1,28 @@
-import { Players } from "@rbxts/services";
+import { InventoryService } from "../Services/InventoryService";
+import { ShopService } from "../Services/ShopService";
+import { DayNightService } from "../Services/DayNightService";
+import {
+	calcNightAlpha,
+	calcSolarHour,
+	DayNightCycleApplier,
+	lerpColor3Gamma,
+	shouldSkipInterpolation,
+	smoothstepQuintic,
+	type DayNightLightingLike,
+} from "../../shared/DayNightCycle";
+import {
+	DAY_NIGHT_ATTRIBUTES,
+	DAY_NIGHT_DEFAULT_DURATION_SECONDS,
+	DAY_NIGHT_DEFAULT_START_HOUR,
+	DAY_NIGHT_EPSILON,
+} from "../../shared/Config";
+import { SHOP_PRICE_RANGES, SHOP_RESET_WINDOW_SECONDS, SHOP_REQUEST_BUCKET_CAPACITY } from "../../shared/Config";
+import { calcOfferPrice, calcStatQuality } from "../../shared/MathUtils";
+import { CollectionService, Players, Workspace } from "@rbxts/services";
+import { BATTLE_NPC_TAG, NPC_BATTLE_ACTIVE_ATTRIBUTE, NPC_PROMPT_DEBOUNCE_SECONDS, NPC_PROMPT_MAX_DISTANCE } from "../../shared/Config";
+import { NPC_DATA } from "../../shared/NpcData";
+import { createNpcSide, NpcService } from "../Services/NpcService";
+import { calcEffectiveStats } from "../../shared/ProgressionMath";
 import { TINYES_MAX_ADD_PER_CALL, TINYES_WIN_BY_TIER, MAX_SAVED_NUMBER, BATTLE_INACTIVITY_TIMEOUT_SECONDS } from "../../shared/Config";
 import { TinyesService } from "../Services/TinyesService";
 import { CLASS_DATA, doesClassCounter } from "../../shared/ClassData";
@@ -61,7 +85,7 @@ import {
 	calcXpForNextLevel,
 	resolveXpAndLevelUp,
 } from "../../shared/ProgressionMath";
-import type { BattleEndedPayload, BattleStartedPayload } from "../../shared/Remotes";
+import type { AllocationReason, BattleEndedPayload, BattleStartedPayload, PurchaseReason, PurchaseResultPayload, ShopStatePayload } from "../../shared/Remotes";
 import type { BattleGlobalState, FighterInventoryItem, SkillSlot, SkillSlots, StatBlock } from "../../shared/TypeDefs";
 import { BattleSide, type FighterIndex, type FighterLineup } from "../Components/BattleSide";
 import { Fighter } from "../Components/Fighter";
@@ -73,6 +97,7 @@ import {
 	InMemoryDataStore,
 	PlayerDataService,
 	validatePlayerSaveData,
+	migratePlayerData,
 	type DataStoreLike,
 	type PlayerSaveData,
 	type SchemaMigrationFn,
@@ -1829,6 +1854,7 @@ function validatePlayerDataPersistence(): void {
 	const emptyExistingPlayer = { Parent: Players, Name: "EmptyExistingPlayer", UserId: 777010 } as unknown as Player;
 	sharedBackingStore.setRawForTest(dataServiceA.getPlayerKey(777010), {
 		version: PLAYER_DATA_SCHEMA_VERSION,
+		shopRestockCounts: [0, 0, 0],
 		tinyes: 250,
 		inventory: [],
 		activeTeam: [],
@@ -2442,6 +2468,7 @@ function validatePlayerDataPersistence(): void {
 	const mainKey = flakyService.getPlayerKey(777001);
 	sharedBackingStore.setRawForTest(mainKey, {
 		version: PLAYER_DATA_SCHEMA_VERSION,
+		shopRestockCounts: [0, 0, 0],
 		tinyes: -999,
 		inventory: "CORRUPTED_INVENTORY",
 		activeTeam: [],
@@ -2655,6 +2682,7 @@ function validatePlayerDataPersistence(): void {
 				return {
 					...raw,
 					version: 2,
+					shopRestockCounts: [0, 0, 0],
 					tinyes: (raw.tinyes as number) + 300,
 				};
 			},
@@ -2723,6 +2751,7 @@ function validatePlayerDataPersistence(): void {
 			(raw) => ({
 				...raw,
 				version: 2,
+				shopRestockCounts: [0, 0, 0],
 				tinyes: -50, // inválido na validação pós-etapa v1 -> v2!
 			}),
 		],
@@ -3063,6 +3092,7 @@ function validatePlayerDataPersistence(): void {
 		simulatedNow += 5;
 		snapBackingStore.setRawForTest(recoverKey, {
 			version: PLAYER_DATA_SCHEMA_VERSION,
+			shopRestockCounts: [0, 0, 0],
 			tinyes: -777,
 			inventory: "BROKEN_ARRAY",
 			activeTeam: [],
@@ -3099,6 +3129,7 @@ function validatePlayerDataPersistence(): void {
 		simulatedNow += 10;
 		snapBackingStore.setRawForTest(recoverKey, {
 			version: PLAYER_DATA_SCHEMA_VERSION,
+			shopRestockCounts: [0, 0, 0],
 			tinyes: -123,
 			inventory: [],
 			activeTeam: [],
@@ -3122,12 +3153,14 @@ function validatePlayerDataPersistence(): void {
 		simulatedNow += 10;
 		snapBackingStore.setRawForTest(recoverKey, {
 			version: PLAYER_DATA_SCHEMA_VERSION,
+			shopRestockCounts: [0, 0, 0],
 			tinyes: -456,
 			inventory: [],
 			activeTeam: [],
 		});
 		snapService.setLastValidSnapshotForTest(777041, {
 			version: PLAYER_DATA_SCHEMA_VERSION,
+			shopRestockCounts: [0, 0, 0],
 			tinyes: -10,
 			inventory: [],
 			activeTeam: [],
@@ -3167,6 +3200,7 @@ function validatePlayerDataPersistence(): void {
 		simulatedNow += 10;
 		snapBackingStore.setRawForTest(failRecKey, {
 			version: PLAYER_DATA_SCHEMA_VERSION,
+			shopRestockCounts: [0, 0, 0],
 			tinyes: -888,
 			inventory: "CORRUPTED",
 			activeTeam: [],
@@ -3201,6 +3235,7 @@ function validatePlayerDataPersistence(): void {
 		// Caso A: registro corrompido no DataStore já possui sessionLock ativo de outro servidor
 		snapBackingStore.setRawForTest(lockRecKey, {
 			version: PLAYER_DATA_SCHEMA_VERSION,
+			shopRestockCounts: [0, 0, 0],
 			tinyes: -555,
 			inventory: "CORRUPTED_BY_OTHER",
 			activeTeam: [],
@@ -3229,6 +3264,7 @@ function validatePlayerDataPersistence(): void {
 		simulatedNow += 10;
 		snapBackingStore.setRawForTest(lockRecKey, {
 			version: PLAYER_DATA_SCHEMA_VERSION,
+			shopRestockCounts: [0, 0, 0],
 			tinyes: -333,
 			inventory: "CORRUPTED_RACE",
 			activeTeam: [],
@@ -3237,6 +3273,7 @@ function validatePlayerDataPersistence(): void {
 			onBeforeRecoveryUpdateHook = () => {
 				snapBackingStore.setRawForTest(lockRecKey, {
 					version: PLAYER_DATA_SCHEMA_VERSION,
+					shopRestockCounts: [0, 0, 0],
 					tinyes: -333,
 					inventory: "CORRUPTED_RACE",
 					activeTeam: [],
@@ -3272,6 +3309,7 @@ function validatePlayerDataPersistence(): void {
 		snapService.addTinyes(stalePlayer, 50); // Em memória em t+100, mas lastPersistedTimestamp continua em t+0!
 		snapBackingStore.setRawForTest(staleKey, {
 			version: PLAYER_DATA_SCHEMA_VERSION,
+			shopRestockCounts: [0, 0, 0],
 			tinyes: -999,
 			inventory: "NEWER_CORRUPTED_RECORD",
 			activeTeam: [],
@@ -4440,6 +4478,26 @@ function validateInventoryTestBattles(): void {
 	assertInvariant(!createJotaroVsAnubisBattleSession(sessions, player, progression, data, () => 0.1), "sem load não cria time nem rolls");
 	assertInvariant(data.loadPlayer(player).ok, "load para batalha do inventário");
 	const starter = progression.getPlayerData(player)!.inventory[0];
+	let inventoryBattle = false;
+	let inventorySends = 0;
+	const inventoryNetwork = new InventoryService(data, progression, () => inventoryBattle, () => inventorySends++);
+	for (const team of [[], [starter.itemUuid, starter.itemUuid], ["foreign"], ["a", "b", "c", "d"]]) {
+		assertInvariant(!inventoryNetwork.setTeam(player, team), "invalid inventory team");
+	}
+	inventoryBattle = true;
+	assertInvariant(!inventoryNetwork.setTeam(player, [starter.itemUuid]), "team rejected during battle");
+	inventoryBattle = false;
+	const savedProgression = progression.getPlayerData(player)!;
+	progression.loadValidatedPlayerData(player, { ...savedProgression, inventory: [{ ...starter, unavailable: true }] });
+	assertInvariant(!inventoryNetwork.setTeam(player, [starter.itemUuid]), "unavailable inventory team");
+	progression.loadValidatedPlayerData(player, savedProgression);
+	assertInvariant(inventoryNetwork.setTeam(player, [starter.itemUuid]), "valid inventory team");
+	progression.addXp(player, starter.itemUuid, 100);
+	const sendsBeforeAllocate = inventorySends;
+	assertInvariant(progression.allocatePoints(player, starter.itemUuid, "atk", 1), "inventory allocate");
+	assertInvariant(inventorySends === sendsBeforeAllocate + 1, "allocate sends inventory");
+	assertInvariant(inventoryNetwork.getState(player)!.fighters[0].allocatedStats.atk === 1, "inventory snapshot");
+
 	const jotaro = progression.createInventoryFighter(player, {
 		fighterId: "jotaro", baseStats: { hp: 17, atk: 11, dodge: 6, crit: 9 },
 		skills: [calcSkillSlotRoll(1, 0.17), calcSkillSlotRoll(2, 0.41), calcSkillSlotRoll(3, 0.83)],
@@ -4581,7 +4639,7 @@ function validateProgressionSnapshots(): void {
 	assertInvariant(service.allocatePoints(player, created.itemUuid, "atk", 5), "valid allocation");
 	// Percorre o validador real e a entrada da persistencia, sem rerrolar campos.
 	const source = service.getPlayerData(player)!;
-	const validated = validatePlayerSaveData({ ...source, tinyes: 123, activeTeam: [created.itemUuid] });
+	const validated = validatePlayerSaveData({ ...source, tinyes: 123, activeTeam: [created.itemUuid], shopRestockCounts: [0, 0, 0] });
 	assertInvariant(validated.valid && validated.data !== undefined, "fixture passa pelo validador real");
 	const loaded = new ProgressionService();
 	loaded.loadValidatedPlayerData(player, validated.data!);
@@ -4792,7 +4850,917 @@ export function validatePostBattleXp(): void {
 	print("POST_BATTLE_XP_PASSED");
 }
 
+export function validateShop(): void {
+	for (const rarity of ["Comum", "Rara", "Épica", "Lendária"] as const) {
+		const range = SHOP_PRICE_RANGES[rarity];
+		assertInvariant(calcOfferPrice(rarity, 0, 1) === range.min && calcOfferPrice(rarity, 1, 3) === range.max, "extremos do preço");
+		for (let level = 1; level <= 3; level++) {
+			let previous = range.min;
+			for (let step = 0; step <= 100; step++) {
+				const quality = step / 100;
+				const price = calcOfferPrice(rarity, quality, level);
+				assertInvariant(price === calcOfferPrice(rarity, quality, level) && price >= previous && price >= range.min && price <= range.max, "preço determinístico, monotônico em qualidade e dentro da faixa");
+				if (level < 3) assertInvariant(calcOfferPrice(rarity, quality, level + 1) >= price, "preço monotônico em nível");
+				previous = price;
+			}
+		}
+	}
+	for (const className of ["Fury", "Menace", "Support", "Controller", "Dominator"] as const) {
+		const ranges = CLASS_DATA[className].baseStats;
+		assertInvariant(calcStatQuality(className, { hp: ranges.hp.min, atk: ranges.atk.min, dodge: ranges.dodge.min, crit: ranges.crit.min }) === 0, "qualidade mínima");
+		assertInvariant(calcStatQuality(className, { hp: ranges.hp.max, atk: ranges.atk.max, dodge: ranges.dodge.max, crit: ranges.crit.max }) === 1, "qualidade máxima");
+	}
+	const backing = new InMemoryDataStore();
+	let now = SHOP_RESET_WINDOW_SECONDS * 10 + 100;
+	let clock = 0;
+	let inBattle = false;
+	const mock = { Parent: Players as Players | undefined, Name: "ShopTest", UserId: 991990 };
+	const player = mock as Player;
+	const progression = new ProgressionService();
+	const warnings: string[] = [];
+	const data = new PlayerDataService(progression, { dataStore: backing, serverId: "ShopTest", now: () => now,
+		waitFn: () => {}, warnFn: (message) => warnings.push(message), disableStudioAutoFallbackOnInjectedStore: true });
+	let changes = 0;
+	let states = 0;
+	const shop = new ShopService(data, () => inBattle, (recipient, payload) => {
+		assertInvariant(recipient === player && payload.offers.size() === 3, "ShopState privado com três prateleiras");
+		const offers = shop.getOffers(player)!;
+		for (let i = 0; i < 3; i++) {
+			assertStoredEqual(payload.offers[i].baseStats, offers[i].baseStats, "atributos expostos antes da compra");
+			assertInvariant(payload.offers[i].level === offers[i].level && payload.offers[i].price === offers[i].price, "nível e preço expostos");
+		}
+		states++;
+	}, () => changes++, () => {}, () => {}, () => now, () => clock);
+	const state = () => {
+		const snapshot = data.getPlayerSaveSnapshot(player)!;
+		return { tinyes: snapshot.tinyes, inventory: snapshot.inventory, activeTeam: snapshot.activeTeam, counts: snapshot.shopRestockCounts };
+	};
+	assertInvariant(!shop.requestPurchase(player, { requestId: "regression", offerId: "inventado" }), "sessão ausente");
+	assertInvariant(data.loadPlayer(player).ok, "load loja");
+	shop.sync(player);
+	const original = shop.getOffers(player)!;
+	assertStoredEqual(shop.getOffers(player), original, "estoque estável sem compra");
+	let before = state();
+	assertInvariant(!shop.requestPurchase(player, { requestId: "regression", offerId: original[0].offerId }), "saldo insuficiente");
+	assertStoredEqual(state(), before, "saldo insuficiente preserva estado final");
+	assertInvariant(data.addTinyes(player, 100000), "crédito de teste");
+	clock += 10;
+	before = state();
+	const offer = original[0];
+	assertInvariant(shop.requestPurchase(player, { requestId: "regression", offerId: offer.offerId }), "compra válida");
+	const after = state();
+	const item = after.inventory[after.inventory.size() - 1];
+	assertInvariant(after.tinyes === before.tinyes - offer.price && after.inventory.size() === before.inventory.size() + 1, "um pagamento e um item");
+	assertInvariant(item.itemUuid !== offer.offerId && item.level === offer.level && item.xp === 0 && item.fighterId === offer.fighterId, "identidade e nível da oferta");
+	assertStoredEqual(item.baseStats, offer.baseStats, "baseStats intactos");
+	assertStoredEqual(item.skills, offer.skills, "três rolls intactos");
+	assertStoredEqual(item.allocatedStats, { hp: 0, atk: 0, dodge: 0, crit: 0 }, "nenhum ponto alocado");
+	assertInvariant(calcAvailablePoints(item.level, item.allocatedStats) === (item.level - 1) * 2, "pontos livres do nível");
+	assertStoredEqual(after.activeTeam, before.activeTeam, "compra não altera time");
+	assertInvariant(changes === 1 && states === 2, "notificações após commit");
+	assertInvariant(!shop.requestPurchase(player, { requestId: "regression", offerId: offer.offerId }), "mesmo offerId recusado");
+	assertStoredEqual(state(), after, "duplicação não cobra nem entrega");
+	const restocked = shop.getOffers(player)!;
+	assertInvariant(restocked[0].offerId !== offer.offerId, "nova identidade no reabastecimento");
+	assertStoredEqual(restocked[1], original[1], "prateleira vizinha intacta");
+	const secondService = new ShopService(data, () => false, () => {}, () => {}, () => {}, () => {}, () => now, () => clock);
+	assertStoredEqual(secondService.getOffers(player), restocked, "reabastecimento determinístico");
+	const alteredSkills = { ...offer, skills: [calcSkillSlotRoll(1, 0), calcSkillSlotRoll(2, 1), calcSkillSlotRoll(3, 0)] };
+	const className = FIGHTER_DATA[offer.fighterId as "jotaro" | "anubis"].className;
+	assertInvariant(calcOfferPrice(alteredSkills.rarity, calcStatQuality(className, alteredSkills.baseStats), alteredSkills.level) === offer.price, "skills não alteram preço");
+	// Save e reentrada na mesma janela preservam tudo, incluindo a prateleira reabastecida.
+	assertInvariant(data.savePlayer(player).ok, "save compra");
+	data.handlePlayerRemoving(player);
+	shop.forgetPlayer(player);
+	assertInvariant(data.loadPlayer(player).ok, "reload compra");
+	assertStoredEqual(state(), after, "saldo, inventário, rolls e contadores persistem");
+	assertStoredEqual(shop.getOffers(player), restocked, "reentrada não rerrola nem muda GUID");
+	// Falha mesmo depois de inserir: rollback precisa remover o item parcialmente criado.
+	const methodSlot = progression as unknown as { createInventoryFighter: unknown };
+	const create = methodSlot.createInventoryFighter;
+	progression.createInventoryFighter = (owner, params) => {
+		const current = progression.getPlayerData(owner)!;
+		progression.loadValidatedPlayerData(owner, { ...current, inventory: [...current.inventory,
+			{ ...params, itemUuid: "partial", level: params.level ?? 1, xp: 0, allocatedStats: { hp: 0, atk: 0, dodge: 0, crit: 0 } }] });
+		error("falha injetada na criação");
+	};
+	before = state(); clock += 10;
+	assertInvariant(!shop.requestPurchase(player, { requestId: "regression", offerId: restocked[0].offerId }), "falha na entrega recusada");
+	assertStoredEqual(state(), before, "rollback devolve saldo e remove item parcial");
+	assertInvariant(warnings.size() > 0, "rollback registrado");
+	methodSlot.createInventoryFighter = create;
+	for (const payload of [{ requestId: "regression", offerId: "inventado" }, { requestId: "regression", offerId: "" }, { requestId: "regression", offerId: string.rep("a", MAX_ITEM_UUID_LENGTH + 1) }, { requestId: "regression", offerId: 1 }, { requestId: "regression", offerId: restocked[0].offerId, price: 1 }, "invalid"]) {
+		clock += 10;
+		assertInvariant(!shop.requestPurchase(player, payload), "payload inválido recusado");
+		assertStoredEqual(state(), before, "payload inválido preserva estado");
+	}
+	clock += 10; inBattle = true;
+	assertInvariant(!shop.requestPurchase(player, { requestId: "regression", offerId: restocked[0].offerId }), "batalha recusa compra");
+	inBattle = false; mock.Parent = undefined;
+	assertInvariant(!shop.requestPurchase(player, { requestId: "regression", offerId: restocked[0].offerId }), "fora de Players recusa compra");
+	mock.Parent = Players;
+	assertStoredEqual(state(), before, "batalha e ausência preservam estado");
+	// Bucket próprio: três compras no mesmo instante, quarta recusada; reposição aceita após 1s.
+	clock += 10; before = state();
+	let spent = 0;
+	for (let i = 0; i < SHOP_REQUEST_BUCKET_CAPACITY; i++) {
+		const current = shop.getOffers(player)![0]; spent += current.price;
+		assertInvariant(shop.requestPurchase(player, { requestId: "regression", offerId: current.offerId }), "compra dentro do bucket");
+	}
+	const burst = state();
+	assertInvariant(burst.tinyes === before.tinyes - spent && burst.inventory.size() === before.inventory.size() + 3, "rajada paga exatamente três");
+	assertInvariant(!shop.requestPurchase(player, { requestId: "regression", offerId: shop.getOffers(player)![0].offerId }), "rajada excedente recusada");
+	assertStoredEqual(state(), burst, "rate limit não altera estado");
+	clock += 1;
+	assertInvariant(shop.requestPurchase(player, { requestId: "regression", offerId: shop.getOffers(player)![0].offerId }), "bucket repõe após um segundo");
+	// Saldo para exatamente uma das duas ofertas.
+	data.trySpendTinyes(player, data.getTinyes(player)!);
+	const pair = shop.getOffers(player)!;
+	data.addTinyes(player, pair[0].price);
+	before = state(); clock += 10;
+	assertInvariant(shop.requestPurchase(player, { requestId: "regression", offerId: pair[0].offerId }) && !shop.requestPurchase(player, { requestId: "regression", offerId: pair[1].offerId }), "duas ofertas disputam saldo para uma");
+	assertInvariant(data.getTinyes(player) === 0 && state().inventory.size() === before.inventory.size() + 1, "saldo nunca negativo e só uma entrega");
+	const previousWindow = shop.getOffers(player)!;
+	now += SHOP_RESET_WINDOW_SECONDS;
+	assertInvariant(shop.getOffers(player)![0].offerId !== previousWindow[0].offerId, "janela renova oferta");
+	assertInvariant(!shop.requestPurchase(player, { requestId: "regression", offerId: previousWindow[0].offerId }), "oferta expirada recusada");
+	// Migração real de v1 e validação estrita dos contadores novos.
+	const legacy = { ...data.getPlayerSaveSnapshot(player)!, version: 1, shopRestockCounts: undefined };
+	const migrated = migratePlayerData(legacy)!;
+	assertStoredEqual(migrated.shopRestockCounts, [0, 0, 0], "migração v1 -> v2 inicializa contadores");
+	assertStoredEqual(migrated.inventory, legacy.inventory, "migração preserva inventário e rolls");
+	for (const counts of [undefined, [], [0, 0], [0, -1, 0], [0, 0.5, 0], [0, math.huge, 0]]) {
+		assertInvariant(!validatePlayerSaveData({ ...migrated, shopRestockCounts: counts }).valid, "schema v2 rejeita contador inválido");
+	}
+	data.handlePlayerRemoving(player);
+	backing.setRawForTest(data.getPlayerKey(player.UserId), { ...legacy, sessionLock: undefined });
+	assertInvariant(data.loadPlayer(player).ok, "save antigo carrega pela migração");
+	assertStoredEqual(data.getShopRestockCounts(player), [0, 0, 0], "load antigo inicializa contadores");
+	assertStoredEqual(progression.getPlayerData(player)!.inventory, legacy.inventory, "load antigo preserva inventário");
+	data.handlePlayerRemoving(player);
+	backing.setRawForTest(data.getPlayerKey(player.UserId), {
+		version: PLAYER_DATA_SCHEMA_VERSION, tinyes: 100000, inventory: [], activeTeam: [], shopRestockCounts: [0, 0, 0],
+	});
+	assertInvariant(data.loadPlayer(player).ok, "conta existente com time vazio");
+	const levels = new Set<number>();
+	for (let sample = 0; sample < 100 && levels.size() < 3; sample++) {
+		now += SHOP_RESET_WINDOW_SECONDS; clock += 10;
+		for (const sampled of shop.getOffers(player)!) {
+			if (levels.has(sampled.level)) continue;
+			assertInvariant(shop.requestPurchase(player, { requestId: "regression", offerId: sampled.offerId }), "compra do nível sorteado");
+			levels.add(sampled.level);
+			const inventory = progression.getPlayerData(player)!.inventory;
+			const purchased = inventory[inventory.size() - 1];
+			assertInvariant(purchased.level === sampled.level && purchased.xp === 0 && calcAvailablePoints(purchased.level, purchased.allocatedStats) === (sampled.level - 1) * 2, "Lv1/Lv2/Lv3 com pontos livres corretos");
+			assertStoredEqual(purchased.skills, sampled.skills, "skills intactas em todos os níveis");
+			assertStoredEqual(purchased.baseStats, sampled.baseStats, "stats intactos em todos os níveis");
+			assertStoredEqual(data.getActiveTeam(player), [], "comprar com time vazio não equipa");
+		}
+	}
+	assertInvariant(levels.size() === 3, "distribuição oferece Lv1, Lv2 e Lv3");
+	const purchased = progression.getPlayerData(player)!.inventory;
+	assertInvariant(purchased.size() === 3 && new Set(purchased.map((entry) => entry.itemUuid)).size() === 3 && new Set(purchased.map((entry) => entry.fighterId)).size() < 3, "duplicatas permitidas com UUIDs próprios");
+	const beforeEmptyTeamReload = state();
+	data.handlePlayerRemoving(player); shop.forgetPlayer(player);
+	assertInvariant(data.loadPlayer(player).ok, "reload com time vazio");
+	assertStoredEqual(state(), beforeEmptyTeamReload, "save/load preserva time vazio e itens de todos os níveis");
+	data.handlePlayerRemoving(player);
+	print("SHOP_PASSED");
+}
+
+function validateShopSynchronization(): void {
+	const player = { Parent: Players, Name: "ShopSyncTest", UserId: 991991 } as unknown as Player;
+	let now = SHOP_RESET_WINDOW_SECONDS * 11 - 1;
+	let clock = 0.1;
+	let nowCalls = 0;
+	let advanceOnRead = false;
+	let inBattle = false;
+	const progression = new ProgressionService();
+	const data = new PlayerDataService(progression, { dataStore: new InMemoryDataStore(), serverId: "ShopSyncTest",
+		now: () => now, waitFn: () => {}, disableStudioAutoFallbackOnInjectedStore: true });
+	let shown: ShopStatePayload | undefined;
+	let purchaseResult: PurchaseResultPayload | undefined;
+	let fail: string | undefined;
+	const attempts: string[] = [];
+	let balanceReceived = -1;
+	let inventoryReceived: string[] = [];
+	const tinyes = new TinyesService(data, (_, payload) => {
+		attempts.push("TinyesChanged");
+		if (fail === "TinyesChanged") error("falha injetada TinyesChanged");
+		balanceReceived = payload.balance;
+	});
+	const inventory = new InventoryService(data, progression, () => inBattle, (_, payload) => {
+		attempts.push("InventoryState");
+		if (fail === "InventoryState") error("falha injetada InventoryState");
+		inventoryReceived = payload.fighters.map((fighter) => fighter.itemUuid);
+	});
+	const shop = new ShopService(data, () => inBattle, (_, payload) => {
+		attempts.push("ShopState");
+		if (fail === "ShopState") error("falha injetada ShopState");
+		shown = payload;
+	}, (owner) => tinyes.syncBalance(owner), (owner) => inventory.sync(owner), (owner, payload) => {
+		assertInvariant(owner === player, "PurchaseResult continua privado após falha de outro envio");
+		purchaseResult = payload;
+	}, () => {
+		nowCalls++;
+		const value = now;
+		if (advanceOnRead) now++;
+		return value;
+	}, () => clock);
+	const internals = shop as unknown as {
+		buckets: Map<Player, { tokens: number; time: number }>; windows: Map<Player, number>;
+	};
+	assertInvariant(!shop.requestPurchase(player, { requestId: "regression", offerId: "sem sessão" }) && !internals.buckets.has(player), "sem sessão não cria bucket");
+	shop.refresh(player);
+	assertInvariant(nowCalls === 0 && attempts.size() === 0 && !internals.windows.has(player), "refresh sem sessão sai antes de consultar relógio ou publicar");
+	assertInvariant(data.loadPlayer(player).ok && data.addTinyes(player, 1000000), "sessão para regressões da loja");
+	const oldOffers = shop.getOffers(player)!;
+	nowCalls = 0; advanceOnRead = true;
+	shop.sync(player);
+	advanceOnRead = false;
+	assertInvariant(nowCalls === 1 && internals.windows.get(player) === 10, "sync decide janela com uma única leitura na virada");
+	assertStoredEqual(shown!.offers.map((offer) => offer.offerId), oldOffers.map((offer) => offer.offerId), "client e janela gravada pertencem à mesma fatia");
+	shop.refresh(player);
+	assertInvariant(internals.windows.get(player) === 11 && shown!.offers[0].offerId !== oldOffers[0].offerId, "refresh envia a fatia seguinte na virada");
+	const beforeSync = shop.getOffers(player)!;
+	now += SHOP_RESET_WINDOW_SECONDS;
+	shop.sync(player);
+	assertInvariant(internals.windows.get(player) === 12 && shown!.offers[0].offerId !== beforeSync[0].offerId, "virada entre getOffers e sync usa a nova fatia");
+	assertStoredEqual(shown!.offers.map((offer) => offer.offerId), shop.getOffers(player)!.map((offer) => offer.offerId), "ofertas publicadas correspondem à janela final");
+	for (const failure of ["ShopState", "TinyesChanged", "InventoryState"]) {
+		clock += 10; shop.sync(player);
+		const advertised = shown!.offers[0];
+		const before = data.getPlayerSaveSnapshot(player)!;
+		attempts.clear(); fail = failure;
+		assertInvariant(shop.requestPurchase(player, { requestId: "regression", offerId: advertised.offerId }), "falha de notificação preserva compra confirmada");
+		fail = undefined;
+		const after = data.getPlayerSaveSnapshot(player)!;
+		assertStoredEqual(attempts, ["ShopState", "TinyesChanged", "InventoryState"], "cada notificação é tentada apesar da falha");
+		assertStoredEqual(purchaseResult, { requestId: "regression", offerId: advertised.offerId, ok: true }, "falha de apresentação não impede resultado confirmado");
+		assertInvariant(after.tinyes === before.tinyes - advertised.price && after.inventory.size() === before.inventory.size() + 1, "preço mostrado é o debitado mesmo com falha de notificação");
+		assertStoredEqual(after.activeTeam, before.activeTeam, "falha de envio preserva time");
+		assertInvariant(after.shopRestockCounts![0] === before.shopRestockCounts![0] + 1, "falha de envio mantém contador confirmado");
+		if (failure !== "TinyesChanged") assertInvariant(balanceReceived === after.tinyes, "TinyesChanged recebe saldo final mesmo se ShopState falha");
+		if (failure !== "InventoryState") assertStoredEqual(inventoryReceived, after.inventory.map((item) => item.itemUuid), "InventoryState recebe itens finais mesmo se outro envio falha");
+	}
+	const beforeBattle = data.getPlayerSaveSnapshot(player)!;
+	clock += 10; inBattle = true;
+	assertInvariant(!shop.requestPurchase(player, { requestId: "regression", offerId: shop.getOffers(player)![0].offerId }), "compra em batalha recusada");
+	assertStoredEqual(data.getPlayerSaveSnapshot(player), beforeBattle, "recusa em batalha preserva estado final completo");
+	inBattle = false; shop.forgetPlayer(player); clock = 0.1;
+	const beforeBurst = data.getPlayerSaveSnapshot(player)!;
+	let spent = 0;
+	const buy = () => {
+		shop.sync(player);
+		const advertised = shown!.offers[0];
+		assertInvariant(shop.requestPurchase(player, { requestId: "regression", offerId: advertised.offerId }), "bucket aceita compra no limite exato");
+		spent += advertised.price;
+	};
+	for (let i = 0; i < SHOP_REQUEST_BUCKET_CAPACITY; i++) buy();
+	for (let second = 0; second < 10; second++) {
+		const beforeDenied = data.getPlayerSaveSnapshot(player)!;
+		assertInvariant(!shop.requestPurchase(player, { requestId: "regression", offerId: shop.getOffers(player)![0].offerId }), "rajada extra recusada no mesmo instante");
+		assertStoredEqual(data.getPlayerSaveSnapshot(player), beforeDenied, "rajada excedente preserva estado final");
+		clock += 1 - FLOAT_TOLERANCE / 2;
+		buy();
+		assertInvariant(internals.buckets.get(player)!.tokens === 0, "tolerância nunca deixa tokens negativos");
+	}
+	const afterBurst = data.getPlayerSaveSnapshot(player)!;
+	assertInvariant(afterBurst.tinyes === beforeBurst.tinyes - spent && afterBurst.inventory.size() === beforeBurst.inventory.size() + SHOP_REQUEST_BUCKET_CAPACITY + 10, "rajada inicial e uma compra por segundo debitam e entregam exatamente");
+	assertInvariant(!shop.requestPurchase(player, { requestId: "regression", offerId: shop.getOffers(player)![0].offerId }), "último segundo também aceita só uma compra");
+	assertStoredEqual(data.getPlayerSaveSnapshot(player), afterBurst, "última recusa mantém estado final");
+	data.handlePlayerRemoving(player); shop.forgetPlayer(player);
+	print("SHOP_SYNCHRONIZATION_PASSED");
+}
+
+export function validatePurchaseAndAllocationResults(): void {
+	const player = { Parent: Players, Name: "ResultTest", UserId: 991992 } as unknown as Player;
+	const other = { Parent: Players, Name: "OtherResultTest", UserId: 991993 } as unknown as Player;
+	let clock = 0;
+	let inBattle = false;
+	let failResult = false;
+	const remotes = new RemoteService(() => clock);
+	const progression = new ProgressionService(remotes);
+	const data = new PlayerDataService(progression, { dataStore: new InMemoryDataStore(), serverId: "ResultTest",
+		now: () => SHOP_RESET_WINDOW_SECONDS * 20, waitFn: () => {}, disableStudioAutoFallbackOnInjectedStore: true,
+		warnFn: () => {} });
+	const allocations: { owner: Player; state: ReturnType<InventoryService["getState"]> }[] = [];
+	const inventory = new InventoryService(data, progression, () => inBattle, (owner, state) => {
+		assertStoredEqual(state, { ...inventory.getState(owner)!, allocationReason: state.allocationReason }, "alocação publica somente o estado final do destinatário");
+		allocations.push({ owner, state });
+	});
+	const results: { owner: Player; payload: PurchaseResultPayload; state: PlayerSaveData | undefined }[] = [];
+	const shop = new ShopService(data, () => inBattle, () => {}, () => {}, (owner) => inventory.sync(owner), (owner, payload) => {
+		results.push({ owner, payload, state: data.getPlayerSaveSnapshot(owner) });
+		if (failResult) error("falha injetada PurchaseResult");
+	}, () => SHOP_RESET_WINDOW_SECONDS * 20, () => clock);
+	assertInvariant(remotes.purchaseResult.Name === "PurchaseResult", "remote de resultado criado");
+	const expectRefusal = (payload: unknown, reason: PurchaseReason, requestId: string, offerId: string) => {
+		clock += 10;
+		const before = data.getPlayerSaveSnapshot(player);
+		const count = results.size();
+		assertInvariant(!shop.requestPurchase(player, payload), "compra recusada");
+		assertInvariant(results.size() === count + 1 && results[results.size() - 1].owner === player, "uma resposta só ao solicitante");
+		assertStoredEqual(results[results.size() - 1].payload, { requestId, offerId, ok: false, reason }, "motivo fixo e correlação sem dados adicionais");
+		assertStoredEqual(data.getPlayerSaveSnapshot(player), before, "recusa preserva saldo, inventário, time e contadores");
+		assertStoredEqual(results[results.size() - 1].state, before, "resultado observa estado final da recusa");
+	};
+	expectRefusal({ requestId: "unloaded", offerId: "any" }, "erro", "unloaded", "any");
+	assertInvariant(data.loadPlayer(player).ok && data.loadPlayer(other).ok, "duas sessões isoladas");
+	const offer = shop.getOffers(player)![0];
+	expectRefusal({ requestId: "balance", offerId: offer.offerId }, "saldo", "balance", offer.offerId);
+	inBattle = true;
+	expectRefusal({ requestId: "battle", offerId: offer.offerId }, "em_batalha", "battle", offer.offerId);
+	inBattle = false;
+	const foreign = shop.getOffers(other)![0].offerId;
+	const otherBefore = data.getPlayerSaveSnapshot(other)!;
+	for (const id of [foreign, "inventada"]) expectRefusal({ requestId: "private", offerId: id }, "oferta_invalida", "private", id);
+	for (const requestId of [undefined, "", 1, string.rep("x", MAX_ITEM_UUID_LENGTH + 1)]) {
+		expectRefusal({ requestId, offerId: offer.offerId }, "oferta_invalida", "", offer.offerId);
+	}
+	expectRefusal({ requestId: "extra", offerId: offer.offerId, price: 1 }, "oferta_invalida", "extra", offer.offerId);
+	expectRefusal("invalid", "oferta_invalida", "", "");
+	expectRefusal({ requestId: "bad-id", offerId: string.rep("x", MAX_ITEM_UUID_LENGTH + 1) }, "oferta_invalida", "bad-id", "");
+	assertInvariant(data.addTinyes(player, 1000000), "saldo para resultados");
+	const createSlot = progression as unknown as { createInventoryFighter: unknown };
+	const create = createSlot.createInventoryFighter;
+	progression.createInventoryFighter = () => error("falha injetada na entrega");
+	expectRefusal({ requestId: "rollback", offerId: offer.offerId }, "erro", "rollback", offer.offerId);
+	createSlot.createInventoryFighter = create;
+	clock += 10;
+	const before = data.getPlayerSaveSnapshot(player)!;
+	assertInvariant(shop.requestPurchase(player, { requestId: "success", offerId: offer.offerId }), "compra confirmada");
+	const success = results[results.size() - 1];
+	assertStoredEqual(success.payload, { requestId: "success", offerId: offer.offerId, ok: true }, "sucesso correlacionado sem motivo");
+	assertStoredEqual(success.state, data.getPlayerSaveSnapshot(player), "sucesso observa commit final");
+	assertInvariant(success.state!.tinyes === before.tinyes - offer.price && success.state!.inventory.size() === before.inventory.size() + 1, "sucesso cobra e entrega exatamente uma vez");
+	expectRefusal({ requestId: "duplicate", offerId: offer.offerId }, "oferta_invalida", "duplicate", offer.offerId);
+	// Rajadas inválidas também consomem tokens; respostas não autorizam mutações extras.
+	shop.forgetPlayer(player);
+	for (let i = 0; i < SHOP_REQUEST_BUCKET_CAPACITY; i++) shop.requestPurchase(player, { requestId: "burst", offerId: "inventada" });
+	const limited = data.getPlayerSaveSnapshot(player)!;
+	const current = shop.getOffers(player)![0];
+	assertInvariant(!shop.requestPurchase(player, { requestId: "limited", offerId: current.offerId }), "rate limit preservado");
+	assertStoredEqual(results[results.size() - 1].payload, { requestId: "limited", offerId: current.offerId, ok: false, reason: "limite" }, "limite também responde");
+	assertStoredEqual(data.getPlayerSaveSnapshot(player), limited, "limite não compra");
+	// O bucket e as respostas são pessoais.
+	assertInvariant(data.addTinyes(other, 1000000) && shop.requestPurchase(other, { requestId: "other", offerId: foreign }), "rajada de um jogador não bloqueia outro");
+	assertInvariant(results[results.size() - 1].owner === other, "resultado privado do outro jogador");
+	assertStoredEqual(data.getPlayerSaveSnapshot(player), limited, "compra alheia não muda o solicitante anterior");
+	clock += 1;
+	failResult = true;
+	assertInvariant(shop.requestPurchase(player, { requestId: "send-failure", offerId: current.offerId }), "falha no resultado não desfaz commit");
+	failResult = false;
+	const delivered = data.getPlayerSaveSnapshot(player)!;
+	expectRefusal({ requestId: "send-retry", offerId: current.offerId }, "oferta_invalida", "send-retry", current.offerId);
+	assertStoredEqual(data.getPlayerSaveSnapshot(player), delivered, "retry não entrega duas vezes");
+
+	// RequestAllocate existente responde pelo InventoryState, sem mudar o payload do pedido.
+	const fighter = progression.createInventoryFighter(player, { ...offer, level: 10 });
+	const low = progression.createInventoryFighter(player, { ...offer, level: 1 });
+	const allocation = (payload: unknown, reason?: AllocationReason) => {
+		clock += 10;
+		const previous = progression.getPlayerData(player);
+		const otherState = progression.getPlayerData(other);
+		const count = allocations.size();
+		remotes.processAllocateEvent(player, payload);
+		assertInvariant(allocations.size() === count + 1, "alocação produz uma resposta");
+		const response = allocations[allocations.size() - 1];
+		assertInvariant(response.owner === player && response.state!.allocationReason === reason, "motivo de alocação fixo e privado");
+		if (reason !== undefined) assertStoredEqual(progression.getPlayerData(player), previous, "recusa não aloca pontos");
+		assertStoredEqual(progression.getPlayerData(other), otherState, "alocação não afeta outro jogador");
+	};
+	allocation({ itemUuid: low.itemUuid, stat: "atk", amount: 1 }, "sem_pontos");
+	allocation({ itemUuid: fighter.itemUuid, stat: "atk", amount: 11 }, "cap_nivel");
+	allocation({ itemUuid: fighter.itemUuid, stat: "atk", amount: 6 }, "par");
+	allocation({ itemUuid: fighter.itemUuid, stat: "hp", amount: 6 }, "par");
+	allocation({ itemUuid: otherBefore.inventory[0].itemUuid, stat: "atk", amount: 1 }, "invalido");
+	for (const payload of [undefined, { itemUuid: fighter.itemUuid, stat: "bad", amount: 1 },
+		{ itemUuid: fighter.itemUuid, stat: "atk", amount: 0 }, { itemUuid: fighter.itemUuid, stat: "atk", amount: math.huge },
+		{ itemUuid: fighter.itemUuid, stat: "atk", amount: 1, extra: true }]) allocation(payload, "invalido");
+	allocation({ itemUuid: fighter.itemUuid, stat: "atk", amount: 5 });
+	assertInvariant(progression.getFighter(player, fighter.itemUuid)!.allocatedStats.atk === 5, "snapshot de sucesso contém pontos finais");
+	allocation({ itemUuid: fighter.itemUuid, stat: "atk", amount: 1 }, "par");
+	allocation({ itemUuid: fighter.itemUuid, stat: "dodge", amount: 1 });
+	assertInvariant(allocations[allocations.size() - 1].state!.allocationReason === undefined, "sucesso limpa motivo anterior");
+	remotes.forgetPlayer(player);
+	const allocationBefore = progression.getPlayerData(player);
+	for (let i = 0; i < ALLOCATE_REQUEST_BUCKET_CAPACITY; i++) remotes.processAllocateEvent(player, "invalid");
+	const count = allocations.size();
+	assertInvariant(!remotes.processAllocateEvent(player, { itemUuid: fighter.itemUuid, stat: "dodge", amount: 1 }), "rate limit da alocação preservado");
+	assertInvariant(allocations.size() === count + 1 && allocations[allocations.size() - 1].state!.allocationReason === "invalido", "rate limit da alocação responde invalido");
+	assertStoredEqual(progression.getPlayerData(player), allocationBefore, "rajada recusada não muda alocação");
+	clock += 1 / ALLOCATE_REQUEST_REFILL_PER_SECOND;
+	assertInvariant(remotes.processAllocateEvent(player, { itemUuid: fighter.itemUuid, stat: "dodge", amount: 1 }), "alocação volta após reposição");
+	assertInvariant(allocations[allocations.size() - 1].state!.allocationReason === undefined, "reposição termina em sucesso");
+	data.handlePlayerRemoving(player); data.handlePlayerRemoving(other);
+	shop.forgetPlayer(player); shop.forgetPlayer(other);
+	remotes.forgetPlayer(player); remotes.forgetPlayer(other);
+	print("PURCHASE_AND_ALLOCATION_RESULTS_PASSED");
+}
+
+/** Fluxo real do Triggered, com inventário/DataStore isolados e Instances descartáveis. */
+export function validateNpcBattles(): void {
+	const npc = new Instance("Model");
+	npc.Name = "BattleSimulatorNpc";
+	const part = new Instance("Part");
+	part.Anchored = true;
+	part.Transparency = 1;
+	part.CanCollide = false;
+	part.Parent = npc;
+	npc.PrimaryPart = part;
+	const prompt = new Instance("ProximityPrompt");
+	prompt.Name = "ExistingPrompt";
+	prompt.Style = Enum.ProximityPromptStyle.Custom;
+	prompt.Parent = npc;
+	npc.SetAttribute("NpcId", "bronze_trainer");
+	CollectionService.AddTag(npc, BATTLE_NPC_TAG);
+	npc.Parent = Workspace;
+	const definition = NPC_DATA.bronze_trainer;
+	const describe = (side: BattleSide) => side.fighters.map((fighter) => ({
+		fighterId: fighter.fighterId, level: fighter.level, stats: fighter.stats, slots: fighter.slots,
+	}));
+	const fixedTeam = describe(createNpcSide(definition, () => 0));
+	assertStoredEqual(describe(createNpcSide(definition, () => 1)), fixedTeam, "rolls NPC independem do RNG de combate");
+
+	for (const outcome of ["win", "loss", "quit", "disconnect", "error", "startError", "endError", "requestError", "respawn", "timeout"] as const) {
+		const character = new Instance("Model");
+		const root = new Instance("Part");
+		root.Name = "HumanoidRootPart";
+		root.Anchored = true;
+		root.Parent = character;
+		const humanoid = new Instance("Humanoid");
+		humanoid.WalkSpeed = 23;
+		humanoid.JumpPower = 61;
+		humanoid.JumpHeight = 9;
+		humanoid.UseJumpPower = outcome !== "win" && outcome !== "disconnect";
+		humanoid.Parent = character;
+		const usePower = humanoid.UseJumpPower;
+		const removing = new Instance("BindableEvent");
+		const attributes = new Map<string, AttributeValue>();
+		const mock = {
+			Parent: Players as Players | undefined, Name: "NpcTest", UserId: 991994,
+			Character: character, CharacterRemoving: removing.Event,
+			SetAttribute(name: string, value: AttributeValue): void { attributes.set(name, value); },
+		};
+		const player = mock as unknown as Player;
+		const progression = new ProgressionService();
+		const data = new PlayerDataService(progression, { dataStore: new InMemoryDataStore(),
+			serverId: "NpcTest", now: () => 1000, waitFn: () => {}, warnFn: () => {}, disableStudioAutoFallbackOnInjectedStore: true });
+		const tinyes = new TinyesService(data, () => {});
+		let started = 0;
+		const ended: BattleEndedPayload[] = [];
+		const adapter = createSurgicalMockAdapter({
+			onBattleStarted: () => { if (outcome === "startError") error("NPC start error intencional"); started++; },
+			onBattleEnded: (_, payload) => { if (outcome === "endError") error("NPC end error intencional"); ended.push(payload); },
+		});
+		const sessions = new BattleSessionService(adapter, tinyes, progression);
+		let now = 0;
+		const notices: string[] = [];
+		const service = new NpcService(sessions, data, progression, (_, message) => notices.push(message), () => now, () => 0.5);
+		service.bindNpc(npc);
+		service.bindNpc(npc);
+		assertInvariant(npc.FindFirstChildWhichIsA("ProximityPrompt", true) === prompt && npc.GetDescendants().filter((x) => x.IsA("ProximityPrompt")).size() === 1,
+			"reutiliza prompt sem duplicar");
+		assertInvariant(prompt.ActionText === "Batalhar" && prompt.ObjectText === definition.displayName && prompt.MaxActivationDistance === NPC_PROMPT_MAX_DISTANCE,
+			"configura prompt existente");
+		assertInvariant((prompt.Style as Enum.ProximityPromptStyle) === Enum.ProximityPromptStyle.Default, "prompt Custom existente passa a mostrar a interface padrão com E");
+		assertInvariant(!service.trigger(player, npc) && !sessions.hasActiveSession(player), "recusa sem sessão carregada");
+		assertInvariant(data.loadPlayer(player).ok, "load NPC");
+		const item = progression.getPlayerData(player)!.inventory[0];
+		const second = progression.createInventoryFighter(player, { fighterId: "anubis", baseStats: item.baseStats, skills: item.skills });
+		assertInvariant(data.setActiveTeam(player, [second.itemUuid, item.itemUuid]), "time salvo personalizado");
+		const selected = [second, item];
+		const recordData = data as unknown as { sessions: Map<Player, { activeTeam: string[] }> };
+		const saved = recordData.sessions.get(player)!;
+		saved.activeTeam = [];
+		assertInvariant(!service.trigger(player, npc) && !sessions.hasActiveSession(player), "time vazio recusa sem sessão");
+		assertInvariant(notices[notices.size() - 1] === "Equipe ao menos um lutador disponível.", "aviso curto para time inválido");
+		now += NPC_PROMPT_DEBOUNCE_SECONDS;
+		progression.loadValidatedPlayerData(player, { version: PLAYER_DATA_SCHEMA_VERSION, inventory: [{ ...item, unavailable: true }] });
+		saved.activeTeam = [item.itemUuid];
+		assertInvariant(!service.trigger(player, npc) && !sessions.hasActiveSession(player), "só unavailable recusa");
+		progression.loadValidatedPlayerData(player, { version: PLAYER_DATA_SCHEMA_VERSION, inventory: [item, second] });
+		data.setActiveTeam(player, [second.itemUuid, item.itemUuid]);
+		now += NPC_PROMPT_DEBOUNCE_SECONDS;
+		root.Position = part.Position.add(new Vector3(NPC_PROMPT_MAX_DISTANCE + 1, 0, 0));
+		assertInvariant(!service.trigger(player, npc) && !sessions.hasActiveSession(player), "longe recusa no servidor");
+		root.Position = part.Position;
+		assertInvariant(!service.trigger(player, npc), "debounce também limita tentativas recusadas");
+		now += NPC_PROMPT_DEBOUNCE_SECONDS;
+		mock.Parent = undefined;
+		assertInvariant(!service.trigger(player, npc), "fora de Players recusa");
+		mock.Parent = Players;
+		const before = data.getPlayerSaveSnapshot(player)!;
+		const created = service.trigger(player, npc);
+		if (outcome !== "startError") {
+			assertInvariant(created && sessions.hasActiveSession(player) && started === 1, "disparo válido cria uma sessão");
+			assertInvariant(!service.trigger(player, npc) && started === 1, "disparo duplo não cria segunda sessão");
+			now += NPC_PROMPT_DEBOUNCE_SECONDS;
+			assertInvariant(!service.trigger(player, npc) && started === 1, "em batalha recusa mesmo após debounce");
+			assertInvariant(humanoid.WalkSpeed === 0 && humanoid.JumpPower === 0 && humanoid.JumpHeight === 0 && attributes.get(NPC_BATTLE_ACTIVE_ATTRIBUTE) === true,
+				"movimento congelado para ambos os modos de salto");
+			assertInvariant(prompt.Enabled, "prompt permanece habilitado no servidor");
+			const record = (sessions as unknown as { activeSessions: { battle: BattleService; sides: [BattleSide, BattleSide]; aiControllers: AIService[] }[] }).activeSessions[0];
+			assertInvariant(record.aiControllers.size() === 1, "IA Bronze anexada");
+			for (let index = 0; index < selected.size(); index++) {
+				const fighter = record.sides[0].fighters[index];
+				assertInvariant(fighter.itemUuid === selected[index].itemUuid && fighter.level === selected[index].level, "UUID/nível e ordem do time salvo");
+				assertStoredEqual(fighter.stats, calcEffectiveStats(selected[index].baseStats, selected[index].allocatedStats), "stats salvos usados na batalha");
+				assertStoredEqual(fighter.slots, selected[index].skills, "rolls salvos sem rerrolar");
+			}
+			assertStoredEqual(describe(record.sides[1]), fixedTeam, "NPC idêntico entre sessões");
+			if (outcome === "win") {
+				const otherCharacter = character.Clone();
+				const otherHumanoid = otherCharacter.FindFirstChildOfClass("Humanoid")!;
+				otherHumanoid.WalkSpeed = 19;
+				const otherRemoving = new Instance("BindableEvent");
+				const other = { Parent: Players, Name: "OtherNpcTest", UserId: 991995,
+					Character: otherCharacter, CharacterRemoving: otherRemoving.Event,
+					SetAttribute(_name: string, _value: AttributeValue) {},
+				} as unknown as Player;
+				assertInvariant(data.loadPlayer(other).ok && service.trigger(other, npc), "mesmo NPC aceita segundo jogador durante batalha");
+				const records = (sessions as unknown as { activeSessions: { sides: [BattleSide, BattleSide] }[] }).activeSessions;
+				assertInvariant(records.size() === 2 && records[1].sides[1] !== record.sides[1], "sessões pessoais com instâncias de combate independentes");
+				assertStoredEqual(describe(records[1].sides[1]), fixedTeam, "mesmos rolls para os dois jogadores");
+				sessions.requestQuit(other);
+				assertInvariant(otherHumanoid.WalkSpeed === 19 && sessions.hasActiveSession(player) && !sessions.hasActiveSession(other), "Quit alheio restaura somente o respectivo jogador");
+				assertInvariant(prompt.Enabled && humanoid.WalkSpeed === 0, "NPC e primeira sessão continuam disponíveis/isolados");
+				ended.clear(); // Resultado do segundo jogador não pertence à verificação de recompensa abaixo.
+				data.handlePlayerRemoving(other);
+				otherCharacter.Destroy();
+				otherRemoving.Destroy();
+			}
+			if (outcome === "win" || outcome === "loss") {
+				const winningSide = record.sides[outcome === "win" ? 0 : 1];
+				const losingSide = record.sides[outcome === "win" ? 1 : 0];
+				for (const fighter of losingSide.fighters) fighter.hp = 1;
+				for (let step = 0; step < 200 && sessions.hasActiveSession(player); step++) {
+					winningSide.setAtb(10);
+					record.battle.requestSkill(winningSide, 1);
+					sessions.step(SIMULATION_DT);
+				}
+				assertInvariant(!sessions.hasActiveSession(player), "fim natural pela morte de todo o time");
+			} else if (outcome === "disconnect") {
+				mock.Parent = undefined;
+				sessions.destroySessionForPlayer(player);
+			} else if (outcome === "error") {
+				record.battle.step = () => error("NPC step error intencional");
+				sessions.step(SIMULATION_DT);
+			} else if (outcome === "requestError") {
+				record.battle.requestSkill = () => error("NPC request error intencional");
+				(sessions as unknown as { handleSkillRequest(player: Player, slot: SkillSlot): void }).handleSkillRequest(player, 1);
+			} else if (outcome === "respawn") {
+				removing.Fire(character);
+				task.wait();
+			} else if (outcome === "timeout") {
+				for (const ai of record.aiControllers) ai.destroy();
+				sessions.step(BATTLE_INACTIVITY_TIMEOUT_SECONDS);
+			}
+			else sessions.requestQuit(player);
+			const after = data.getPlayerSaveSnapshot(player)!;
+			record.battle.events.battleEnd.fire(record.sides[0]);
+			sessions.requestQuit(player);
+			assertStoredEqual(data.getPlayerSaveSnapshot(player), after, `${outcome}: segundo fim não paga novamente`);
+			if (outcome === "win") {
+				assertInvariant(after.tinyes - before.tinyes === 100 && ended.size() === 1 && ended[0].tinyesReward === 100,
+					`vitória Bronze paga Tinyes uma vez (saldo=${after.tinyes - before.tinyes}, eventos=${ended.size()}, recompensa=${ended[0]?.tinyesReward}, vencedor=${ended[0]?.winnerSideId})`);
+				assertInvariant(ended[0].xpRewards?.size() === 2, "vitória paga XP aos dois selecionados");
+				for (const reward of ended[0].xpRewards!) assertInvariant(reward.xpGained === 48 && progression.getFighter(player, reward.itemUuid)?.xp === 48, "XP final usa média NPC 1,5 e divisão dupla");
+			} else {
+				assertInvariant(after.tinyes === before.tinyes, "sem vitória não paga Tinyes");
+				assertStoredEqual(after.inventory, before.inventory, "sem vitória não paga XP");
+			}
+		} else assertInvariant(!created && started === 0, "falha no BattleStarted não deixa sessão parcial");
+		assertInvariant(!sessions.hasActiveSession(player) && humanoid.WalkSpeed === 23 && humanoid.JumpPower === 61 && humanoid.JumpHeight === 9 && humanoid.UseJumpPower === usePower,
+			`${outcome}: estado final restaura movimento original`);
+		assertInvariant(attributes.get(NPC_BATTLE_ACTIVE_ATTRIBUTE) === false, `${outcome}: client liberado mesmo se remote falhar`);
+		service.destroy();
+		mock.Parent = Players;
+		data.handlePlayerRemoving(player);
+		character.Destroy();
+		removing.Destroy();
+	}
+	npc.Destroy();
+	print("NPC_BATTLES_PASSED");
+}
+
+export function validateDayNightCycle(): void {
+	assertInvariant(smoothstepQuintic(-0.5) === 0 && smoothstepQuintic(0) === 0, "smoothstepQuintic início em 0");
+	assertInvariant(math.abs(smoothstepQuintic(0.5) - 0.5) < 1e-6, "smoothstepQuintic simétrico em 0.5");
+	assertInvariant(smoothstepQuintic(1) === 1 && smoothstepQuintic(2) === 1, "smoothstepQuintic teto em 1");
+	assertInvariant(smoothstepQuintic(0 / 0) === 0, "smoothstepQuintic seguro para NaN");
+
+	assertInvariant(
+		calcNightAlpha(8) === 0 && calcNightAlpha(12) === 0 && calcNightAlpha(15.999) === 0,
+		"pleno dia [8, 16) deve retornar 0",
+	);
+	assertInvariant(
+		calcNightAlpha(16) === 0 &&
+			calcNightAlpha(17) > 0 &&
+			calcNightAlpha(17) < 0.5 &&
+			math.abs(calcNightAlpha(18) - 0.5) < 1e-6,
+		"crepúsculo [16, 20) deve suavizar até 1",
+	);
+	assertInvariant(
+		calcNightAlpha(20) === 1 &&
+			calcNightAlpha(23.9) === 1 &&
+			calcNightAlpha(0) === 1 &&
+			calcNightAlpha(3.999) === 1,
+		"plena noite [20, 4) deve retornar 1",
+	);
+	assertInvariant(
+		calcNightAlpha(4) === 1 &&
+			calcNightAlpha(5) > 0.5 &&
+			calcNightAlpha(5) < 1 &&
+			math.abs(calcNightAlpha(6) - 0.5) < 1e-6,
+		"amanhecer [4, 8) deve suavizar até 0",
+	);
+	assertInvariant(calcNightAlpha(-4) === 1 && calcNightAlpha(32) === 0, "normaliza horas fora de [0, 24)");
+
+	assertInvariant(calcSolarHour(8, 0, 1440) === 8, "hora inicial sem tempo decorrido");
+	assertInvariant(math.abs(calcSolarHour(8, 720, 1440) - 20) < 1e-6, "meio ciclo avança 12 horas");
+	assertInvariant(math.abs(calcSolarHour(8, 1440, 1440) - 8) < 1e-6, "ciclo completo fecha em 24h");
+	assertInvariant(math.abs(calcSolarHour(8, 0.5, 0) - 20) < 1e-6, "duração mínima limitada a 1s");
+	assertInvariant(calcSolarHour(0 / 0, 0, 1440) === DAY_NIGHT_DEFAULT_START_HOUR, "hora inicial NaN usa padrão");
+
+	const black = new Color3(0, 0, 0);
+	const white = new Color3(1, 1, 1);
+	assertInvariant(lerpColor3Gamma(black, white, 0) === black, "gamma t=0 retorna c1");
+	assertInvariant(lerpColor3Gamma(black, white, 1) === white, "gamma t=1 retorna c2");
+	const midGamma = lerpColor3Gamma(black, white, 0.5);
+	const expectedMid = math.sqrt(0.5);
+	assertInvariant(
+		math.abs(midGamma.R - expectedMid) < 1e-5 &&
+			math.abs(midGamma.G - expectedMid) < 1e-5 &&
+			math.abs(midGamma.B - expectedMid) < 1e-5,
+		"interpolação de cor usa espaço Gamma 2.0",
+	);
+
+	assertInvariant(!shouldSkipInterpolation(0, -1), "primeira atualização nunca pula");
+	assertInvariant(shouldSkipInterpolation(0.5001, 0.5), "passo intermediário menor que epsilon pula");
+	assertInvariant(!shouldSkipInterpolation(0, 0.0002), "snap exato em t=0 não pula");
+	assertInvariant(shouldSkipInterpolation(0, 0), "t=0 repetido pula");
+	assertInvariant(!shouldSkipInterpolation(1, 0.9998), "snap exato em t=1 não pula");
+	assertInvariant(shouldSkipInterpolation(1, 1), "t=1 repetido pula");
+
+	const makeMockWorkspace = (initial?: Record<string, AttributeValue>) => {
+		const attrs = new Map<string, AttributeValue>();
+		if (initial !== undefined) {
+			for (const [key, value] of pairs(initial)) attrs.set(key, value);
+		}
+		return {
+			attrs,
+			GetAttribute(name: string): AttributeValue | undefined {
+				return attrs.get(name);
+			},
+			SetAttribute(name: string, value: AttributeValue): void {
+				attrs.set(name, value);
+			},
+		};
+	};
+
+	const freshWs = makeMockWorkspace();
+	new DayNightService(freshWs, () => 1234.5).start();
+	assertInvariant(
+		freshWs.attrs.get(DAY_NIGHT_ATTRIBUTES.startTime) === 1234.5 &&
+			freshWs.attrs.get(DAY_NIGHT_ATTRIBUTES.duration) === DAY_NIGHT_DEFAULT_DURATION_SECONDS &&
+			freshWs.attrs.get(DAY_NIGHT_ATTRIBUTES.startHour) === DAY_NIGHT_DEFAULT_START_HOUR &&
+			freshWs.attrs.get(DAY_NIGHT_ATTRIBUTES.paused) === false,
+		"DayNightService inicializa atributos padrão no Workspace",
+	);
+
+	const presetWs = makeMockWorkspace({
+		[DAY_NIGHT_ATTRIBUTES.startTime]: 500,
+		[DAY_NIGHT_ATTRIBUTES.duration]: 60,
+		[DAY_NIGHT_ATTRIBUTES.startHour]: 18,
+		[DAY_NIGHT_ATTRIBUTES.paused]: true,
+	});
+	new DayNightService(presetWs, () => 9999).start();
+	assertInvariant(
+		presetWs.attrs.get(DAY_NIGHT_ATTRIBUTES.startTime) === 500 &&
+			presetWs.attrs.get(DAY_NIGHT_ATTRIBUTES.duration) === 60 &&
+			presetWs.attrs.get(DAY_NIGHT_ATTRIBUTES.startHour) === 18 &&
+			presetWs.attrs.get(DAY_NIGHT_ATTRIBUTES.paused) === true,
+		"DayNightService preserva atributos já configurados",
+	);
+
+	const dayFolder = new Instance("Folder");
+	const nightFolder = new Instance("Folder");
+	const lightingContainer = new Instance("Folder");
+
+	dayFolder.SetAttribute("Lighting_GlobalShadows", false);
+	dayFolder.SetAttribute("Lighting_Brightness", 2);
+	nightFolder.SetAttribute("Lighting_Brightness", 1);
+	dayFolder.SetAttribute("Lighting_GeographicLatitude", 26.8);
+	nightFolder.SetAttribute("Lighting_GeographicLatitude", 26.8);
+	dayFolder.SetAttribute("Lighting_FogColor", new Color3(1, 1, 1));
+	nightFolder.SetAttribute("Lighting_FogColor", new Color3(0, 0, 0));
+
+	const makeAtmosphere = (parent: Instance, density: number, color: Color3): Atmosphere => {
+		const inst = new Instance("Atmosphere");
+		inst.Name = "Atmosphere";
+		inst.Density = density;
+		inst.Color = color;
+		inst.Parent = parent;
+		return inst;
+	};
+	makeAtmosphere(dayFolder, 0.3, new Color3(1, 1, 1));
+	makeAtmosphere(nightFolder, 0.5, new Color3(0, 0, 1));
+
+	const makeBloom = (parent: Instance, intensity: number, size: number, threshold: number): BloomEffect => {
+		const inst = new Instance("BloomEffect");
+		inst.Name = "Bloom";
+		inst.Intensity = intensity;
+		inst.Size = size;
+		inst.Threshold = threshold;
+		inst.Parent = parent;
+		return inst;
+	};
+	makeBloom(dayFolder, 0.16, 20, 1.25);
+	makeBloom(nightFolder, 0.26, 22, 1.35);
+
+	const existingBloom = makeBloom(lightingContainer, 0, 0, 0);
+	existingBloom.Enabled = false;
+
+	const makeColorCorrection = (parent: Instance, brightness: number, tint: Color3): ColorCorrectionEffect => {
+		const inst = new Instance("ColorCorrectionEffect");
+		inst.Name = "ColorCorrection";
+		inst.Brightness = brightness;
+		inst.TintColor = tint;
+		inst.Parent = parent;
+		return inst;
+	};
+	makeColorCorrection(dayFolder, 0.01, new Color3(1, 0.9, 0.8));
+	makeColorCorrection(nightFolder, -0.01, new Color3(0.8, 0.8, 1));
+
+	const makeSunRays = (parent: Instance, intensity: number, spread: number): SunRaysEffect => {
+		const inst = new Instance("SunRaysEffect");
+		inst.Name = "SunRays";
+		inst.Intensity = intensity;
+		inst.Spread = spread;
+		inst.Parent = parent;
+		return inst;
+	};
+	makeSunRays(dayFolder, 0.04, 0.45);
+	makeSunRays(nightFolder, 0, 0.12);
+
+	const makeDepth = (parent: Instance, far: number, focus: number, radius: number): DepthOfFieldEffect => {
+		const inst = new Instance("DepthOfFieldEffect");
+		inst.Name = "JoJoBackgroundDepth";
+		inst.FarIntensity = far;
+		inst.FocusDistance = focus;
+		inst.InFocusRadius = radius;
+		inst.NearIntensity = 0;
+		inst.Parent = parent;
+		return inst;
+	};
+	makeDepth(dayFolder, 0.12, 85, 60);
+	makeDepth(nightFolder, 0.17, 90, 52);
+
+	const makeGrading = (parent: Instance, preset: Enum.TonemapperPreset): ColorGradingEffect => {
+		const inst = new Instance("ColorGradingEffect");
+		inst.Name = "ColorGrading";
+		inst.TonemapperPreset = preset;
+		inst.Parent = parent;
+		return inst;
+	};
+	makeGrading(dayFolder, Enum.TonemapperPreset.Default);
+	makeGrading(nightFolder, Enum.TonemapperPreset.Retro);
+
+	const makeSky = (parent: Instance, name: string, stars: number, moonSize: number, skyboxBk: string): Sky => {
+		const inst = new Instance("Sky");
+		inst.Name = name;
+		inst.StarCount = stars;
+		inst.MoonAngularSize = moonSize;
+		inst.SunAngularSize = 21;
+		inst.SkyboxBk = skyboxBk;
+		inst.CelestialBodiesShown = true;
+		inst.Parent = parent;
+		return inst;
+	};
+	makeSky(dayFolder, "Sky day", 900, 11, "rbxasset://sky/sun.jpg");
+	makeSky(nightFolder, "Sky night", 3000, 13, "rbxasset://sky/moon.jpg");
+	const existingSky = makeSky(lightingContainer, "Sky day", 1, 1, "rbxasset://sky/sun.jpg");
+
+	const lightingProxy: DayNightLightingLike & Record<string, unknown> = {
+		ClockTime: 0,
+		GlobalShadows: true,
+		Brightness: 1,
+		ExposureCompensation: 0,
+		EnvironmentDiffuseScale: 1,
+		EnvironmentSpecularScale: 1,
+		Ambient: new Color3(0, 0, 0),
+		OutdoorAmbient: new Color3(0, 0, 0),
+		ColorShift_Top: new Color3(0, 0, 0),
+		ColorShift_Bottom: new Color3(0, 0, 0),
+		ShadowSoftness: 0.2,
+		FogColor: new Color3(0, 0, 0),
+		FogStart: 0,
+		FogEnd: 100000,
+		GeographicLatitude: 0,
+		GetChildren(): Instance[] {
+			return lightingContainer.GetChildren();
+		},
+		adoptEffect(effect: Instance): void {
+			effect.Parent = lightingContainer;
+		},
+	};
+
+	const simWs = makeMockWorkspace({
+		[DAY_NIGHT_ATTRIBUTES.startTime]: 1000,
+		[DAY_NIGHT_ATTRIBUTES.duration]: 24,
+		[DAY_NIGHT_ATTRIBUTES.startHour]: 8,
+		[DAY_NIGHT_ATTRIBUTES.paused]: false,
+	});
+	let simNow = 1000;
+	const applier = new DayNightCycleApplier(lightingProxy, dayFolder, nightFolder, simWs, () => simNow);
+
+	assertInvariant(
+		lightingProxy.GlobalShadows === false && math.abs((lightingProxy.GeographicLatitude as number) - 26.8) < 1e-6,
+		"propriedades estáticas e idênticas aplicadas no init",
+	);
+	applier.update();
+	assertInvariant(
+		math.abs(lightingProxy.ClockTime - 8) < DAY_NIGHT_EPSILON &&
+			math.abs((lightingProxy.Brightness as number) - 2) < DAY_NIGHT_EPSILON &&
+			existingBloom.Enabled &&
+			math.abs(existingBloom.Intensity - 0.16) < DAY_NIGHT_EPSILON &&
+			existingSky.StarCount === 900 &&
+			existingSky.SkyboxBk === "rbxasset://sky/sun.jpg",
+		"t=0 aplica dia e reutiliza Bloom/Sky existentes",
+	);
+
+	const activeDepth = lightingContainer.FindFirstChildOfClass("DepthOfFieldEffect")!;
+	const activeCc = lightingContainer.FindFirstChildOfClass("ColorCorrectionEffect")!;
+	const activeRays = lightingContainer.FindFirstChildOfClass("SunRaysEffect")!;
+	const activeAtmo = lightingContainer.FindFirstChildOfClass("Atmosphere")!;
+	const activeGrading = lightingContainer.FindFirstChildOfClass("ColorGradingEffect")!;
+	assertInvariant(
+		lightingContainer.GetChildren().filter((x) => x.IsA("BloomEffect")).size() === 1 &&
+			lightingContainer.GetChildren().filter((x) => x.IsA("Sky")).size() === 1 &&
+			activeDepth !== undefined &&
+			activeCc !== undefined &&
+			activeRays !== undefined &&
+			activeAtmo !== undefined &&
+			activeGrading !== undefined,
+		"todos os efeitos são encontrados por classe sem duplicar",
+	);
+
+	simNow = 1009; // 17h -> crepúsculo antes de t=0.5
+	applier.update();
+	assertInvariant(
+		existingBloom.Intensity > 0.16 &&
+			existingBloom.Intensity < 0.26 &&
+			activeDepth.FarIntensity > 0.12 &&
+			activeDepth.FarIntensity < 0.17 &&
+			activeRays.Intensity > 0 &&
+			activeRays.Intensity < 0.04 &&
+			existingSky.SkyboxBk === "rbxasset://sky/sun.jpg" &&
+			activeGrading.TonemapperPreset === Enum.TonemapperPreset.Default,
+		"crepúsculo interpola efeitos por classe mantendo faces diurnas antes de t=0.5",
+	);
+
+	simNow = 1010; // 18h -> t=0.5 exato
+	applier.update();
+	assertInvariant(
+		existingSky.SkyboxBk === "rbxasset://sky/moon.jpg" &&
+			activeGrading.TonemapperPreset === Enum.TonemapperPreset.Retro &&
+			existingSky.StarCount === 1950,
+		"virada em t=0.5 troca Skybox, TonemapperPreset e arredonda StarCount",
+	);
+
+	simNow = 1012; // 20h -> t=1
+	applier.update();
+	assertInvariant(
+		math.abs((lightingProxy.Brightness as number) - 1) < DAY_NIGHT_EPSILON &&
+			math.abs(activeRays.Intensity) < DAY_NIGHT_EPSILON &&
+			existingSky.StarCount === 3000 &&
+			(lightingProxy.FogColor as Color3) === new Color3(0, 0, 0),
+		"plena noite aplica valores finais exatos",
+	);
+
+	simWs.attrs.set(DAY_NIGHT_ATTRIBUTES.paused, true);
+	simNow = 1016; // seria 0h
+	applier.update();
+	assertInvariant(math.abs(lightingProxy.ClockTime - 20) < DAY_NIGHT_EPSILON, "Pausado congela ClockTime e efeitos");
+
+	simWs.attrs.set(DAY_NIGHT_ATTRIBUTES.paused, false);
+	applier.update();
+	assertInvariant(math.abs(lightingProxy.ClockTime) < DAY_NIGHT_EPSILON, "retomar após pausa sincroniza hora atual");
+
+	dayFolder.Destroy();
+	nightFolder.Destroy();
+	lightingContainer.Destroy();
+	print("DAY_NIGHT_CYCLE_PASSED");
+}
+
 export function runSimulation(): void {
+	validateDayNightCycle();
+	validateNpcBattles();
+	validatePurchaseAndAllocationResults();
+	validateShopSynchronization();
+	validateShop();
 	validatePostBattleXp();
 	validateS3Unlock();
 	validateProgressionSnapshots();

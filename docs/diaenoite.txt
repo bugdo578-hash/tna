@@ -1,0 +1,322 @@
+--!strict
+--!optimize 2
+local Lighting = game:GetService("Lighting")
+local MaterialService = game:GetService("MaterialService")
+local RunService = game:GetService("RunService")
+
+-- Configurações padrão (podem ser alteradas em tempo real via Attributes no Script)
+local DURACAO_PADRAO = 1440
+local HORA_INICIAL_PADRAO = 8
+local INTERVALO_SERVIDOR = 0.1
+local EPSILON = 0.0005
+
+local PERFIL_DIA = MaterialService:WaitForChild("mundo 1 dia")
+local PERFIL_NOITE = MaterialService:WaitForChild("mundo 1 noite")
+
+local PROPRIEDADES_LIGHTING = {
+	"Brightness", "ExposureCompensation", "EnvironmentDiffuseScale",
+	"EnvironmentSpecularScale", "Ambient", "OutdoorAmbient",
+	"ColorShift_Top", "ColorShift_Bottom", "ShadowSoftness",
+	"FogColor", "FogStart", "FogEnd", "GeographicLatitude",
+}
+
+local PROPRIEDADES_EFEITO: { [string]: { string } } = {
+	Atmosphere = {"Density", "Offset", "Color", "Decay", "Haze", "Glare"},
+	BloomEffect = {"Intensity", "Size", "Threshold"},
+	ColorCorrectionEffect = {"Brightness", "Contrast", "Saturation", "TintColor"},
+	SunRaysEffect = {"Intensity", "Spread"},
+	DepthOfFieldEffect = {"FarIntensity", "FocusDistance", "InFocusRadius", "NearIntensity"},
+}
+
+local SKY_FACES = {
+	"SkyboxBk", "SkyboxDn", "SkyboxFt", "SkyboxLf", "SkyboxRt", "SkyboxUp",
+	"SunTextureId", "MoonTextureId",
+}
+
+local SKY_NUMEROS = {"SunAngularSize", "MoonAngularSize", "StarCount"}
+
+type BindingNumero = {
+	instancia: any,
+	propriedade: string,
+	dia: number,
+	noite: number,
+	ultimo: number,
+	inteiro: boolean,
+}
+
+type BindingCor = {
+	instancia: any,
+	propriedade: string,
+	dia: Color3,
+	noite: Color3,
+}
+
+type BindingGeral = {
+	instancia: any,
+	propriedade: string,
+	dia: any,
+	noite: any,
+	tipo: string,
+}
+
+-- Inicializa atributos no script para fácil edição no Roblox Studio durante o jogo
+if script:GetAttribute("DuracaoCiclo") == nil then script:SetAttribute("DuracaoCiclo", DURACAO_PADRAO) end
+if script:GetAttribute("HoraInicial") == nil then script:SetAttribute("HoraInicial", HORA_INICIAL_PADRAO) end
+if script:GetAttribute("Pausado") == nil then script:SetAttribute("Pausado", false) end
+
+-- Sincroniza o marco zero do ciclo entre servidor e clientes
+if workspace:GetAttribute("InicioCicloSolar") == nil then
+	workspace:SetAttribute("InicioCicloSolar", workspace:GetServerTimeNow())
+end
+
+-- ============================================================================
+-- FUNÇÕES MATEMÁTICAS E DE TRANSIÇÃO
+-- ============================================================================
+
+-- Quintic smoothstep (C2 contínua: aceleração e desaceleração mais orgânicas que a cúbica)
+local function suavizar(x: number): number
+	return x * x * x * (x * (x * 6 - 15) + 10)
+end
+
+local function alphaNoite(hora: number): number
+	if hora >= 8 and hora < 16 then
+		return 0
+	elseif hora >= 16 and hora < 20 then
+		return suavizar((hora - 16) * 0.25)
+	elseif hora >= 20 or hora < 4 then
+		return 1
+	else
+		return 1 - suavizar((hora - 4) * 0.25)
+	end
+end
+
+-- Interpolação de cor corrigida em espaço Gamma 2.0 (evita tons acinzentados/esverdeados no crepúsculo)
+local function interpolarCorGamma(c1: Color3, c2: Color3, t: number): Color3
+	if t <= 0 then return c1 end
+	if t >= 1 then return c2 end
+
+	local invT = 1 - t
+	local r = math.sqrt((c1.R * c1.R) * invT + (c2.R * c2.R) * t)
+	local g = math.sqrt((c1.G * c1.G) * invT + (c2.G * c2.G) * t)
+	local b = math.sqrt((c1.B * c1.B) * invT + (c2.B * c2.B) * t)
+	return Color3.new(r, g, b)
+end
+
+-- ============================================================================
+-- PRÉ-CACHE PLANO (Separa tudo por tipo antes do loop começar)
+-- ============================================================================
+
+local bindingsNumeros: { BindingNumero } = {}
+local bindingsCores: { BindingCor } = {}
+local bindingsGerais: { BindingGeral } = {}
+
+local function registrarBinding(instancia: Instance, prop: string, valDia: any, valNoite: any)
+	if valDia == nil and valNoite == nil then return end
+	local a = if valDia ~= nil then valDia else valNoite
+	local b = if valNoite ~= nil then valNoite else valDia
+	local tipo = typeof(a)
+
+	-- Se os valores de dia e noite forem idênticos, aplica apenas uma vez e não coloca no loop
+	if a == b then
+		(instancia :: any)[prop] = a
+		return
+	end
+
+	if tipo == "number" then
+		table.insert(bindingsNumeros, {
+			instancia = instancia,
+			propriedade = prop,
+			dia = a,
+			noite = b,
+			ultimo = -1e9,
+			inteiro = (prop == "StarCount"),
+		})
+	elseif tipo == "Color3" then
+		table.insert(bindingsCores, {
+			instancia = instancia,
+			propriedade = prop,
+			dia = a,
+			noite = b,
+		})
+	else
+		table.insert(bindingsGerais, {
+			instancia = instancia,
+			propriedade = prop,
+			dia = a,
+			noite = b,
+			tipo = tipo,
+		})
+	end
+end
+
+-- 1. Propriedades estáticas e dinâmicas do Lighting
+local shadows = PERFIL_DIA:GetAttribute("Lighting_GlobalShadows")
+if shadows ~= nil then
+	Lighting.GlobalShadows = shadows
+end
+
+for _, prop in PROPRIEDADES_LIGHTING do
+	local padrao = (Lighting :: any)[prop]
+	local valDia = PERFIL_DIA:GetAttribute("Lighting_" .. prop)
+	local valNoite = PERFIL_NOITE:GetAttribute("Lighting_" .. prop)
+	registrarBinding(
+		Lighting,
+		prop,
+		if valDia ~= nil then valDia else padrao,
+		if valNoite ~= nil then valNoite else padrao
+	)
+end
+
+-- 2. Efeitos de Pós-Processamento e Atmosphere
+local function obterOuCriarEfeito(nome: string, modeloDia: Instance): Instance
+	for _, obj in Lighting:GetChildren() do
+		if obj.Name == nome and obj.ClassName == modeloDia.ClassName then
+			return obj
+		end
+	end
+	local clone = modeloDia:Clone()
+	clone.Parent = Lighting
+	return clone
+end
+
+for nome, propriedades in PROPRIEDADES_EFEITO do
+	local dia = PERFIL_DIA:FindFirstChild(nome)
+	local noite = PERFIL_NOITE:FindFirstChild(nome)
+	if dia and noite and dia.ClassName == noite.ClassName then
+		local inst = obterOuCriarEfeito(nome, dia)
+		if inst:IsA("PostEffect") then
+			inst.Enabled = true
+		end
+		for _, prop in propriedades do
+			registrarBinding(inst, prop, (dia :: any)[prop], (noite :: any)[prop])
+		end
+	end
+end
+
+-- 3. Cache do ColorGrading
+local gd = PERFIL_DIA:FindFirstChild("ColorGrading")
+local gn = PERFIL_NOITE:FindFirstChild("ColorGrading")
+local gradingAtual: any = nil
+local presetDia: any = nil
+local presetNoite: any = nil
+
+if gd and gn and gd.ClassName == gn.ClassName then
+	gradingAtual = obterOuCriarEfeito("ColorGrading", gd)
+	if gradingAtual:IsA("PostEffect") then
+		gradingAtual.Enabled = true
+	end
+	pcall(function()
+		presetDia = (gd :: any).TonemapperPreset
+		presetNoite = (gn :: any).TonemapperPreset
+	end)
+end
+
+-- 4. Cache do Skybox
+local skyDia = PERFIL_DIA:FindFirstChildOfClass("Sky")
+local skyNoite = PERFIL_NOITE:FindFirstChildOfClass("Sky")
+local skyAtual: Sky? = nil
+
+if skyDia and skyNoite then
+	skyAtual = Lighting:FindFirstChildOfClass("Sky")
+	if not skyAtual then
+		skyAtual = skyDia:Clone()
+		skyAtual.Parent = Lighting
+	end
+	skyAtual.CelestialBodiesShown = skyDia.CelestialBodiesShown
+
+	for _, prop in SKY_NUMEROS do
+		registrarBinding(skyAtual, prop, (skyDia :: any)[prop], (skyNoite :: any)[prop])
+	end
+end
+
+-- ============================================================================
+-- LOOP DE EXECUÇÃO (Alta Performance)
+-- ============================================================================
+
+local ultimoT = -1
+local estadoNoiteBinario: boolean? = nil
+
+local function atualizar()
+	if script:GetAttribute("Pausado") == true then
+		return
+	end
+
+	local duracao = math.max(1, (script:GetAttribute("DuracaoCiclo") :: number?) or DURACAO_PADRAO)
+	local horaInicial = (script:GetAttribute("HoraInicial") :: number?) or HORA_INICIAL_PADRAO
+	local inicioGlobal = (workspace:GetAttribute("InicioCicloSolar") :: number?) or 0
+
+	local decorrido = workspace:GetServerTimeNow() - inicioGlobal
+	local hora = (horaInicial + (decorrido * 24 / duracao)) % 24
+	local t = alphaNoite(hora)
+
+	if math.abs(Lighting.ClockTime - hora) > EPSILON then
+		Lighting.ClockTime = hora
+	end
+
+	-- Pula interpolação se o fator 't' estiver estacionado (pleno dia ou plena noite)
+	if math.abs(t - ultimoT) < EPSILON and t ~= 0 and t ~= 1 then
+		return
+	end
+	if t == ultimoT then
+		return
+	end
+	ultimoT = t
+
+	-- 1. Interpola números (com filtro de precisão e arredondamento para inteiros)
+	for _, b in bindingsNumeros do
+		local valor = b.dia + (b.noite - b.dia) * t
+		if b.inteiro then
+			valor = math.round(valor)
+		end
+		if math.abs(valor - b.ultimo) > EPSILON then
+			b.ultimo = valor
+			b.instancia[b.propriedade] = valor
+		end
+	end
+
+	-- 2. Interpola cores em espaço Gamma
+	for _, b in bindingsCores do
+		b.instancia[b.propriedade] = interpolarCorGamma(b.dia, b.noite, t)
+	end
+
+	-- 3. Interpola vetores e outros tipos
+	for _, b in bindingsGerais do
+		if b.tipo == "Vector3" then
+			b.instancia[b.propriedade] = b.dia:Lerp(b.noite, t)
+		else
+			b.instancia[b.propriedade] = if t < 0.5 then b.dia else b.noite
+		end
+	end
+
+	-- 4. Troca texturas de Sky e Tonemapper apenas na virada exata (t = 0.5)
+	local ehNoite = t >= 0.5
+	if ehNoite ~= estadoNoiteBinario then
+		estadoNoiteBinario = ehNoite
+
+		if skyAtual and skyDia and skyNoite then
+			local origem = if ehNoite then skyNoite else skyDia
+			for _, prop in SKY_FACES do
+				(skyAtual :: any)[prop] = (origem :: any)[prop]
+			end
+		end
+
+		if gradingAtual and presetDia ~= nil and presetNoite ~= nil then
+			gradingAtual.TonemapperPreset = if ehNoite then presetNoite else presetDia
+		end
+	end
+end
+
+atualizar()
+
+-- Se estiver em um LocalScript, roda a 60+ FPS; se for Server Script, usa intervalo controlado
+if RunService:IsClient() then
+	RunService.Heartbeat:Connect(function()
+		if not script.Parent then return end
+		atualizar()
+	end)
+else
+	while script.Parent do
+		task.wait(INTERVALO_SERVIDOR)
+		atualizar()
+	end
+end
