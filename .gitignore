@@ -1,0 +1,13 @@
+/node_modules
+/out
+/include
+*.tsbuildinfo
+
+.antigravitycli/
+sourcemap.json
+
+# Local tools, Studio places and temporary runners
+.openclaude/
+*.rbxl
+*.rbxlx
+**/BattleSimulatorRunner*
