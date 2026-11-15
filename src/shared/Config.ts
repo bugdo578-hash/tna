@@ -271,7 +271,12 @@ export const BATTLE_END_CLEANUP_DELAY_SECONDS = 2.0;
 export const DEV_TEST_BATTLE_CHAT_COMMAND = "/testbattle";
 /** dev: seed dos rolls permanentes do oponente de teste; reiniciada a cada montagem. */
 export const DEV_OPPONENT_SEED = 20261114;
-export const DEV_AUTO_START_TEST_BATTLE = true;
+export const DEV_AUTO_START_TEST_BATTLE = false;
+// Provisórios: distância existente de Npc_Luta e debounce técnico (não cooldown de luta).
+export const NPC_PROMPT_MAX_DISTANCE = 7;
+export const NPC_PROMPT_DEBOUNCE_SECONDS = 1;
+export const BATTLE_NPC_TAG = "BattleNpc";
+export const NPC_BATTLE_ACTIVE_ATTRIBUTE = "NpcBattleActive";
 export const DEV_AUTO_START_DELAY_SECONDS = 2.0;
 export const DEV_AUTO_BATTLE_STEP_INTERVAL_SECONDS = 0.25;
 

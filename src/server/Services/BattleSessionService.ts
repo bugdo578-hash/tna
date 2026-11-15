@@ -42,6 +42,7 @@ interface SessionParticipant {
 }
 
 interface BattleSessionRecord {
+	onFinished?: () => void;
 	readonly rewardRng: () => number;
 	rewardPaid: boolean;
 	readonly id: number;
@@ -102,6 +103,7 @@ export class BattleSessionService {
 		secondSide: BattleSide,
 		rng: () => number,
 		mode: SessionMode = secondPlayer === undefined ? "PVE" : "PVP",
+		onFinished?: () => void,
 	): boolean {
 		if (firstPlayer.Parent !== Players) return false;
 		if (secondPlayer !== undefined && secondPlayer.Parent !== Players) return false;
@@ -128,6 +130,7 @@ export class BattleSessionService {
 		if (secondPlayer !== undefined) participants.push({ player: secondPlayer, side: secondSide, sideId: secondSideId });
 
 		const session: BattleSessionRecord = {
+			onFinished,
 			rewardRng: rng,
 			rewardPaid: false,
 			id,
@@ -153,8 +156,14 @@ export class BattleSessionService {
 			this.playerSessions.set(participant.player, { session, side: participant.side });
 		}
 		this.activeSessions.push(session);
-		this.connectBattleEvents(session);
-		this.broadcastBattleStarted(session);
+		const [ok, failure] = pcall(() => {
+			this.connectBattleEvents(session);
+			this.broadcastBattleStarted(session);
+		});
+		if (!ok) {
+			this.abortSession(session, failure);
+			return false;
+		}
 		return true;
 	}
 
@@ -295,8 +304,9 @@ export class BattleSessionService {
 		const session = playerSession.session;
 		const losingSide = playerSession.side;
 		const winnerSide = session.sides[0] === losingSide ? session.sides[1] : session.sides[0];
-		this.finishSession(session, winnerSide, disconnected ? player : undefined);
+		const [ok, failure] = pcall(() => this.finishSession(session, winnerSide, disconnected ? player : undefined));
 		this.destroySession(session);
+		if (!ok) warn(`[BattleSessionService] erro ao sair: ${tostring(failure)}`);
 		if (disconnected) this.remoteService.forgetPlayer(player);
 	}
 
@@ -360,18 +370,24 @@ export class BattleSessionService {
 	private handleSkillRequest(player: Player, slot: SkillSlot): void {
 		const playerSession = this.playerSessions.get(player);
 		if (playerSession === undefined || playerSession.session.closed || playerSession.session.paused) return;
-		if (playerSession.session.battle.requestSkill(playerSession.side, slot)) {
-			playerSession.session.secondsWithoutAction = 0;
-		}
+		const [ok, failure] = pcall(() => {
+			if (playerSession.session.battle.requestSkill(playerSession.side, slot)) {
+				playerSession.session.secondsWithoutAction = 0;
+			}
+		});
+		if (!ok) this.abortSession(playerSession.session, failure);
 	}
 
 	private handleSwitchRequest(player: Player, clientIndex: number): void {
 		const playerSession = this.playerSessions.get(player);
 		if (playerSession === undefined || playerSession.session.closed || playerSession.session.paused) return;
 		const fighterIndex = (clientIndex - MIN_CLIENT_FIGHTER_INDEX) as FighterIndex;
-		if (playerSession.session.battle.requestSwitch(playerSession.side, fighterIndex)) {
-			playerSession.session.secondsWithoutAction = 0;
-		}
+		const [ok, failure] = pcall(() => {
+			if (playerSession.session.battle.requestSwitch(playerSession.side, fighterIndex)) {
+				playerSession.session.secondsWithoutAction = 0;
+			}
+		});
+		if (!ok) this.abortSession(playerSession.session, failure);
 	}
 
 	private connectBattleEvents(session: BattleSessionRecord): void {
@@ -455,6 +471,7 @@ export class BattleSessionService {
 	): void {
 		if (session.ended || session.closed) return;
 		session.ended = true;
+		this.releaseSession(session);
 		for (const participant of session.participants) {
 			const player = participant.player;
 			if (player === excludedPlayer || player.Parent !== Players) continue;
@@ -580,6 +597,7 @@ export class BattleSessionService {
 	private destroySession(session: BattleSessionRecord): void {
 		if (session.closed) return;
 		session.closed = true;
+		this.releaseSession(session);
 		session.paused = false;
 		for (const aiController of session.aiControllers) {
 			aiController.destroy();
@@ -594,5 +612,20 @@ export class BattleSessionService {
 		session.sideIdBySide.clear();
 		session.fighterIds.clear();
 		this.activeSessions = this.activeSessions.filter((activeSession) => activeSession !== session);
+	}
+
+	private releaseSession(session: BattleSessionRecord): void {
+		const release = session.onFinished;
+		session.onFinished = undefined;
+		if (release !== undefined) {
+			const [ok, failure] = pcall(release);
+			if (!ok) warn(`[BattleSessionService] erro de limpeza: ${tostring(failure)}`);
+		}
+	}
+
+	private abortSession(session: BattleSessionRecord, failure: unknown): void {
+		warn(`[BattleSessionService] erro na sessão battle-${session.id}: ${tostring(failure)}`);
+		pcall(() => this.finishSession(session, undefined));
+		this.destroySession(session);
 	}
 }

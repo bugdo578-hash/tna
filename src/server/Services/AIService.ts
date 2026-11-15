@@ -216,7 +216,7 @@ export class AIService {
 
 	private getLivingBenchIndices(): FighterIndex[] {
 		const living: FighterIndex[] = [];
-		for (const index of $range(0, 2)) {
+		for (const index of $range(0, this.aiSide.fighters.size() - 1)) {
 			const fighterIndex = index as FighterIndex;
 			if (fighterIndex === this.aiSide.activeIndex) continue;
 			if (this.aiSide.fighters[fighterIndex].isAlive()) {
