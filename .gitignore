@@ -1,6 +1,7 @@
 /node_modules
 /out
 /include
+/.tools/
 *.tsbuildinfo
 
 .antigravitycli/

@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "skills": {
+    "headroom": {
+      "source": "headroomlabs-ai/headroom",
+      "sourceType": "github",
+      "skillPath": "skills/headroom/SKILL.md",
+      "computedHash": "a8eaac845279b8e3c094d2cd905fe39aed92d492db2dd0c0f23528bf733c725f"
+    },
+    "rtk": {
+      "source": "akillness/jeo-skills",
+      "sourceType": "github",
+      "skillPath": ".agent-skills/rtk/SKILL.md",
+      "computedHash": "21752fc43795a8eda356ef8fd8bd9d94e201799a4021bec093ea6e5ccc94e54f"
+    }
+  }
+}
