@@ -1,4 +1,4 @@
-import type { NumericRange, SkillSlot, StatPointPair } from "./TypeDefs";
+import type { NumericRange, Rarity, SkillSlot, StatPointPair } from "./TypeDefs";
 
 /** Limites da barra de ATB por lado da batalha. */
 export const ATB_MIN = 0;
@@ -50,7 +50,22 @@ export const CRIT_POINTS_PER_POINT = 1;
 export const DODGE_PERCENT_PER_POINT = 1;
 export const CRIT_PERCENT_PER_POINT = 1.5;
 
-export const PLAYER_DATA_SCHEMA_VERSION = 1;
+export const PLAYER_DATA_SCHEMA_VERSION = 2;
+
+/** Loja: valores dev/provisórios, inclusive faixas de preço e distribuição de níveis. */
+export const SHOP_SHELF_COUNT = 3;
+export const SHOP_RESET_WINDOW_SECONDS = 3600;
+export const SHOP_REFRESH_INTERVAL_SECONDS = 1;
+export const SHOP_REQUEST_BUCKET_CAPACITY = 3;
+export const SHOP_REQUEST_REFILL_PER_SECOND = 1;
+export const SHOP_MAX_LEVEL = 3;
+export const SHOP_PRICE_LEVEL_WEIGHT = 0.6;
+export const SHOP_PRICE_QUALITY_WEIGHT = 0.4;
+export const SHOP_LEVEL_WEIGHTS = [0.60, 0.30, 0.10] as const;
+export const SHOP_PRICE_RANGES: Readonly<Record<Rarity, NumericRange>> = {
+	Comum: { min: 150, max: 250 }, Rara: { min: 400, max: 950 },
+	Épica: { min: 1500, max: 4000 }, Lendária: { min: 6000, max: 14000 },
+};
 
 /**
  * Curva de XP por nível e regras de XP pós-batalha por time (valores provisórios).

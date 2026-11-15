@@ -1,5 +1,5 @@
 import { HttpService } from "@rbxts/services";
-import { MIN_LEVEL, PLAYER_DATA_SCHEMA_VERSION, TEAM_XP_SLOTS } from "../../shared/Config";
+import { MAX_LEVEL, MIN_LEVEL, PLAYER_DATA_SCHEMA_VERSION, TEAM_XP_SLOTS } from "../../shared/Config";
 import { isValidStatAllocation } from "../../shared/MathUtils";
 import {
 	calcAvailablePoints,
@@ -21,6 +21,7 @@ import type {
 	StatBlock,
 } from "../../shared/TypeDefs";
 import type { RemoteService } from "./RemoteService";
+import type { AllocationReason } from "../../shared/Remotes";
 
 /** Entrada de participação pós-batalha vinculada ao `itemUuid` do inventário. */
 export interface TeamBattleXpEntry extends FighterBattleParticipation {
@@ -35,6 +36,7 @@ export interface PlayerProgressionData {
 
 /** Parâmetros para registrar um novo lutador no inventário em memória. */
 export interface CreateInventoryFighterParams {
+	readonly level?: number;
 	readonly fighterId: string;
 	readonly rarity?: Rarity;
 	readonly baseStats: StatBlock;
@@ -87,13 +89,14 @@ function isAllocatableStat(stat: unknown): stat is AllocatableStat {
 }
 
 export class ProgressionService {
+	public onInventoryChanged?: (player: Player, allocationReason?: AllocationReason) => void;
 	private readonly playerData = new Map<Player, PlayerProgressionData>();
 
 	public constructor(remoteService?: RemoteService) {
 		if (remoteService !== undefined) {
 			remoteService.bindAllocateRequest((player, payload) => {
 				this.allocatePoints(player, payload.itemUuid, payload.stat, payload.amount);
-			});
+			}, (player) => this.onInventoryChanged?.(player, "invalido"));
 		}
 	}
 
@@ -134,13 +137,14 @@ export class ProgressionService {
 	 * Cria um novo lutador no inventário em memória com `itemUuid` permanente gerado no servidor
 	 * (`HttpService:GenerateGUID(false)`). `baseStats` e rolls de `skills` são copiados e nunca rerrolados.
 	 */
-	public createInventoryFighter(player: Player, params: CreateInventoryFighterParams): FighterInventoryItem {
+	public createInventoryFighter(player: Player, params: CreateInventoryFighterParams, notify = true): FighterInventoryItem {
+		assert(params.level === undefined || (params.level >= MIN_LEVEL && params.level <= MAX_LEVEL && math.floor(params.level) === params.level), "Nível inválido");
 		const data = this.getOrCreateInternalData(player);
 		const item: FighterInventoryItem = {
 			itemUuid: HttpService.GenerateGUID(false),
 			fighterId: params.fighterId,
 			rarity: params.rarity,
-			level: MIN_LEVEL,
+			level: params.level ?? MIN_LEVEL,
 			xp: 0,
 			baseStats: cloneStatBlock(params.baseStats),
 			allocatedStats: { hp: 0, atk: 0, dodge: 0, crit: 0 },
@@ -149,6 +153,7 @@ export class ProgressionService {
 			duo: params.duo !== undefined ? { ...params.duo } : undefined,
 		};
 		data.inventory.push(item);
+		if (notify) this.onInventoryChanged?.(player);
 		return cloneInventoryItem(item);
 	}
 
@@ -220,6 +225,7 @@ export class ProgressionService {
 			xp: resolved.xp,
 		};
 		data.inventory[index] = updated;
+		this.onInventoryChanged?.(player);
 		return cloneInventoryItem(updated);
 	}
 
@@ -281,21 +287,26 @@ export class ProgressionService {
 	 * - Trava de pares (`|ATK - Dodge| <= 5` e `|HP - Crit| <= 5`) via `isValidStatAllocation`.
 	 */
 	public allocatePoints(player: Player, itemUuid: string, stat: AllocatableStat, amount: number): boolean {
-		if (typeOf(itemUuid) !== "string" || itemUuid.size() === 0) return false;
-		if (!isAllocatableStat(stat)) return false;
-		if (typeOf(amount) !== "number" || amount !== amount || math.floor(amount) !== amount || amount < 1) {
+		const refuse = (reason: AllocationReason) => {
+			this.onInventoryChanged?.(player, reason);
 			return false;
+		};
+		if (typeOf(itemUuid) !== "string" || itemUuid.size() === 0) return refuse("invalido");
+		if (!isAllocatableStat(stat)) return refuse("invalido");
+		if (typeOf(amount) !== "number" || amount !== amount || math.floor(amount) !== amount || amount < 1) {
+			return refuse("invalido");
 		}
 
 		const data = this.playerData.get(player);
-		if (data === undefined) return false;
+		if (data === undefined) return refuse("invalido");
 
 		const index = this.findFighterIndex(data.inventory, itemUuid);
-		if (index === undefined) return false;
+		if (index === undefined) return refuse("invalido");
 
 		const current = data.inventory[index];
 		const available = calcAvailablePoints(current.level, current.allocatedStats);
-		if (amount > available) return false;
+		if (amount > available) return refuse("sem_pontos");
+		if (current.allocatedStats[stat] + amount > current.level) return refuse("cap_nivel");
 
 		const nextAllocated: StatBlock = {
 			hp: current.allocatedStats.hp + (stat === "hp" ? amount : 0),
@@ -305,13 +316,14 @@ export class ProgressionService {
 		};
 
 		if (!isValidStatAllocation(nextAllocated, current.level)) {
-			return false;
+			return refuse("par");
 		}
 
 		data.inventory[index] = {
 			...current,
 			allocatedStats: nextAllocated,
 		};
+		this.onInventoryChanged?.(player);
 		return true;
 	}
 

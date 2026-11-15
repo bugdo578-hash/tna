@@ -1,8 +1,30 @@
-import type { AllocatableStat, BattleGlobalState, ClassName, FighterXpReward, SkillSlot, StatusEffect } from "./TypeDefs";
+import type { AllocatableStat, BattleGlobalState, ClassName, FighterXpReward, Rarity, StatBlock, SkillSlot, StatusEffect } from "./TypeDefs";
+
+export interface RequestPurchasePayload { readonly offerId: string; readonly requestId: string; }
+export type PurchaseReason = "saldo" | "oferta_invalida" | "em_batalha" | "limite" | "erro";
+export interface PurchaseResultPayload {
+	readonly requestId: string;
+	readonly offerId: string;
+	readonly ok: boolean;
+	readonly reason?: PurchaseReason;
+}
+export type AllocationReason = "sem_pontos" | "cap_nivel" | "par" | "invalido";
+export interface ShopStatePayload {
+	readonly offers: readonly {
+		readonly offerId: string; readonly fighterId: string; readonly displayName: string;
+		readonly rarity: Rarity; readonly className: ClassName; readonly level: number;
+		readonly baseStats: StatBlock; readonly price: number;
+		readonly slotCosts: readonly [number, number, number];
+	}[];
+}
 
 export const REMOTES_FOLDER_NAME = "Remotes";
 
 export const REMOTE_NAMES = {
+	NpcBattleNotice: "NpcBattleNotice",
+	RequestPurchase: "RequestPurchase",
+	PurchaseResult: "PurchaseResult",
+	ShopState: "ShopState",
 	TinyesChanged: "TinyesChanged",
 	RequestSkill: "RequestSkill",
 	RequestSwitch: "RequestSwitch",

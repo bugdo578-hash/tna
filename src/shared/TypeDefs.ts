@@ -66,6 +66,8 @@ export interface DuoState {
 
 /** Oferta temporária gerada na loja antes da compra. */
 export interface ShopOffer {
+	readonly level: number;
+	readonly price: number;
 	readonly offerId: string;
 	readonly fighterId: string;
 	readonly rarity: Rarity;
@@ -119,6 +121,8 @@ export interface SessionLockInfo {
 
 /** Schema versionado de persistência de dados do jogador no DataStore (T7.2). */
 export interface PlayerSaveData {
+	/** Ausente apenas nos registros legados v0/v1. Obrigatório na validação v2. */
+	readonly shopRestockCounts?: number[];
 	readonly version: number;
 	readonly tinyes: number;
 	readonly inventory: FighterInventoryItem[];

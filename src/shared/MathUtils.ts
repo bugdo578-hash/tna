@@ -1,4 +1,5 @@
 import {
+	SHOP_MAX_LEVEL, SHOP_PRICE_LEVEL_WEIGHT, SHOP_PRICE_QUALITY_WEIGHT, SHOP_PRICE_RANGES,
 	ATB_COST_RANGES,
 	BASE_ATB_SPEED,
 	CRIT_MULTIPLIER,
@@ -12,8 +13,27 @@ import {
 	STAT_POINT_PAIRS,
 	STAT_POINTS_PER_LEVEL,
 } from "./Config";
-import { getCounterMultiplier } from "./ClassData";
-import type { ClassName, SkillSlot, SkillSlotRoll, StatBlock } from "./TypeDefs";
+import { CLASS_DATA, getCounterMultiplier } from "./ClassData";
+import type { ClassName, Rarity, SkillSlot, SkillSlotRoll, StatBlock } from "./TypeDefs";
+
+/** Qualidade média dos quatro atributos; skills não participam do preço. */
+export function calcStatQuality(className: ClassName, stats: StatBlock): number {
+	const ranges = CLASS_DATA[className].baseStats;
+	let total = 0;
+	for (const stat of ["hp", "atk", "dodge", "crit"] as const) {
+		const range = ranges[stat];
+		total += clamp((stats[stat] - range.min) / (range.max - range.min), 0, 1);
+	}
+	return total / 4;
+}
+
+/** Função pura: preço por raridade, qualidade dos atributos e nível da oferta. */
+export function calcOfferPrice(rarity: Rarity, statQuality: number, level: number): number {
+	const range = SHOP_PRICE_RANGES[rarity];
+	const fraction = clamp((level - 1) / (SHOP_MAX_LEVEL - 1), 0, 1);
+	const score = SHOP_PRICE_LEVEL_WEIGHT * fraction + SHOP_PRICE_QUALITY_WEIGHT * clamp(statQuality, 0, 1);
+	return math.round(range.min + (range.max - range.min) * score);
+}
 
 const MIN_ALLIES = 1;
 const LEVEL_SCALE_BASE = 0.5;

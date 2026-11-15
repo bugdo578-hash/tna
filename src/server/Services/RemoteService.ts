@@ -60,6 +60,13 @@ export interface BattleRemoteAdapter {
 }
 
 export class RemoteService implements BattleRemoteAdapter {
+	readonly npcBattleNotice: RemoteEvent;
+	readonly requestPurchase: RemoteEvent;
+	readonly purchaseResult: RemoteEvent;
+	readonly shopState: RemoteEvent;
+	readonly inventoryState: RemoteEvent;
+	readonly requestSetTeam: RemoteEvent;
+	private readonly teamBuckets = new Map<Player, RequestBucket>();
 	readonly tinyesChanged: RemoteEvent;
 	readonly requestSkill: RemoteEvent;
 	readonly requestSwitch: RemoteEvent;
@@ -83,9 +90,16 @@ export class RemoteService implements BattleRemoteAdapter {
 	private requestHandlersBound = false;
 	private allocateHandlerBound = false;
 	private onAllocateCallback?: (player: Player, payload: RequestAllocatePayload) => void;
+	private onAllocateRejected?: (player: Player) => void;
 
 	public constructor(private readonly clock: () => number = os.clock) {
 		const remotesFolder = this.getOrCreateRemotesFolder();
+		this.npcBattleNotice = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.NpcBattleNotice);
+		this.requestPurchase = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.RequestPurchase);
+		this.purchaseResult = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.PurchaseResult);
+		this.shopState = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.ShopState);
+		this.inventoryState = this.getOrCreateRemote(remotesFolder, "InventoryState");
+		this.requestSetTeam = this.getOrCreateRemote(remotesFolder, "RequestSetTeam");
 		this.tinyesChanged = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.TinyesChanged);
 		this.requestSkill = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.RequestSkill);
 		this.requestSwitch = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.RequestSwitch);
@@ -143,8 +157,40 @@ export class RemoteService implements BattleRemoteAdapter {
 		});
 	}
 
-	public bindAllocateRequest(onAllocate: (player: Player, payload: RequestAllocatePayload) => void): void {
+	public bindSetTeamRequest(callback: (player: Player, uuids: string[]) => void): void {
+		this.requestSetTeam.OnServerEvent.Connect((player, payload) => {
+			if (!this.consumeToken(this.teamBuckets, player, ALLOCATE_REQUEST_BUCKET_CAPACITY, ALLOCATE_REQUEST_REFILL_PER_SECOND)) return;
+			const uuids = this.readSetTeamPayload(payload);
+			if (uuids !== undefined) callback(player, uuids);
+		});
+	}
+
+	public readSetTeamPayload(payload: unknown): string[] | undefined {
+		if (!typeIs(payload, "table")) return undefined;
+		const record = payload as Record<string, unknown>;
+		for (const [key] of pairs(record)) if (key !== "uuids") return undefined;
+		if (!typeIs(record.uuids, "table")) return undefined;
+		const values = record.uuids as defined[];
+		let count = 0;
+		const seen = new Set<string>();
+		for (const [key, value] of pairs(values)) {
+			if (!typeIs(key, "number") || key !== math.floor(key) || key < 1 || key > 3) return undefined;
+			if (!typeIs(value, "string") || value.size() === 0 || value.size() > MAX_ITEM_UUID_LENGTH || seen.has(value)) return undefined;
+			seen.add(value);
+			count += 1;
+		}
+		if (count < 1 || count > 3 || values.size() !== count) return undefined;
+		const result: string[] = [];
+		for (const i of $range(0, count - 1)) {
+			if (!typeIs(values[i], "string")) return undefined;
+			result.push(values[i] as string);
+		}
+		return result;
+	}
+
+	public bindAllocateRequest(onAllocate: (player: Player, payload: RequestAllocatePayload) => void, onRejected?: (player: Player) => void): void {
 		this.onAllocateCallback = onAllocate;
+		this.onAllocateRejected = onRejected;
 		if (this.allocateHandlerBound) return;
 		this.allocateHandlerBound = true;
 
@@ -156,9 +202,15 @@ export class RemoteService implements BattleRemoteAdapter {
 	}
 
 	public processAllocateEvent(player: Player, payload: unknown): boolean {
-		if (!this.consumeAllocateRequest(player)) return false;
+		if (!this.consumeAllocateRequest(player)) {
+			this.onAllocateRejected?.(player);
+			return false;
+		}
 		const parsed = this.readAllocatePayload(payload);
-		if (parsed === undefined) return false;
+		if (parsed === undefined) {
+			this.onAllocateRejected?.(player);
+			return false;
+		}
 		if (this.onAllocateCallback !== undefined) {
 			this.onAllocateCallback(player, parsed);
 		}
@@ -168,6 +220,7 @@ export class RemoteService implements BattleRemoteAdapter {
 	public forgetPlayer(player: Player): void {
 		this.requestBuckets.delete(player);
 		this.allocateBuckets.delete(player);
+		this.teamBuckets.delete(player);
 	}
 
 	public sendBattleStarted(player: Player, payload: BattleStartedPayload): void {

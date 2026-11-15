@@ -1,11 +1,83 @@
-import type { ClassName, StatusEffect } from "../../shared/TypeDefs";
+import type { ClassName, Rarity, StatusEffect } from "../../shared/TypeDefs";
 import { S3_UNLOCK_LEVEL } from "../../shared/Config";
+import type { AllocationReason, PurchaseReason } from "../../shared/Remotes";
 
 /**
  * Tema centralizado do HUD de Batalha (T3).
  * Centraliza todas as cores, fontes, tamanhos (Scale), aspect ratios, constantes de animação e textos.
  */
 export const UITheme = {
+	Shop: {
+		ScreenGuiName: "Shop", DisplayOrder: 9, ToggleKey: Enum.KeyCode.L,
+		TogglePos: UDim2.fromScale(.015, .49), ToggleSize: UDim2.fromScale(.22, .15),
+		PanelPos: UDim2.fromScale(.25, .02), PanelSize: UDim2.fromScale(.735, .96),
+		TitlePos: UDim2.fromScale(.04, .02), TitleSize: UDim2.fromScale(.72, .075),
+		BalancePos: UDim2.fromScale(.04, .10), BalanceSize: UDim2.fromScale(.72, .07),
+		ClosePos: UDim2.fromScale(.84, .02), CloseSize: UDim2.fromScale(.12, .16), CloseAspect: 1,
+		NoticePos: UDim2.fromScale(.04, .18), NoticeSize: UDim2.fromScale(.92, .06),
+		CardsPos: UDim2.fromScale(.025, .25), CardsSize: UDim2.fromScale(.95, .73),
+		CardWidth: .32, CardStep: .34, ShelfCount: 3,
+		NamePos: UDim2.fromScale(.04, .02), NameSize: UDim2.fromScale(.92, .12),
+		RarityPos: UDim2.fromScale(.04, .145), RaritySize: UDim2.fromScale(.92, .07),
+		MetaPos: UDim2.fromScale(.04, .22), MetaSize: UDim2.fromScale(.92, .09),
+		StatsPos: UDim2.fromScale(.04, .32), StatsSize: UDim2.fromScale(.92, .16),
+		CostsPos: UDim2.fromScale(.04, .49), CostsSize: UDim2.fromScale(.92, .20),
+		PricePos: UDim2.fromScale(.04, .70), PriceSize: UDim2.fromScale(.92, .07),
+		BuyPos: UDim2.fromScale(.04, .79), BuySize: UDim2.fromScale(.92, .20),
+		MinTextSize: 9, MaxTextSize: 22, MinTouchSize: 44,
+		PurchaseTimeoutSeconds: 5, NoticeSeconds: 2,
+		ToggleText: "LOJA [L]", Title: "LOJA DE LUTADORES", CloseText: "×",
+		Loading: "Aguardando loja…", EmptyShelf: "Prateleira vazia", Buy: "Comprar",
+		Pending: "Aguardando…", Insufficient: "Saldo insuficiente", UnknownBalance: "Aguardando saldo",
+		Timeout: "Sem confirmação. Tente novamente.", Purchased: "Comprado!",
+		PurchaseReasons: {
+			saldo: "Saldo insuficiente", oferta_invalida: "Oferta inválida", em_batalha: "Em batalha",
+			limite: "Limite atingido", erro: "Erro na compra",
+		} as Readonly<Record<PurchaseReason, string>>,
+		DevCommand: "/testshop", DevExit: "off",
+		DevResultSeconds: .25,
+		FormatBalance: (balance?: number): string => `Tinyes: ${balance ?? "—"}`,
+		FormatPrice: (price: number): string => `${price} Tinyes`,
+		FormatValue: (value: number): string => string.format("%g", value),
+	},
+	Inventory: {
+		ScreenGuiName: "Inventory", DisplayOrder: 20, ToggleKey: Enum.KeyCode.I,
+		TogglePos: UDim2.fromScale(.015, .37), ToggleSize: UDim2.fromScale(.22, .09),
+		PanelPos: UDim2.fromScale(.02, .02), PanelSize: UDim2.fromScale(.96, .96),
+		TitlePos: UDim2.fromScale(.025, .02), TitleSize: UDim2.fromScale(.82, .08),
+		ClosePos: UDim2.fromScale(.90, .015), CloseSize: UDim2.fromScale(.075, .09),
+		GridPos: UDim2.fromScale(.025, .14), GridSize: UDim2.fromScale(.45, .59),
+		DetailPos: UDim2.fromScale(.50, .14), DetailSize: UDim2.fromScale(.475, .59),
+		TeamPos: UDim2.fromScale(.025, .77), TeamSize: UDim2.fromScale(.95, .20),
+		CellSize: UDim2.fromScale(.48, .43), CellGap: UDim2.fromScale(.025, .04),
+		CardNamePos: UDim2.fromScale(.05, .07), CardNameSize: UDim2.fromScale(.90, .25),
+		CardMetaPos: UDim2.fromScale(.05, .35), CardMetaSize: UDim2.fromScale(.90, .33),
+		CardBadgePos: UDim2.fromScale(.05, .73), CardBadgeSize: UDim2.fromScale(.90, .20),
+		DetailNamePos: UDim2.fromScale(.02, 0), DetailNameSize: UDim2.fromScale(.96, .14),
+		XpPos: UDim2.fromScale(.02, .17), XpSize: UDim2.fromScale(.96, .08),
+		PointsPos: UDim2.fromScale(.02, .28), PointsSize: UDim2.fromScale(.96, .10),
+		StatsPos: UDim2.fromScale(.02, .41), StatsSize: UDim2.fromScale(.96, .36),
+		StatHeight: .22, StatStep: .26, StatTrackSize: UDim2.fromScale(.83, 1),
+		PlusPos: UDim2.fromScale(.86, 0), PlusSize: UDim2.fromScale(.14, 1),
+		SkillsPos: UDim2.fromScale(.02, .80), SkillsSize: UDim2.fromScale(.96, .18),
+		SlotWidth: .32, SlotStep: .34, SkillWidth: .32, SkillStep: .34,
+		TeamTitleSize: UDim2.fromScale(1, .28), TeamSlotY: .35, TeamSlotHeight: .65,
+		MaxTextSize: 22, MinTextSize: 8, ScrollThickness: 4, PlusAspect: 1,
+		BlinkSeconds: .65, BlinkTransparency: .65,
+		// Escalas gráficas provisórias, não representam caps/regras de alocação.
+		StatDisplayRange: { hp: 1000, atk: 100, dodge: 100, crit: 100 },
+		RarityColors: {
+			Comum: Color3.fromRGB(180, 192, 205), Rara: Color3.fromRGB(95, 174, 255),
+			Épica: Color3.fromRGB(195, 130, 255), Lendária: Color3.fromRGB(255, 212, 95),
+		} as Readonly<Record<Rarity, Color3>>,
+		ToggleText: "INVENTÁRIO [I]", Title: "LUTADORES", CloseText: "×",
+		Loading: "Aguardando inventário…", Empty: "Nenhum lutador", Select: "Selecione um lutador",
+		TeamHint: "TIME · selecione um lutador e toque num slot", EmptySlot: "Vazio",
+		NewLevel: "NOVO NÍVEL", InTeam: "NO TIME", Unavailable: "Indisponível", MaxXp: "XP MÁX",
+		AllocationReasons: {
+			sem_pontos: "Sem pontos disponíveis", cap_nivel: "Limite do nível", par: "Limite do par", invalido: "Alocação inválida",
+		} as Readonly<Record<AllocationReason, string>>,
+	},
 	ScreenGuiName: "BattleHUD",
 	DisplayOrder: 10,
 	Xp: {

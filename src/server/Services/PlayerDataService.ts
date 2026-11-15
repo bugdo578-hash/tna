@@ -1,5 +1,6 @@
 import { DataStoreService, HttpService, Players, RunService } from "@rbxts/services";
 import {
+	SHOP_SHELF_COUNT,
 	ATB_COST_RANGES,
 	BIND_TO_CLOSE_POLL_INTERVAL_SECONDS,
 	BIND_TO_CLOSE_TIMEOUT_SECONDS,
@@ -39,6 +40,7 @@ import type {
 	SkillSlot,
 	SkillSlotRoll,
 	SkillSlots,
+	ShopOffer,
 	StatBlock,
 } from "../../shared/TypeDefs";
 import type { PlayerProgressionData, ProgressionService } from "./ProgressionService";
@@ -113,6 +115,7 @@ interface ActivePlayerSession {
 	readonly key: string;
 	readonly getProgressionData: () => PlayerProgressionData;
 	tinyes: number;
+	shopRestockCounts: number[];
 	activeTeam: string[];
 	version: number;
 	lastPersistedLockTimestamp: number;
@@ -238,6 +241,7 @@ export function clonePlayerSaveData(data: PlayerSaveData): PlayerSaveData {
 	return {
 		version: data.version,
 		tinyes: data.tinyes,
+		shopRestockCounts: data.shopRestockCounts !== undefined ? [...data.shopRestockCounts] : undefined,
 		inventory,
 		activeTeam,
 		sessionLock:
@@ -554,6 +558,8 @@ export function migratePlayerData(
 				inventory: legacyInventory,
 				activeTeam,
 			};
+		} else if (currentVersion === 1) {
+			working = { ...working, version: 2, shopRestockCounts: [0, 0, 0] };
 		} else {
 			return undefined;
 		}
@@ -587,6 +593,16 @@ export function validatePlayerSaveData(
 			valid: false,
 			reason: `versão de schema inválida (${tostring(raw.version)} !== ${expectedSchemaVersion})`,
 		};
+	}
+
+	let shopRestockCounts: number[] | undefined;
+	if (expectedSchemaVersion >= 2) {
+		if (!isDenseArray(raw.shopRestockCounts)) return { valid: false, reason: "shopRestockCounts inválido" };
+		const counts = raw.shopRestockCounts as number[];
+		if (counts.size() !== SHOP_SHELF_COUNT || counts.some((count) => !isNonNegativeInteger(count))) {
+			return { valid: false, reason: "contadores da loja inválidos" };
+		}
+		shopRestockCounts = [...counts];
 	}
 
 	if (!isNonNegativeInteger(raw.tinyes)) {
@@ -661,6 +677,7 @@ export function validatePlayerSaveData(
 		data: {
 			version: expectedSchemaVersion,
 			tinyes: raw.tinyes,
+			shopRestockCounts,
 			inventory,
 			activeTeam,
 			sessionLock,
@@ -882,6 +899,33 @@ export class PlayerDataService {
 		});
 	}
 
+	public getShopRestockCounts(player: Player): number[] | undefined {
+		const session = this.sessions.get(player);
+		return session !== undefined && !session.closing ? [...session.shopRestockCounts] : undefined;
+	}
+
+	/** Transação síncrona: nenhum callback, remote ou yield entre débito e entrega. */
+	public purchaseShopOffer(player: Player, shelf: number, expectedCount: number, offer: ShopOffer): boolean {
+		const session = this.sessions.get(player);
+		if (session === undefined || session.closing || player.Parent !== Players ||
+			shelf < 0 || shelf >= SHOP_SHELF_COUNT || math.floor(shelf) !== shelf ||
+			session.shopRestockCounts[shelf] !== expectedCount || expectedCount >= MAX_SAVED_NUMBER ||
+			!isNonNegativeInteger(offer.price) || offer.price <= 0 || session.tinyes < offer.price) return false;
+		const before = session.getProgressionData();
+		const balance = session.tinyes;
+		session.tinyes -= offer.price;
+		const [ok, result] = pcall(() => this.progressionService.createInventoryFighter(player, offer, false));
+		if (!ok) {
+			session.tinyes = balance;
+			this.progressionService.loadValidatedPlayerData(player, before);
+			this.warnFn(`[Shop] Compra revertida para ${player.UserId}: ${tostring(result)}`);
+			return false;
+		}
+		session.shopRestockCounts[shelf] += 1;
+		this.updateLastValidSnapshotFromSession(session);
+		return true;
+	}
+
 	public getTinyes(player: Player): number | undefined {
 		return this.sessions.get(player)?.tinyes;
 	}
@@ -922,7 +966,7 @@ export class PlayerDataService {
 
 		const inventoryUuids = new Set<string>();
 		for (const fighter of session.getProgressionData().inventory) {
-			inventoryUuids.add(fighter.itemUuid);
+			if (!fighter.unavailable) inventoryUuids.add(fighter.itemUuid);
 		}
 
 		const nextTeam: string[] = [];
@@ -1113,6 +1157,7 @@ export class PlayerDataService {
 				const validData: PlayerSaveData = {
 					version: validation.data.version,
 					tinyes: validation.data.tinyes,
+					shopRestockCounts: validation.data.shopRestockCounts !== undefined ? [...validation.data.shopRestockCounts] : undefined,
 					inventory: validation.data.inventory.map((item) => cloneInventoryItem(item)),
 					activeTeam: [...validation.data.activeTeam],
 					sessionLock: lockInfo,
@@ -1465,6 +1510,7 @@ export class PlayerDataService {
 			const restoredData: PlayerSaveData = {
 				version: validSnapshot.version,
 				tinyes: validSnapshot.tinyes,
+				shopRestockCounts: validSnapshot.shopRestockCounts !== undefined ? [...validSnapshot.shopRestockCounts] : undefined,
 				inventory: validSnapshot.inventory.map((item) => cloneInventoryItem(item)),
 				activeTeam: [...validSnapshot.activeTeam],
 				sessionLock: lockInfo,
@@ -1696,6 +1742,7 @@ export class PlayerDataService {
 			const payload: PlayerSaveData = {
 				version: candidateSnapshot.version,
 				tinyes: candidateSnapshot.tinyes,
+				shopRestockCounts: candidateSnapshot.shopRestockCounts !== undefined ? [...candidateSnapshot.shopRestockCounts] : undefined,
 				inventory: candidateSnapshot.inventory.map((item) => cloneInventoryItem(item)),
 				activeTeam: [...candidateSnapshot.activeTeam],
 				sessionLock: releaseLock
@@ -2263,6 +2310,7 @@ export class PlayerDataService {
 			return {
 				version: this.schemaVersion,
 				tinyes: INITIAL_TINYES,
+				shopRestockCounts: [0, 0, 0],
 				inventory: [starterItem],
 				activeTeam: [starterItem.itemUuid],
 				sessionLock: lockInfo,
@@ -2271,6 +2319,7 @@ export class PlayerDataService {
 		return {
 			version: this.schemaVersion,
 			tinyes: INITIAL_TINYES,
+			shopRestockCounts: [0, 0, 0],
 			inventory: [],
 			activeTeam: [],
 			sessionLock: lockInfo,
@@ -2298,6 +2347,7 @@ export class PlayerDataService {
 
 		if (reuseSession !== undefined && reuseSession.userId === userId && reuseSession.key === key) {
 			reuseSession.tinyes = loadedData.tinyes;
+			reuseSession.shopRestockCounts = [...(loadedData.shopRestockCounts ?? [0, 0, 0])];
 			reuseSession.activeTeam = activeTeam;
 			reuseSession.version = this.schemaVersion;
 			reuseSession.lastPersistedLockTimestamp = persistedTimestamp;
@@ -2318,6 +2368,7 @@ export class PlayerDataService {
 			key,
 			getProgressionData: () => this.progressionService.getPlayerData(player)!,
 			tinyes: loadedData.tinyes,
+			shopRestockCounts: [...(loadedData.shopRestockCounts ?? [0, 0, 0])],
 			activeTeam,
 			version: this.schemaVersion,
 			lastPersistedLockTimestamp: persistedTimestamp,
@@ -2347,14 +2398,6 @@ export class PlayerDataService {
 				validTeam.push(uuid);
 			}
 		}
-
-		if (validTeam.size() === 0) {
-			for (const fighter of session.getProgressionData().inventory) {
-				if (validTeam.size() >= MAX_ACTIVE_TEAM_SIZE) break;
-				validTeam.push(fighter.itemUuid);
-			}
-		}
-
 		session.activeTeam = validTeam;
 	}
 
@@ -2367,6 +2410,7 @@ export class PlayerDataService {
 		return {
 			version: session.version,
 			tinyes: session.tinyes,
+			shopRestockCounts: [...(session.shopRestockCounts ?? [0, 0, 0])],
 			inventory,
 			activeTeam: [...session.activeTeam],
 			sessionLock,
