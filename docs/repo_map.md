@@ -17,8 +17,8 @@ Leia este arquivo primeiro. Não escaneie o projeto. Não leia o GDD inteiro.
 
 ## Estrutura (confirme caminhos reais)
 - `src/server/`: Services (Arena, Battle, ATB, Damage, Tag, AI, PlayerData, NPC, Shop, Crate), Components (Fighter, Skill, Arena, AIBrain)
-- `src/client/`: Controllers (Input, BattleHUD, Camera, VFX, Cutscene, Sound, Crate)
-- `src/shared/`: FighterData, SkillData, ClassData, TypeDefs, ShopData, Signal, Config, MathUtils
+- `src/client/`: Controllers (Input, BattleHUD, Camera, VFX, Cutscene, Sound, Crate), `UI/CombatVisualConfig` (constantes visuais de combate)
+- `src/shared/`: FighterData, SkillData, ClassData, TypeDefs, ShopData, Signal, Config (`configs/`: AI, Animation, Combat, Dev, Economy, Network, Persistence, Progression, Pvp, World), MathUtils
 - Remotes: Battle, ATB, Tag, VFX, Skill, Shop, Crate
 - Arenas: ServerStorage/Arenas (npc, pvp, boss), clonadas por batalha, destruídas ao fim
 - Init: `init.server` / `init.client` (ordem Init → Start)
@@ -56,7 +56,7 @@ Leia este arquivo primeiro. Não escaneie o projeto. Não leia o GDD inteiro.
 - Hamon: ×1.30 / 1.8 / 2.20 por slot. 3 cargas. Multi-hit gasta 2.
 - BuffMulti: `capFinal * min(aplicações,4) / 4`; `dano += dano * BuffMulti`
 - WeakMulti: `dano *= (1 - capFinal * min(aplicações,4)/4)`; mínimo 1 de dano
-- Bleed 25% / Burn 20% do dano REAL. 3 ticks, 1/s. Renovam, não empilham.
+- Bleed 25% / Burn 20% do dano REAL. 3 ticks, 1/s (3s — decisão final fechada pelo autor). Renovam, não empilham.
   Tick < 1: acumula; último tick garante ≥ 1. Nunca mostrar "0".
 
 ## Dodge e hit
@@ -78,7 +78,7 @@ Leia este arquivo primeiro. Não escaneie o projeto. Não leia o GDD inteiro.
 
 ## Progressão
 - Lv máx 30. Lv1 sem pontos. +2 pontos/nível (58 no Lv30).
-- HP +12.5/ponto. ATK, Dodge, Crit +1/ponto.
+- HP +12.5/ponto. ATK +1/ponto, Dodge +1/ponto (1%/pt), Crit +1/ponto (1.5%/pt).
 - Cap por stat = nível atual.
 - Pares: |ATK−Dodge| ≤ 5 e |HP−Crit| ≤ 5.
 - S3 desbloqueia no Lv5 (decisão em aberto).
@@ -93,7 +93,12 @@ Leia este arquivo primeiro. Não escaneie o projeto. Não leia o GDD inteiro.
 - Saldo único em PlayerDataService; TinyesService valida/delega, sem save próprio. Autosave e saída persistem.
 - Vitória natural PVE contra IA paga uma vez; derrota, Quit, desconexão, timeout, erro e jogador fora de Players não pagam.
 - `TinyesChanged { balance }` e `BattleEnded.tinyesReward?` são enviados só ao respectivo jogador.
-- TODO: PVP casual paga vitória, valor pendente; Rival paga mais que Ouro, valor pendente; definir teto diário Bronze. Não implementar nesta etapa.
+- Decisão definitiva do autor (2026-11-16): não haverá teto diário de recompensa Bronze. Reenfrentar usa `NpcData.rematchCooldownSeconds` por jogador/npcId, contado ESTRITAMENTE do fim de uma vitória natural do jogador. Dar dano e sair, derrota, Quit, desconexão, respawn, timeout e erro NÃO geram cooldown. `bronze_trainer = 300s` provisório (faixa desejada: 5–15 min). Somente em memória: saída limpa e reentrada zera; sem schema novo. Recusa no Triggered sem sessão, aviso privado em NpcBattleNotice e texto em UITheme.Npc. Botão do resultado apenas fecha; não inicia `/testbattle` nem contorna o prompt.
+- Loja: 3 prateleiras; pesos de nível 1/2/3 = `60%/30%/10%` (`SHOP_LEVEL_WEIGHTS`).
+- TODO: PVP casual paga vitória, valor pendente; Rival paga mais que Ouro, valor pendente. Não implementar nesta etapa.
+
+## IA Bronze
+- Reação normal `1.5–3.0s`, Ultimate `2.0–4.0s`, erro `30%` (força S1), troca por HP `<25%` (`50%` de chance) e troca por tempo `20–30s` acumulados em `IDLE` (respeitando `Root`).
 
 ## IDs
 - `fighterId`: template. `offerId`: oferta temporária. `itemUuid`: boneco permanente.

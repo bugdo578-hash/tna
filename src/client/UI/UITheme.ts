@@ -1,12 +1,102 @@
 import type { ClassName, Rarity, StatusEffect } from "../../shared/TypeDefs";
 import { S3_UNLOCK_LEVEL } from "../../shared/Config";
-import type { AllocationReason, PurchaseReason } from "../../shared/Remotes";
+import type { AllocationReason, ChallengeStatus, NpcBattleNoticeReason, PurchaseReason, RewardBlockedReason } from "../../shared/Remotes";
 
 /**
  * Tema centralizado do HUD de Batalha (T3).
  * Centraliza todas as cores, fontes, tamanhos (Scale), aspect ratios, constantes de animação e textos.
  */
 export const UITheme = {
+	ResultScreenGuiName: "BattleResult",
+	ShowResultOnLocalQuit: false,
+	Npc: {
+		NoticeTitle: "Batalha",
+		NoticeTexts: {
+			em_batalha: "Você já está em batalha.",
+			carregando: "Aguarde seus dados carregarem.",
+			distancia: "Chegue mais perto do NPC.",
+			time_invalido: "Equipe ao menos um lutador disponível.",
+			erro: "Não foi possível iniciar a batalha.",
+		} as Readonly<Record<NpcBattleNoticeReason, string>>,
+		FormatRematchCooldown: (seconds: number) => `Aguarde ${seconds}s para reenfrentar este NPC.`,
+	},
+	Pvp: {
+		ScreenGuiName: "PvpUI",
+		DisplayOrder: 9, // Abaixo do BattleHUD (10) para nunca cobrir o HUD de combate
+		InvitePos: UDim2.fromScale(0.5, 0.25),
+		InviteSize: UDim2.fromScale(0.46, 0.46),
+		InviteAnchor: new Vector2(0.5, 0),
+		InviteMinSize: new Vector2(280, 140),
+		InviteMaxSize: new Vector2(480, 220),
+		InviteBadgePos: UDim2.fromScale(0.05, 0.05),
+		InviteBadgeSize: UDim2.fromScale(0.90, 0.13),
+		InviteTextPos: UDim2.fromScale(0.05, 0.19),
+		InviteTextSize: UDim2.fromScale(0.90, 0.27),
+		TimeBarPos: UDim2.fromScale(0.06, 0.50),
+		TimeBarSize: UDim2.fromScale(0.88, 0.08),
+		ButtonsRowPos: UDim2.fromScale(0.05, 0.63),
+		ButtonsRowSize: UDim2.fromScale(0.90, 0.32),
+		AcceptPos: UDim2.fromScale(0, 0),
+		AcceptSize: UDim2.fromScale(0.48, 1),
+		DeclinePos: UDim2.fromScale(0.52, 0),
+		DeclineSize: UDim2.fromScale(0.48, 1),
+		StatusPos: UDim2.fromScale(0.5, 0.245),
+		StatusSize: UDim2.fromScale(0.38, 0.12),
+		StatusAnchor: new Vector2(0.5, 0),
+		StatusMinSize: new Vector2(210, 36),
+		StatusMaxSize: new Vector2(420, 54),
+		StatusTextPos: UDim2.fromScale(0.04, 0.10),
+		StatusTextSize: UDim2.fromScale(0.82, 0.80),
+		StatusClosePos: UDim2.fromScale(0.88, 0.12),
+		StatusCloseSize: UDim2.fromScale(0.10, 0.76),
+		StatusCloseAspect: 1,
+		StatusNoticeSeconds: 2.5,
+		ResultReasonPos: UDim2.fromScale(0.10, 0.26),
+		ResultReasonSize: UDim2.fromScale(0.80, 0.14),
+		ResultBlockedPos: UDim2.fromScale(0.10, 0.44),
+		ResultBlockedSize: UDim2.fromScale(0.80, 0.22),
+		ResultBlockedPadding: new UDim(0.04, 0),
+		MinTextSize: 10,
+		MaxTextSize: 22,
+		BadgeMinTextSize: 9,
+		BadgeMaxTextSize: 16,
+		ButtonMinTextSize: 11,
+		ButtonMaxTextSize: 22,
+		InviteBadgeText: "DUELO PVP",
+		AcceptText: "Aceitar",
+		DeclineText: "Recusar",
+		CloseText: "×",
+		EndedNoWinnerTitle: "PARTIDA ENCERRADA",
+		CloseResultButton: "FECHAR",
+		FormatInviteText: (challengerName: string): string => `${challengerName} desafiou você`,
+		StatusTexts: {
+			enviado: "Aguardando resposta...",
+			aceito: "Desafio aceito!",
+			recusado: "Desafio recusado",
+			expirado: "Desafio expirado",
+			indisponivel: "Duelo indisponível",
+		} as Readonly<Record<ChallengeStatus, string>>,
+		StatusColors: {
+			enviado: Color3.fromRGB(56, 186, 255),
+			aceito: Color3.fromRGB(82, 235, 128),
+			recusado: Color3.fromRGB(242, 78, 78),
+			expirado: Color3.fromRGB(235, 168, 42),
+			indisponivel: Color3.fromRGB(242, 78, 78),
+		} as Readonly<Record<ChallengeStatus, Color3>>,
+		RewardBlockedReasons: {
+			limite_par: "Limite de prêmios contra este oponente atingido",
+			limite_diario: "Limite diário de Tinyes PVP atingido",
+			luta_curta: "Luta muito curta para recompensa",
+		} as Readonly<Record<RewardBlockedReason, string>>,
+		EndReasonTexts: {
+			victory: "",
+			quitWin: "Oponente desistiu",
+			quitLoss: "Você desistiu",
+			disconnect: "Oponente desconectou",
+			timeout: "Tempo esgotado",
+			error: "Erro na partida",
+		},
+	},
 	Shop: {
 		ScreenGuiName: "Shop", DisplayOrder: 9, ToggleKey: Enum.KeyCode.L,
 		TogglePos: UDim2.fromScale(.015, .49), ToggleSize: UDim2.fromScale(.22, .15),
@@ -368,7 +458,7 @@ export const UITheme = {
 		SkillBusyState: "AGUARDE IDLE",
 		VictoryTitle: "VICTORY",
 		DefeatTitle: "DEFEAT",
-		ResultCloseAndRestartButton: "FECHAR / REINICIAR (/testbattle)",
+		ResultCloseButton: "FECHAR",
 		StatePrefix: "ESTADO: ",
 		StatusShortLabels: {
 			Burn: "BURN",

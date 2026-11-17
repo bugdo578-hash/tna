@@ -1,3 +1,5 @@
+import { PVP_DAY_SECONDS, PVP_DAILY_TINYES_CAP, PVP_DAILY_XP_CAP, PVP_MAX_PAIR_ENTRIES, PVP_PAIR_MAX_REWARDED_WINS, PVP_PAIR_WINDOW_SECONDS } from "../../shared/Config";
+import type { PvpSaveData } from "../../shared/TypeDefs";
 import { DataStoreService, HttpService, Players, RunService } from "@rbxts/services";
 import {
 	SHOP_SHELF_COUNT,
@@ -116,6 +118,7 @@ interface ActivePlayerSession {
 	readonly getProgressionData: () => PlayerProgressionData;
 	tinyes: number;
 	shopRestockCounts: number[];
+	pvp: PvpSaveData;
 	activeTeam: string[];
 	version: number;
 	lastPersistedLockTimestamp: number;
@@ -143,6 +146,22 @@ export interface ValidationOutcome {
 	readonly valid: boolean;
 	readonly data?: PlayerSaveData;
 	readonly reason?: string;
+}
+
+function emptyPvpData(): PvpSaveData { return { pairs: {}, dailyTinyes: 0, dailyXp: 0, dayKey: 0 }; }
+function clonePvpData(data: PvpSaveData): PvpSaveData {
+	const result: PvpSaveData = { pairs: {}, dailyTinyes: data.dailyTinyes, dailyXp: data.dailyXp ?? 0, dayKey: data.dayKey };
+	for (const [key, entry] of pairs(data.pairs)) result.pairs[key] = { ...entry };
+	return result;
+}
+function cleanPvpData(data: PvpSaveData, now: number): PvpSaveData {
+	const result = clonePvpData(data);
+	for (const [key, entry] of pairs(result.pairs)) {
+		if (now >= entry.windowStart + PVP_PAIR_WINDOW_SECONDS) delete result.pairs[key];
+	}
+	const dayKey = math.floor(now / PVP_DAY_SECONDS);
+	if (result.dayKey !== dayKey) { result.dayKey = dayKey; result.dailyTinyes = 0; result.dailyXp = 0; }
+	return result;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -242,6 +261,7 @@ export function clonePlayerSaveData(data: PlayerSaveData): PlayerSaveData {
 		version: data.version,
 		tinyes: data.tinyes,
 		shopRestockCounts: data.shopRestockCounts !== undefined ? [...data.shopRestockCounts] : undefined,
+		pvp: data.pvp !== undefined ? clonePvpData(data.pvp) : undefined,
 		inventory,
 		activeTeam,
 		sessionLock:
@@ -560,6 +580,11 @@ export function migratePlayerData(
 			};
 		} else if (currentVersion === 1) {
 			working = { ...working, version: 2, shopRestockCounts: [0, 0, 0] };
+		} else if (currentVersion === 2) {
+			working = { ...working, version: 3, pvp: { pairs: {}, dailyTinyes: 0, dayKey: 0 } };
+		} else if (currentVersion === 3) {
+			if (!isRecord(working.pvp)) return undefined;
+			working = { ...working, version: 4, pvp: { ...working.pvp, dailyXp: working.pvp.dailyXp ?? 0 } };
 		} else {
 			return undefined;
 		}
@@ -595,6 +620,21 @@ export function validatePlayerSaveData(
 		};
 	}
 
+	let pvp: PvpSaveData | undefined;
+	if (expectedSchemaVersion >= 3) {
+		if (!isRecord(raw.pvp) || !isRecord(raw.pvp.pairs) || !isNonNegativeInteger(raw.pvp.dailyTinyes) ||
+			!isNonNegativeInteger(raw.pvp.dayKey) || raw.pvp.dailyTinyes > PVP_DAILY_TINYES_CAP) return { valid: false, reason: "pvp invalido" };
+		if (expectedSchemaVersion >= 4 && !isNonNegativeInteger(raw.pvp.dailyXp)) return { valid: false, reason: "dailyXp invalido" };
+		let count = 0;
+		for (const [key, entry] of pairs(raw.pvp.pairs)) {
+			if (!typeIs(key, "string") || key.size() === 0 || !isRecord(entry) ||
+				!isNonNegativeInteger(entry.count) || entry.count > PVP_PAIR_MAX_REWARDED_WINS ||
+				!isNonNegativeInteger(entry.windowStart)) return { valid: false, reason: "par PVP invalido" };
+			count++;
+		}
+		if (count > PVP_MAX_PAIR_ENTRIES) return { valid: false, reason: "pares PVP excedidos" };
+		pvp = clonePvpData(raw.pvp as unknown as PvpSaveData);
+	}
 	let shopRestockCounts: number[] | undefined;
 	if (expectedSchemaVersion >= 2) {
 		if (!isDenseArray(raw.shopRestockCounts)) return { valid: false, reason: "shopRestockCounts inválido" };
@@ -678,6 +718,7 @@ export function validatePlayerSaveData(
 			version: expectedSchemaVersion,
 			tinyes: raw.tinyes,
 			shopRestockCounts,
+			pvp,
 			inventory,
 			activeTeam,
 			sessionLock,
@@ -926,8 +967,48 @@ export class PlayerDataService {
 		return true;
 	}
 
+	/** Commit unico em memoria: saldo, janela e teto sem callback/yield. Notificacao ocorre depois. */
+	public awardPvpWin(player: Player, opponentUserId: number, requested: number): { amount: number; blockedReason?: "limite_par" | "limite_diario" } {
+		const session = this.sessions.get(player);
+		if (session === undefined || session.closing || player.Parent !== Players || !isNonNegativeInteger(requested) || requested === 0) return { amount: 0 };
+		const now = this.now();
+		const pvp = cleanPvpData(session.pvp, now);
+		const key = tostring(opponentUserId);
+		const entry = pvp.pairs[key];
+		let entries = 0;
+		for (const _ of pairs(pvp.pairs)) entries++;
+		// Nunca expulsa janela ativa: isso permitiria contornar o limite alternando oponentes.
+		if ((entry !== undefined && entry.count >= PVP_PAIR_MAX_REWARDED_WINS) || (entry === undefined && entries >= PVP_MAX_PAIR_ENTRIES)) return { amount: 0, blockedReason: "limite_par" };
+		const remaining = PVP_DAILY_TINYES_CAP - pvp.dailyTinyes;
+		if (remaining <= 0) return { amount: 0, blockedReason: "limite_diario" };
+		const amount = math.min(requested, remaining, MAX_SAVED_NUMBER - session.tinyes);
+		if (amount <= 0) return { amount: 0 };
+		pvp.pairs[key] = { count: (entry?.count ?? 0) + 1, windowStart: entry?.windowStart ?? now };
+		pvp.dailyTinyes += amount;
+		session.pvp = pvp;
+		session.tinyes += amount;
+		this.updateLastValidSnapshotFromSession(session);
+		return { amount, blockedReason: amount < requested && remaining < requested ? "limite_diario" : undefined };
+	}
+
 	public getTinyes(player: Player): number | undefined {
 		return this.sessions.get(player)?.tinyes;
+	}
+
+	public getRemainingPvpXp(player: Player): number {
+		const session = this.sessions.get(player);
+		if (session === undefined || session.closing || player.Parent !== Players) return 0;
+		session.pvp = cleanPvpData(session.pvp, this.now());
+		return math.max(0, PVP_DAILY_XP_CAP - session.pvp.dailyXp);
+	}
+
+	/** Contabiliza somente o XP útil já incorporado ao inventário. */
+	public recordPvpXp(player: Player, xpGained: number): void {
+		const session = this.sessions.get(player);
+		if (session === undefined || session.closing || !isNonNegativeInteger(xpGained)) return;
+		session.pvp = cleanPvpData(session.pvp, this.now());
+		session.pvp.dailyXp = math.min(MAX_SAVED_NUMBER, session.pvp.dailyXp + xpGained);
+		this.updateLastValidSnapshotFromSession(session);
 	}
 
 	public onTinyesChanged?: (player: Player, balance: number, amount: number, reason: string) => void;
@@ -1158,6 +1239,7 @@ export class PlayerDataService {
 					version: validation.data.version,
 					tinyes: validation.data.tinyes,
 					shopRestockCounts: validation.data.shopRestockCounts !== undefined ? [...validation.data.shopRestockCounts] : undefined,
+					pvp: validation.data.pvp !== undefined ? cleanPvpData(validation.data.pvp, this.now()) : undefined,
 					inventory: validation.data.inventory.map((item) => cloneInventoryItem(item)),
 					activeTeam: [...validation.data.activeTeam],
 					sessionLock: lockInfo,
@@ -1511,6 +1593,7 @@ export class PlayerDataService {
 				version: validSnapshot.version,
 				tinyes: validSnapshot.tinyes,
 				shopRestockCounts: validSnapshot.shopRestockCounts !== undefined ? [...validSnapshot.shopRestockCounts] : undefined,
+				pvp: validSnapshot.pvp !== undefined ? cleanPvpData(validSnapshot.pvp, this.now()) : undefined,
 				inventory: validSnapshot.inventory.map((item) => cloneInventoryItem(item)),
 				activeTeam: [...validSnapshot.activeTeam],
 				sessionLock: lockInfo,
@@ -1743,6 +1826,7 @@ export class PlayerDataService {
 				version: candidateSnapshot.version,
 				tinyes: candidateSnapshot.tinyes,
 				shopRestockCounts: candidateSnapshot.shopRestockCounts !== undefined ? [...candidateSnapshot.shopRestockCounts] : undefined,
+				pvp: candidateSnapshot.pvp !== undefined ? clonePvpData(candidateSnapshot.pvp) : undefined,
 				inventory: candidateSnapshot.inventory.map((item) => cloneInventoryItem(item)),
 				activeTeam: [...candidateSnapshot.activeTeam],
 				sessionLock: releaseLock
@@ -2311,6 +2395,7 @@ export class PlayerDataService {
 				version: this.schemaVersion,
 				tinyes: INITIAL_TINYES,
 				shopRestockCounts: [0, 0, 0],
+				pvp: cleanPvpData(emptyPvpData(), this.now()),
 				inventory: [starterItem],
 				activeTeam: [starterItem.itemUuid],
 				sessionLock: lockInfo,
@@ -2320,6 +2405,7 @@ export class PlayerDataService {
 			version: this.schemaVersion,
 			tinyes: INITIAL_TINYES,
 			shopRestockCounts: [0, 0, 0],
+			pvp: cleanPvpData(emptyPvpData(), this.now()),
 			inventory: [],
 			activeTeam: [],
 			sessionLock: lockInfo,
@@ -2348,6 +2434,7 @@ export class PlayerDataService {
 		if (reuseSession !== undefined && reuseSession.userId === userId && reuseSession.key === key) {
 			reuseSession.tinyes = loadedData.tinyes;
 			reuseSession.shopRestockCounts = [...(loadedData.shopRestockCounts ?? [0, 0, 0])];
+			reuseSession.pvp = cleanPvpData(loadedData.pvp ?? emptyPvpData(), this.now());
 			reuseSession.activeTeam = activeTeam;
 			reuseSession.version = this.schemaVersion;
 			reuseSession.lastPersistedLockTimestamp = persistedTimestamp;
@@ -2369,6 +2456,7 @@ export class PlayerDataService {
 			getProgressionData: () => this.progressionService.getPlayerData(player)!,
 			tinyes: loadedData.tinyes,
 			shopRestockCounts: [...(loadedData.shopRestockCounts ?? [0, 0, 0])],
+			pvp: cleanPvpData(loadedData.pvp ?? emptyPvpData(), this.now()),
 			activeTeam,
 			version: this.schemaVersion,
 			lastPersistedLockTimestamp: persistedTimestamp,
@@ -2411,6 +2499,7 @@ export class PlayerDataService {
 			version: session.version,
 			tinyes: session.tinyes,
 			shopRestockCounts: [...(session.shopRestockCounts ?? [0, 0, 0])],
+			pvp: cleanPvpData(session.pvp, this.now()),
 			inventory,
 			activeTeam: [...session.activeTeam],
 			sessionLock,

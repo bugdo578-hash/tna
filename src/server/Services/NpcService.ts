@@ -1,6 +1,8 @@
+import { freezeBattleMovement } from "./BattleMovement";
 import { CollectionService, Players, Workspace } from "@rbxts/services";
-import { BATTLE_NPC_TAG, NPC_BATTLE_ACTIVE_ATTRIBUTE, NPC_PROMPT_DEBOUNCE_SECONDS, NPC_PROMPT_MAX_DISTANCE } from "../../shared/Config";
+import { BATTLE_NPC_TAG, NPC_PROMPT_DEBOUNCE_SECONDS, NPC_PROMPT_MAX_DISTANCE } from "../../shared/Config";
 import { NPC_DATA, type NpcDefinition } from "../../shared/NpcData";
+import type { NpcBattleNoticePayload, NpcBattleNoticeReason } from "../../shared/Remotes";
 import { BattleSide } from "../Components/BattleSide";
 import { createPlayerInventorySide, makeRealFighter } from "./BattleTeamFactory";
 import type { BattleSessionService } from "./BattleSessionService";
@@ -25,13 +27,14 @@ function promptPosition(prompt: ProximityPrompt): Vector3 | undefined {
 export class NpcService {
 	private readonly bindings = new Map<Instance, { prompt: ProximityPrompt; connection: RBXScriptConnection }>();
 	private readonly lastTriggered = new Map<Player, number>();
+	private readonly rematchCooldowns = new Map<Player, Map<string, number>>();
 	private readonly connections: RBXScriptConnection[] = [];
 
 	public constructor(
 		private readonly sessions: BattleSessionService,
 		private readonly data: PlayerDataService,
 		private readonly progression: ProgressionService,
-		private readonly notify: (player: Player, message: string) => void,
+		private readonly notify: (player: Player, payload: NpcBattleNoticePayload) => void,
 		private readonly clock: () => number = os.clock,
 		private readonly rng: () => number = () => math.random(),
 	) {}
@@ -42,7 +45,7 @@ export class NpcService {
 			CollectionService.GetInstanceAddedSignal(BATTLE_NPC_TAG).Connect((npc) => this.bindNpc(npc)),
 			CollectionService.GetInstanceRemovedSignal(BATTLE_NPC_TAG).Connect((npc) => this.unbindNpc(npc)),
 			Workspace.ChildAdded.Connect((npc) => this.adoptLegacyNpc(npc)),
-			Players.PlayerRemoving.Connect((player) => this.lastTriggered.delete(player)),
+			Players.PlayerRemoving.Connect((player) => this.handlePlayerRemoving(player)),
 		);
 		const legacy = Workspace.FindFirstChild("Npc_Luta");
 		if (legacy !== undefined) this.adoptLegacyNpc(legacy);
@@ -84,14 +87,21 @@ export class NpcService {
 	/** Entrada única do Triggered no servidor; não existe remote de pedido de luta NPC. */
 	public trigger(player: Player, npc: Instance): boolean {
 		if (player.Parent !== Players) return false;
-		if (this.sessions.hasActiveSession(player)) return this.reject(player, "Você já está em batalha.");
-		if (!this.data.isSessionLoaded(player)) return this.reject(player, "Aguarde seus dados carregarem.");
+		if (this.sessions.hasActiveSession(player)) return this.reject(player, "em_batalha");
+		if (!this.data.isSessionLoaded(player)) return this.reject(player, "carregando");
 		const now = this.clock();
+		const npcId = npc.GetAttribute("NpcId");
+		if (typeIs(npcId, "string")) {
+			const remaining = (this.rematchCooldowns.get(player)?.get(npcId) ?? now) - now;
+			if (remaining > 0) {
+				this.notify(player, { reason: "cooldown", npcId, remainingSeconds: math.ceil(remaining) });
+				return false;
+			}
+		}
 		const last = this.lastTriggered.get(player);
 		if (last !== undefined && now - last < NPC_PROMPT_DEBOUNCE_SECONDS) return false;
 		this.lastTriggered.set(player, now);
 		const binding = this.bindings.get(npc);
-		const npcId = npc.GetAttribute("NpcId");
 		const definition = typeIs(npcId, "string") ? NPC_DATA[npcId] : undefined;
 		if (binding === undefined || definition === undefined || !npc.IsDescendantOf(Workspace) ||
 			!CollectionService.HasTag(npc, BATTLE_NPC_TAG) || !binding.prompt.IsDescendantOf(npc) || !binding.prompt.Enabled) return false;
@@ -101,45 +111,43 @@ export class NpcService {
 		const position = promptPosition(binding.prompt);
 		if (root === undefined || !root.IsA("BasePart") || humanoid === undefined || humanoid.Health <= 0 || position === undefined) return false;
 		const distance = root.Position.sub(position).Magnitude;
-		if (!(distance <= NPC_PROMPT_MAX_DISTANCE)) return this.reject(player, "Chegue mais perto do NPC.");
+		if (!(distance <= NPC_PROMPT_MAX_DISTANCE)) return this.reject(player, "distancia");
 		const playerSide = createPlayerInventorySide(player, this.progression, this.data, this.rng);
-		if (playerSide === undefined) return this.reject(player, "Equipe ao menos um lutador disponível.");
+		if (playerSide === undefined) return this.reject(player, "time_invalido");
 
-		const speed = humanoid.WalkSpeed;
-		const power = humanoid.JumpPower;
-		const height = humanoid.JumpHeight;
-		const usePower = humanoid.UseJumpPower;
-		let released = false;
-		let removing: RBXScriptConnection | undefined;
-		const release = () => {
-			if (released) return;
-			released = true;
-			removing?.Disconnect();
-			// Cada restauração é independente, inclusive se o personagem já foi destruído.
-			pcall(() => { humanoid.WalkSpeed = speed; humanoid.JumpPower = power; humanoid.JumpHeight = height; humanoid.UseJumpPower = usePower; });
-			pcall(() => player.SetAttribute(NPC_BATTLE_ACTIVE_ATTRIBUTE, false));
+		const cooldowns = this.rematchCooldowns.get(player) ?? new Map<string, number>();
+		this.rematchCooldowns.set(player, cooldowns);
+		let release = () => {};
+		const onFinished = (playerWon: boolean) => {
+			// A identidade impede callback tardio de recriar estado após saída/destroy.
+			if (playerWon && this.rematchCooldowns.get(player) === cooldowns) {
+				cooldowns.set(definition.npcId, this.clock() + definition.rematchCooldownSeconds);
+			}
+			release();
 		};
+
 		const [ok, created] = pcall(() => {
-			humanoid.WalkSpeed = 0;
-			humanoid.JumpPower = 0;
-			humanoid.JumpHeight = 0;
-			player.SetAttribute(NPC_BATTLE_ACTIVE_ATTRIBUTE, true);
-			removing = player.CharacterRemoving.Connect(() => this.sessions.destroySessionForPlayer(player));
-			if (!this.sessions.createSession(player, undefined, playerSide, createNpcSide(definition, this.rng), this.rng, "PVE", release)) return false;
+			release = freezeBattleMovement(player, humanoid, () => this.sessions.destroySessionForPlayer(player));
+			if (!this.sessions.createSession(player, undefined, playerSide, createNpcSide(definition, this.rng), this.rng, "PVE", onFinished)) return false;
 			return this.sessions.attachSideAI(player, 1, this.rng) !== undefined;
 		});
 		if (!ok || !created) {
 			this.sessions.destroySessionForPlayer(player);
 			release();
 			if (!ok) warn(`[NpcService] erro ao iniciar batalha: ${tostring(created)}`);
-			return this.reject(player, "Não foi possível iniciar a batalha.");
+			return this.reject(player, "erro");
 		}
 		return true;
 	}
 
-	private reject(player: Player, message: string): false {
-		this.notify(player, message);
+	private reject(player: Player, reason: NpcBattleNoticeReason): false {
+		this.notify(player, { reason });
 		return false;
+	}
+
+	public handlePlayerRemoving(player: Player): void {
+		this.lastTriggered.delete(player);
+		this.rematchCooldowns.delete(player);
 	}
 
 	private unbindNpc(npc: Instance): void {
@@ -152,5 +160,6 @@ export class NpcService {
 		this.connections.clear();
 		for (const [npc] of this.bindings) this.unbindNpc(npc);
 		this.lastTriggered.clear();
+		this.rematchCooldowns.clear();
 	}
 }

@@ -16,6 +16,7 @@ import { ProgressionService } from "./Services/ProgressionService";
 import { RemoteService } from "./Services/RemoteService";
 import { TinyesService } from "./Services/TinyesService";
 import { NpcService } from "./Services/NpcService";
+import { PvpService } from "./Services/PvpService";
 import { DayNightService } from "./Services/DayNightService";
 
 const dayNightService = new DayNightService();
@@ -47,6 +48,11 @@ playerDataService.start();
 const npcService = new NpcService(battleSessionService, playerDataService, progressionService,
 	(player, message) => remoteService.npcBattleNotice.FireClient(player, message));
 npcService.start();
+const pvpService = new PvpService(battleSessionService, playerDataService, progressionService,
+	(player, payload) => remoteService.challengeReceived.FireClient(player, payload),
+	(player, payload) => remoteService.challengeStatus.FireClient(player, payload));
+remoteService.requestChallengeResponse.OnServerEvent.Connect((player, payload) => pvpService.respond(player, payload));
+pvpService.start();
 
 function handlePlayerAdded(player: Player): void {
 	const loadResult = playerDataService.loadPlayer(player);

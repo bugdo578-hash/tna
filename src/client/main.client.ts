@@ -12,9 +12,20 @@ import "./Controllers/BattleNpcController";
 import { BattleHUD } from "./Controllers/BattleHUD";
 import { CombatController } from "./Controllers/CombatController";
 import { DayNightController } from "./Controllers/DayNightController";
+import { PvpController } from "./Controllers/PvpController";
+import { ChallengePromptController } from "./Controllers/ChallengePromptController";
+import { CharacterAnimationController } from "./Controllers/CharacterAnimationController";
+
+new CharacterAnimationController().start();
+
+const challengePromptController = new ChallengePromptController();
+challengePromptController.start();
 
 const dayNightController = new DayNightController();
 dayNightController.start();
+
+const pvpController = new PvpController();
+pvpController.start();
 
 const combatController = new CombatController();
 combatController.start();

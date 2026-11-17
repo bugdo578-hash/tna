@@ -1,11 +1,14 @@
-import { Players, ReplicatedStorage, RunService, TextChatService, TweenService } from "@rbxts/services";
-import { ATB_MAX, ATB_MIN, DEV_TEST_BATTLE_CHAT_COMMAND, FLOAT_TOLERANCE } from "../../shared/Config";
+import { battleCleanupStep } from "./BattleCleanup";
+import { Players, RunService, TweenService } from "@rbxts/services";
+import { ATB_MAX, ATB_MIN, FLOAT_TOLERANCE } from "../../shared/Config";
 import { FIGHTER_DATA, type RealFighterId } from "../../shared/FighterData";
 import { clamp } from "../../shared/MathUtils";
 import type {
 	AtbSyncPayload,
 	BattleEndedPayload,
+	BattleEndReason,
 	BattleFighterSnapshot,
+	BattleSessionMode,
 	BattleStartedPayload,
 	ClientFighterIndex,
 	EffectAppliedPayload,
@@ -100,23 +103,34 @@ export class BattleHUD {
 	private readonly skillButtonWidgets: SkillButtonWidgets[] = [];
 	private pauseOverlay: Frame | undefined;
 	private resultOverlay: Frame | undefined;
+	private resultScreenGui?: ScreenGui;
+	private quitRequested = false;
+	private readonly battleDisconnectors: (() => void)[] = [];
 	private xpCards = new XpRewardCards();
     private hpTweens = new Map<Frame, Tween>();
     private clearHpTweens(): void {
-        for (const [, tween] of this.hpTweens) tween.Cancel();
+        for (const [, tween] of this.hpTweens) battleCleanupStep("HP tween", () => tween.Cancel());
         this.hpTweens.clear();
     }
 	private resultCardStroke: UIStroke | undefined;
 	private resultTitleLabel: TextLabel | undefined;
 	private resultRewardLabel: TextLabel | undefined;
+	private resultReasonLabel: TextLabel | undefined;
+	private resultBlockedLabel: TextLabel | undefined;
+	private resultActionButton: TextButton | undefined;
 
+	private readonly lifetime: RBXScriptConnection[] = [];
 	private sideIds: readonly [string, string] = ["", ""];
+	private ownSideId = "";
+	private opponentSideId = "";
+	private battleMode: BattleSessionMode = "PVE";
 	private battleState: BattleGlobalState = "IDLE";
 	private canPause = false;
 	private isPaused = false;
 	private lastPauseToggleClock = 0;
 	private quitConfirmPending = false;
 	private quitConfirmToken = 0;
+	private quitConfirmTimer?: thread;
 	private battleActive = false;
 	private battleEnded = false;
 
@@ -126,86 +140,101 @@ export class BattleHUD {
 	private opponentDisplayAtb = 0;
 
 	private started = false;
+	private destroyed = false;
 
 	public constructor(private readonly combatController?: CombatController) {}
 
 	public start(): void {
-		if (this.started) return;
+		if (this.started || this.destroyed) return;
 		this.started = true;
 
 		this.buildGui();
 		this.bindEvents();
-        this.screenGui?.Destroying.Connect(() => {
-            this.quitConfirmToken++;
-            this.clearHpTweens(); this.xpCards.clear();
-        });
+		if (this.screenGui !== undefined) {
+			this.lifetime.push(this.screenGui.Destroying.Connect(() => {
+				this.screenGui = undefined;
+				this.destroy();
+			}));
+		}
         if (RunService.IsStudio()) {
-            Players.LocalPlayer.Chatted.Connect((message) => {
+            this.lifetime.push(Players.LocalPlayer.Chatted.Connect((message) => {
                 const args = message.split(" ");
-                if (args[0] !== UITheme.Xp.DevCommand || !this.hasResultGui()) return;
+                if (args[0] !== UITheme.Xp.DevCommand || this.battleActive || !this.hasResultGui()) return;
                 const count = tonumber(args[1]) ?? UITheme.Xp.MaxCards;
                 if (count !== 1 && count !== 2 && count !== 3) return;
                 const rewards = XpRewardCards.devRewards();
-                if (this.screenGui !== undefined && this.screenGui.Parent !== undefined) this.screenGui.Enabled = true;
-                this.onBattleEnded({ winnerSideId: this.sideIds[0], xpRewards: rewards.filter((_, index) => index < count) });
-            });
+                const devOwnSide = this.ownSideId !== "" ? this.ownSideId : "dev-own-side";
+                if (this.ownSideId === "") {
+                    this.ownSideId = devOwnSide;
+                    this.opponentSideId = "dev-opponent-side";
+                    this.sideIds = [this.ownSideId, this.opponentSideId];
+                }
+                this.battleMode = "PVE";
+                this.showBattleResult({ winnerSideId: devOwnSide, xpRewards: rewards.filter((_, index) => index < count) });
+            }));
         }
 
-		RunService.Heartbeat.Connect((dt) => {
-			this.stepAtbInterpolation(dt);
-		});
+	}
+
+	public destroy(): void {
+		if (this.destroyed) return;
+		this.destroyed = true;
+		this.teardownBattle();
+		for (const connection of this.lifetime) battleCleanupStep("HUD lifetime connection", () => connection.Disconnect());
+		this.lifetime.clear();
+		const gui = this.screenGui;
+		this.screenGui = undefined;
+		battleCleanupStep("HUD destroy", () => gui?.Destroy());
+		battleCleanupStep("result GUI destroy", () => this.resultScreenGui?.Destroy());
+		this.resultScreenGui = undefined;
 	}
 
 	private bindEvents(): void {
-		BattleRemotes.battleStarted.OnClientEvent.Connect((payload) => {
-			this.onBattleStarted(payload as BattleStartedPayload);
-		});
-		BattleRemotes.stateChanged.OnClientEvent.Connect((payload) => {
-			this.onStateChanged(payload as StateChangedPayload);
-		});
-		BattleRemotes.atbSync.OnClientEvent.Connect((payload) => {
-			this.onAtbSync(payload as AtbSyncPayload);
-		});
-		BattleRemotes.switchPerformed.OnClientEvent.Connect((payload) => {
-			this.onSwitchPerformed(payload as SwitchPerformedPayload);
-		});
-		BattleRemotes.effectApplied.OnClientEvent.Connect((payload) => {
-			this.onEffectApplied(payload as EffectAppliedPayload);
-		});
-		BattleRemotes.effectExpired.OnClientEvent.Connect((payload) => {
-			this.onEffectExpired(payload as EffectExpiredPayload);
-		});
-		BattleRemotes.battleEnded.OnClientEvent.Connect((payload) => {
-			this.onBattleEnded(payload as BattleEndedPayload);
-		});
+		this.lifetime.push(
+			BattleRemotes.battleStarted.OnClientEvent.Connect((payload) => {
+				this.onBattleStarted(payload as BattleStartedPayload);
+			}),
+			BattleRemotes.stateChanged.OnClientEvent.Connect((payload) => {
+				this.onStateChanged(payload as StateChangedPayload);
+			}),
+			BattleRemotes.atbSync.OnClientEvent.Connect((payload) => {
+				this.onAtbSync(payload as AtbSyncPayload);
+			}),
+			BattleRemotes.switchPerformed.OnClientEvent.Connect((payload) => {
+				this.onSwitchPerformed(payload as SwitchPerformedPayload);
+			}),
+			BattleRemotes.effectApplied.OnClientEvent.Connect((payload) => {
+				this.onEffectApplied(payload as EffectAppliedPayload);
+			}),
+			BattleRemotes.effectExpired.OnClientEvent.Connect((payload) => {
+				this.onEffectExpired(payload as EffectExpiredPayload);
+			}),
+			BattleRemotes.battleEnded.OnClientEvent.Connect((payload) => {
+				this.onBattleEnded(payload as BattleEndedPayload);
+			}),
+		);
 
-		if (this.combatController !== undefined) {
-			// Sincroniza visualmente HP e KO no exato instante em que o CombatController consome o hit/tick
-			this.combatController.onFighterHpVisualChanged((targetId, hp, hpMax) => {
-				this.applyVisualHpUpdate(targetId, hp, hpMax);
-			});
-			this.combatController.onFighterDeathVisualFlushed((payload) => {
-				this.applyVisualDeathAndAutoSwitch(payload);
-			});
-		} else {
-			BattleRemotes.hitResolved.OnClientEvent.Connect((payload) => {
-				const hit = payload as HitResolvedPayload;
-				if (!hit.hit) return;
-				const fighter = this.fightersByTargetId.get(hit.targetId);
-				if (fighter !== undefined) {
-					this.applyVisualHpUpdate(hit.targetId, math.max(fighter.hp - hit.damage, 0), fighter.hpMax);
-				}
-			});
-			BattleRemotes.effectTick.OnClientEvent.Connect((payload) => {
-				const tick = payload as EffectTickPayload;
-				const fighter = this.fightersByTargetId.get(tick.targetId);
-				if (fighter !== undefined) {
-					this.applyVisualHpUpdate(tick.targetId, math.max(fighter.hp - tick.damage, 0), fighter.hpMax);
-				}
-			});
-			BattleRemotes.fighterDied.OnClientEvent.Connect((payload) => {
-				this.applyVisualDeathAndAutoSwitch(payload as FighterDiedPayload);
-			});
+		if (this.combatController === undefined) {
+			this.lifetime.push(
+				BattleRemotes.hitResolved.OnClientEvent.Connect((payload) => {
+					const hit = payload as HitResolvedPayload;
+					if (!hit.hit) return;
+					const fighter = this.fightersByTargetId.get(hit.targetId);
+					if (fighter !== undefined) {
+						this.applyVisualHpUpdate(hit.targetId, math.max(fighter.hp - hit.damage, 0), fighter.hpMax);
+					}
+				}),
+				BattleRemotes.effectTick.OnClientEvent.Connect((payload) => {
+					const tick = payload as EffectTickPayload;
+					const fighter = this.fightersByTargetId.get(tick.targetId);
+					if (fighter !== undefined) {
+						this.applyVisualHpUpdate(tick.targetId, math.max(fighter.hp - tick.damage, 0), fighter.hpMax);
+					}
+				}),
+				BattleRemotes.fighterDied.OnClientEvent.Connect((payload) => {
+					this.applyVisualDeathAndAutoSwitch(payload as FighterDiedPayload);
+				}),
+			);
 		}
 	}
 
@@ -255,7 +284,16 @@ export class BattleHUD {
 		this.createTagPanel(main);
 		this.createSkillsPanel(main);
 		this.createPauseOverlay(screenGui);
-		this.createResultOverlay(screenGui);
+		const resultGui = new Instance("ScreenGui");
+		resultGui.Name = UITheme.ResultScreenGuiName;
+		resultGui.DisplayOrder = UITheme.Xp.ResultDisplayOrder;
+		resultGui.IgnoreGuiInset = screenGui.IgnoreGuiInset;
+		resultGui.ResetOnSpawn = false;
+		resultGui.ZIndexBehavior = screenGui.ZIndexBehavior;
+		resultGui.Enabled = false;
+		resultGui.Parent = playerGui;
+		this.resultScreenGui = resultGui;
+		this.createResultOverlay(resultGui);
 	}
 
 	private createStatusCard(
@@ -530,9 +568,9 @@ export class BattleHUD {
 		this.applyStroke(pauseBtn, UITheme.Colors.PanelStroke, UITheme.StrokeThickness.Thin);
 		this.pauseButton = pauseBtn;
 
-		pauseBtn.Activated.Connect(() => {
+		this.lifetime.push(pauseBtn.Activated.Connect(() => {
 			this.handlePauseClicked();
-		});
+		}));
 
 		const quitBtn = new Instance("TextButton");
 		quitBtn.Name = "QuitButton";
@@ -549,9 +587,9 @@ export class BattleHUD {
 		this.applyStroke(quitBtn, UITheme.Colors.PanelStroke, UITheme.StrokeThickness.Thin);
 		this.quitButton = quitBtn;
 
-		quitBtn.Activated.Connect(() => {
+		this.lifetime.push(quitBtn.Activated.Connect(() => {
 			this.handleQuitClicked();
-		});
+		}));
 
 		const stateBanner = this.createTextLabel(
 			container,
@@ -703,9 +741,9 @@ export class BattleHUD {
 			deadCrossLabel.Visible = false;
 			deadCrossLabel.ZIndex = 6;
 
-			btn.Activated.Connect(() => {
+			this.lifetime.push(btn.Activated.Connect(() => {
 				this.handleTagSlotClicked(slotIdx);
-			});
+			}));
 
 			this.tagSlotWidgets.push({
 				index: slotIdx,
@@ -809,9 +847,9 @@ export class BattleHUD {
 				Enum.TextXAlignment.Center,
 			);
 
-			btn.Activated.Connect(() => {
+			this.lifetime.push(btn.Activated.Connect(() => {
 				this.handleSkillButtonClicked(slot);
-			});
+			}));
 
 			this.skillButtonWidgets.push({
 				slot,
@@ -887,9 +925,9 @@ export class BattleHUD {
 		this.applyCorner(resumeBtn, UITheme.CornerRadius.Button);
 		this.applyStroke(resumeBtn, UITheme.Colors.PanelStroke, UITheme.StrokeThickness.Normal);
 
-		resumeBtn.Activated.Connect(() => {
+		this.lifetime.push(resumeBtn.Activated.Connect(() => {
 			this.handlePauseClicked();
-		});
+		}));
 	}
 
 	private createResultOverlay(parent: ScreenGui): void {
@@ -942,6 +980,46 @@ export class BattleHUD {
 		rewardLabel.ZIndex = 32;
 		this.resultRewardLabel = rewardLabel;
 
+		const pvpReasonLabel = this.createTextLabel(
+			card,
+			"PvpReasonText",
+			UITheme.Pvp.ResultReasonPos,
+			UITheme.Pvp.ResultReasonSize,
+			"",
+			UITheme.Fonts.Medium,
+			UITheme.Colors.TextSecondary,
+			Enum.TextXAlignment.Center,
+		);
+		pvpReasonLabel.TextWrapped = true;
+		pvpReasonLabel.Visible = false;
+		pvpReasonLabel.ZIndex = 32;
+		this.applyTextConstraint(pvpReasonLabel, UITheme.Pvp.MinTextSize, UITheme.Pvp.MaxTextSize);
+		this.resultReasonLabel = pvpReasonLabel;
+
+		const pvpBlockedLabel = this.createTextLabel(
+			card,
+			"RewardBlockedNotice",
+			UITheme.Pvp.ResultBlockedPos,
+			UITheme.Pvp.ResultBlockedSize,
+			"",
+			UITheme.Fonts.Bold,
+			UITheme.Colors.PauseActiveBg,
+			Enum.TextXAlignment.Center,
+		);
+		pvpBlockedLabel.BackgroundColor3 = UITheme.Colors.PanelSecondary;
+		pvpBlockedLabel.BackgroundTransparency = UITheme.Transparency.SecondaryPanel;
+		pvpBlockedLabel.TextWrapped = true;
+		pvpBlockedLabel.Visible = false;
+		pvpBlockedLabel.ZIndex = 32;
+		this.applyCorner(pvpBlockedLabel, UITheme.CornerRadius.Panel);
+		this.applyStroke(pvpBlockedLabel, UITheme.Colors.PauseActiveBg, UITheme.StrokeThickness.Thin);
+		this.applyTextConstraint(pvpBlockedLabel, UITheme.Pvp.MinTextSize, UITheme.Pvp.MaxTextSize);
+		const noticePadding = new Instance("UIPadding");
+		noticePadding.PaddingLeft = UITheme.Pvp.ResultBlockedPadding;
+		noticePadding.PaddingRight = UITheme.Pvp.ResultBlockedPadding;
+		noticePadding.Parent = pvpBlockedLabel;
+		this.resultBlockedLabel = pvpBlockedLabel;
+
 		const actionBtn = new Instance("TextButton");
 		actionBtn.Name = "CloseRestartButton";
 		actionBtn.Position = UITheme.Xp.ButtonPos;
@@ -950,11 +1028,12 @@ export class BattleHUD {
 		actionBtn.Font = UITheme.Fonts.Bold;
 		actionBtn.TextColor3 = UITheme.Colors.TextPrimary;
 		actionBtn.TextScaled = true;
-		actionBtn.Text = UITheme.Texts.ResultCloseAndRestartButton;
+		actionBtn.Text = UITheme.Texts.ResultCloseButton;
 		actionBtn.ZIndex = 32;
 		actionBtn.Parent = card;
 		this.applyCorner(actionBtn, UITheme.CornerRadius.Button);
 		this.applyStroke(actionBtn, UITheme.Colors.PanelStroke, UITheme.StrokeThickness.Normal);
+		this.resultActionButton = actionBtn;
 
         const close = actionBtn.Clone();
         close.Name = "ExitResultButton";
@@ -962,35 +1041,33 @@ export class BattleHUD {
         close.Position = UITheme.Xp.ClosePos;
         close.Size = UITheme.Xp.CloseSize;
         close.Parent = card;
-        close.Activated.Connect(() => {
-            if (!this.hasResultGui()) return;
-            this.clearHpTweens();
-            this.xpCards.clear();
-            backdrop.Visible = false;
-            if (this.screenGui) this.screenGui.Enabled = false;
-        });
-		actionBtn.Activated.Connect(() => {
+        this.lifetime.push(close.Activated.Connect(() => {
+            this.closeResultOverlay();
+        }));
+		this.lifetime.push(actionBtn.Activated.Connect(() => {
 			this.handleResultCloseAndRestart();
-		});
+		}));
 	}
 
     private hasResultGui(): boolean {
-        const gui = this.screenGui;
+        const gui = this.resultScreenGui;
         const overlay = this.resultOverlay;
         if (gui === undefined || gui.Parent === undefined || overlay === undefined || overlay.Parent !== gui) return false;
         const modal = overlay.FindFirstChild("ResultModalCard");
         return modal !== undefined && modal.IsA("Frame") && modal.Parent === overlay;
     }
 	private onBattleStarted(payload: BattleStartedPayload): void {
-        if (!this.hasResultGui()) { this.clearHpTweens(); this.xpCards.clear(); return; }
-		this.clearHpTweens();
-            this.xpCards.clear();
-        if (this.screenGui) this.screenGui.DisplayOrder = UITheme.DisplayOrder;
+		battleCleanupStep("previous HP tweens", () => this.clearHpTweens());
+		battleCleanupStep("previous XP cards", () => this.xpCards.clear());
+		if (this.screenGui) this.screenGui.DisplayOrder = UITheme.DisplayOrder;
 		this.fightersByTargetId.clear();
 		this.playerTeamOrder.clear();
 		this.opponentTeamOrder.clear();
 
 		this.sideIds = payload.sides;
+		this.ownSideId = payload.sides[0];
+		this.opponentSideId = payload.sides[1];
+		this.battleMode = payload.mode ?? "PVE";
 		this.battleState = "IDLE";
 		this.canPause = payload.canPause === true || payload.mode === "PVE";
 		this.isPaused = false;
@@ -998,6 +1075,18 @@ export class BattleHUD {
 		this.resetQuitConfirmState();
 		this.battleActive = true;
 		this.battleEnded = false;
+		this.quitRequested = false;
+		if (this.resultScreenGui !== undefined) this.resultScreenGui.Enabled = false;
+		for (const disconnect of this.battleDisconnectors) battleCleanupStep("previous HUD connection", disconnect);
+		this.battleDisconnectors.clear();
+		if (this.combatController !== undefined) {
+			this.battleDisconnectors.push(
+				this.combatController.onFighterHpVisualChanged((id, hp, max) => this.applyVisualHpUpdate(id, hp, max)),
+				this.combatController.onFighterDeathVisualFlushed((death) => this.applyVisualDeathAndAutoSwitch(death)),
+			);
+		}
+		const heartbeat = RunService.Heartbeat.Connect((dt) => this.stepAtbInterpolation(dt));
+		this.battleDisconnectors.push(() => heartbeat.Disconnect());
 
 		this.playerTargetAtb = 0;
 		this.playerDisplayAtb = 0;
@@ -1008,7 +1097,7 @@ export class BattleHUD {
 		let opponentSlotCounter = 0;
 
 		for (const snapshot of payload.fighters) {
-			const isPlayerSide = snapshot.sideId === payload.sides[0];
+			const isPlayerSide = snapshot.sideId === this.ownSideId;
 			const sideIndex: 0 | 1 = isPlayerSide ? 0 : 1;
 			if (isPlayerSide) {
 				playerSlotCounter += 1;
@@ -1106,10 +1195,10 @@ export class BattleHUD {
 		if (!this.battleActive || this.battleEnded) return;
 		this.clearPauseIfServerProgressed();
 		const clampedAtb = clamp(payload.atb, ATB_MIN, ATB_MAX);
-		if (payload.sideId === this.sideIds[0]) {
+		if (payload.sideId === this.ownSideId) {
 			this.playerTargetAtb = clampedAtb;
 			this.refreshPlayerAtbMarkersAndSkills();
-		} else if (payload.sideId === this.sideIds[1]) {
+		} else if (payload.sideId === this.opponentSideId) {
 			this.opponentTargetAtb = clampedAtb;
 		}
 	}
@@ -1146,6 +1235,7 @@ export class BattleHUD {
 	}
 
 	private applyVisualHpUpdate(targetId: string, hp: number, hpMax: number): void {
+		if (!this.battleActive || this.battleEnded) return;
 		const fighter = this.fightersByTargetId.get(targetId);
 		if (fighter === undefined) return;
 		fighter.hp = clamp(hp, 0, hpMax);
@@ -1155,6 +1245,7 @@ export class BattleHUD {
 	}
 
 	private applyVisualDeathAndAutoSwitch(payload: FighterDiedPayload): void {
+		if (!this.battleActive || this.battleEnded) return;
 		const deadFighter = this.fightersByTargetId.get(payload.fighterId);
 		if (deadFighter !== undefined) {
 			deadFighter.dead = true;
@@ -1164,10 +1255,10 @@ export class BattleHUD {
 		}
 
 		// Regra do jogo: morte zera ATB do lado e troca automaticamente para nextActive
-		if (payload.sideId === this.sideIds[0]) {
+		if (payload.sideId === this.ownSideId) {
 			this.playerTargetAtb = 0;
 			this.playerDisplayAtb = 0;
-		} else if (payload.sideId === this.sideIds[1]) {
+		} else if (payload.sideId === this.opponentSideId) {
 			this.opponentTargetAtb = 0;
 			this.opponentDisplayAtb = 0;
 		}
@@ -1182,21 +1273,54 @@ export class BattleHUD {
 		this.refreshAllVisuals();
 	}
 
-	private onBattleEnded(payload: BattleEndedPayload): void {
-        if (!this.hasResultGui()) { this.clearHpTweens(); this.xpCards.clear(); return; }
-		this.clearHpTweens();
-        if (this.screenGui) this.screenGui.DisplayOrder = UITheme.Xp.ResultDisplayOrder;
-		this.xpCards.show(this.resultOverlay, payload.xpRewards);
-		this.battleEnded = true;
+	/** All authoritative ends and result dismissal converge here; every step can fail independently. */
+	private teardownBattle(): void {
 		this.battleActive = false;
+		this.battleEnded = true;
 		this.isPaused = false;
-		this.resetQuitConfirmState();
+		battleCleanupStep("hide HUD", () => { if (this.screenGui !== undefined) this.screenGui.Enabled = false; });
+		battleCleanupStep("hide result", () => { if (this.resultScreenGui !== undefined) this.resultScreenGui.Enabled = false; });
+		battleCleanupStep("hide pause", () => { if (this.pauseOverlay !== undefined) this.pauseOverlay.Visible = false; });
+		battleCleanupStep("hide result overlay", () => { if (this.resultOverlay !== undefined) this.resultOverlay.Visible = false; });
+		battleCleanupStep("quit confirmation", () => this.resetQuitConfirmState());
+		battleCleanupStep("HP tweens", () => this.clearHpTweens());
+		battleCleanupStep("XP cards", () => this.xpCards.clear());
+		for (const disconnect of this.battleDisconnectors) battleCleanupStep("HUD battle connection", disconnect);
+		this.battleDisconnectors.clear();
+		battleCleanupStep("combat resources", () => this.combatController?.cleanupStage());
+		battleCleanupStep("HUD fighters", () => {
+			this.fightersByTargetId.clear();
+			this.playerTeamOrder.clear();
+			this.opponentTeamOrder.clear();
+		});
+	}
 
-		if (this.pauseOverlay !== undefined) {
-			this.pauseOverlay.Visible = false;
+	private onBattleEnded(payload: BattleEndedPayload): void {
+		if (!this.battleActive) return;
+		const suppressResult = (!UITheme.ShowResultOnLocalQuit && (this.quitRequested ||
+			(payload.reason === "quit" && payload.winnerSideId !== this.ownSideId))) ||
+			(payload.winnerSideId === undefined && (payload.xpRewards === undefined || payload.xpRewards.size() === 0));
+		this.teardownBattle();
+		if (suppressResult) return;
+		const [ok, failure] = pcall(() => this.showBattleResult(payload));
+		if (!ok) {
+			warn(`[BattleHUD] resultado: ${tostring(failure)}`);
+			this.teardownBattle();
 		}
+	}
 
-		const isVictory = payload.winnerSideId !== undefined && payload.winnerSideId === this.sideIds[0];
+	private showBattleResult(payload: BattleEndedPayload): void {
+		if (!this.hasResultGui()) return;
+		const hasWinner = payload.winnerSideId !== undefined;
+		const isVictory = this.ownSideId !== "" && hasWinner && payload.winnerSideId === this.ownSideId;
+		if (this.battleMode === "PVP") this.applyPvpResult(payload, hasWinner, isVictory);
+		else this.applyPveResult(payload, isVictory);
+		this.xpCards.show(this.resultOverlay, payload.xpRewards);
+		if (this.resultOverlay !== undefined) this.resultOverlay.Visible = true;
+		if (this.resultScreenGui !== undefined) this.resultScreenGui.Enabled = true;
+	}
+
+	private applyPveResult(payload: BattleEndedPayload, isVictory: boolean): void {
 		if (this.resultTitleLabel !== undefined) {
 			this.resultTitleLabel.Text = isVictory ? UITheme.Texts.VictoryTitle : UITheme.Texts.DefeatTitle;
 			this.resultTitleLabel.TextColor3 = isVictory
@@ -1209,14 +1333,83 @@ export class BattleHUD {
 				: UITheme.Colors.DefeatAccent;
 		}
 		if (this.resultRewardLabel !== undefined) {
+			this.resultRewardLabel.Visible = true;
 			this.resultRewardLabel.Text = UITheme.Texts.FormatReward(payload.tinyesReward ?? 0);
 		}
-		if (this.resultOverlay !== undefined) {
-			this.resultOverlay.Visible = true;
+		if (this.resultReasonLabel !== undefined) {
+			this.resultReasonLabel.Visible = false;
+			this.resultReasonLabel.Text = "";
 		}
+		if (this.resultBlockedLabel !== undefined) {
+			this.resultBlockedLabel.Visible = false;
+			this.resultBlockedLabel.Text = "";
+		}
+		if (this.resultActionButton !== undefined) {
+			this.resultActionButton.Text = UITheme.Texts.ResultCloseButton;
+		}
+	}
 
-		this.refreshSkillButtons();
-		this.refreshTagSlots();
+	private applyPvpResult(payload: BattleEndedPayload, hasWinner: boolean, isVictory: boolean): void {
+		const accent = !hasWinner
+			? UITheme.Colors.TextPrimary
+			: isVictory
+				? UITheme.Colors.VictoryAccent
+				: UITheme.Colors.DefeatAccent;
+		const strokeColor = !hasWinner
+			? UITheme.Colors.PanelStroke
+			: isVictory
+				? UITheme.Colors.VictoryAccent
+				: UITheme.Colors.DefeatAccent;
+		if (this.resultTitleLabel !== undefined) {
+			this.resultTitleLabel.Text = !hasWinner
+				? UITheme.Pvp.EndedNoWinnerTitle
+				: isVictory
+					? UITheme.Texts.VictoryTitle
+					: UITheme.Texts.DefeatTitle;
+			this.resultTitleLabel.TextColor3 = accent;
+		}
+		if (this.resultCardStroke !== undefined) {
+			this.resultCardStroke.Color = strokeColor;
+		}
+		if (this.resultRewardLabel !== undefined) {
+			if (isVictory && payload.tinyesReward !== undefined) {
+				this.resultRewardLabel.Visible = true;
+				this.resultRewardLabel.Text = UITheme.Texts.FormatReward(payload.tinyesReward);
+			} else {
+				this.resultRewardLabel.Visible = false;
+				this.resultRewardLabel.Text = "";
+			}
+		}
+		if (this.resultBlockedLabel !== undefined) {
+			const blockedText = isVictory && payload.rewardBlockedReason !== undefined
+				? (UITheme.Pvp.RewardBlockedReasons[payload.rewardBlockedReason] ?? "")
+				: "";
+			this.resultBlockedLabel.Text = blockedText;
+			this.resultBlockedLabel.Visible = blockedText !== "";
+		}
+		if (this.resultReasonLabel !== undefined) {
+			const reasonText = this.resolvePvpEndReasonText(payload.reason, isVictory);
+			this.resultReasonLabel.Text = reasonText;
+			this.resultReasonLabel.Visible = reasonText !== "";
+		}
+		if (this.resultActionButton !== undefined) {
+			this.resultActionButton.Text = UITheme.Pvp.CloseResultButton;
+		}
+	}
+
+	private resolvePvpEndReasonText(reason: BattleEndReason | undefined, isVictory: boolean): string {
+		if (reason === "quit") {
+			return isVictory ? UITheme.Pvp.EndReasonTexts.quitWin : UITheme.Pvp.EndReasonTexts.quitLoss;
+		}
+		if (reason === "disconnect") return UITheme.Pvp.EndReasonTexts.disconnect;
+		if (reason === "timeout") return UITheme.Pvp.EndReasonTexts.timeout;
+		if (reason === "error") return UITheme.Pvp.EndReasonTexts.error;
+		return UITheme.Pvp.EndReasonTexts.victory;
+	}
+
+	private closeResultOverlay(): void {
+		if (this.battleActive) return;
+		this.teardownBattle();
 	}
 
 	private handleSkillButtonClicked(slot: SkillSlot): void {
@@ -1260,7 +1453,7 @@ export class BattleHUD {
 	}
 
 	private handleQuitClicked(): void {
-		if (!this.battleActive || this.battleEnded) return;
+		if (!this.battleActive || this.battleEnded || this.quitRequested) return;
 
 		if (!this.quitConfirmPending) {
 			this.quitConfirmPending = true;
@@ -1270,7 +1463,11 @@ export class BattleHUD {
 				this.quitButton.Text = UITheme.Texts.QuitConfirmButton;
 				this.quitButton.BackgroundColor3 = UITheme.Colors.QuitConfirmBg;
 			}
-			task.delay(UITheme.Numbers.QuitConfirmTimeoutSeconds, () => {
+			if (this.quitConfirmTimer !== undefined) {
+				task.cancel(this.quitConfirmTimer);
+			}
+			this.quitConfirmTimer = task.delay(UITheme.Numbers.QuitConfirmTimeoutSeconds, () => {
+				this.quitConfirmTimer = undefined;
 				if (this.quitConfirmToken === token && this.quitConfirmPending && this.quitButton !== undefined && this.quitButton.Parent !== undefined) {
 					this.resetQuitConfirmState();
 				}
@@ -1279,34 +1476,24 @@ export class BattleHUD {
 		}
 
 		this.resetQuitConfirmState();
+		this.quitRequested = true;
+		// Only the HUD closes optimistically. The stage stays until the server ends the session.
+		if (this.screenGui !== undefined) this.screenGui.Enabled = false;
 		BattleRemotes.requestQuit.FireServer();
 	}
 
 	private handleResultCloseAndRestart(): void {
-		this.clearHpTweens();
-            this.xpCards.clear();
-		if (this.resultOverlay !== undefined) {
-			this.resultOverlay.Visible = false;
-		}
-		// Tenta disparar o comando dev /testbattle no Studio (TextChatService ou LegacyChatService)
-		pcall(() => {
-			const textChannels = TextChatService.FindFirstChild("TextChannels");
-			const general = textChannels?.FindFirstChild("RBXGeneral") as TextChannel | undefined;
-			if (general !== undefined) {
-				general.SendAsync(DEV_TEST_BATTLE_CHAT_COMMAND);
-				return;
-			}
-			const legacyEvents = ReplicatedStorage.FindFirstChild("DefaultChatSystemChatEvents");
-			const sayMessage = legacyEvents?.FindFirstChild("SayMessageRequest") as RemoteEvent | undefined;
-			if (sayMessage !== undefined) {
-				sayMessage.FireServer(DEV_TEST_BATTLE_CHAT_COMMAND, "All");
-			}
-		});
+		if (this.battleActive) return;
+		this.teardownBattle();
 	}
 
 	private resetQuitConfirmState(): void {
 		this.quitConfirmPending = false;
 		this.quitConfirmToken += 1;
+		if (this.quitConfirmTimer !== undefined) {
+			task.cancel(this.quitConfirmTimer);
+			this.quitConfirmTimer = undefined;
+		}
 		if (this.quitButton !== undefined) {
 			this.quitButton.Text = UITheme.Texts.QuitButton;
 			this.quitButton.BackgroundColor3 = UITheme.Colors.QuitButtonBg;
@@ -1636,5 +1823,13 @@ export class BattleHUD {
 		aspect.DominantAxis = Enum.DominantAxis.Width;
 		aspect.Parent = parent;
 		return aspect;
+	}
+
+	private applyTextConstraint(parent: GuiObject, minSize: number, maxSize: number): UITextSizeConstraint {
+		const constraint = new Instance("UITextSizeConstraint");
+		constraint.MinTextSize = minSize;
+		constraint.MaxTextSize = maxSize;
+		constraint.Parent = parent;
+		return constraint;
 	}
 }

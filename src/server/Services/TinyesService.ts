@@ -31,6 +31,18 @@ export class TinyesService {
 		return this.change(player, amount, reason, true);
 	}
 
+	public awardPvpWin(player: Player, opponentUserId: number, amount: number) {
+		return this.data.awardPvpWin(player, opponentUserId, amount);
+	}
+
+	public getRemainingPvpXp(player: Player): number {
+		return this.data.getRemainingPvpXp(player);
+	}
+
+	public recordPvpXp(player: Player, xpGained: number): void {
+		this.data.recordPvpXp(player, xpGained);
+	}
+
 	public spendTinyes(player: Player, amount: number, reason: string): TinyesResult {
 		return this.change(player, amount, reason, false);
 	}

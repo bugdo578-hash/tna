@@ -177,8 +177,8 @@ export function tryAllocateStatPoints(
  * Pool total de XP da batalha (Passo 0): `XP_BATTLE_BASE + XP_BATTLE_PER_ENEMY_LEVEL * avgEnemyLevel`.
  * Só vitória PvE paga; derrota, Quit, desconexão, timeout ou nível médio inválido retornam 0.
  */
-export function calcBattleTotalXp(avgEnemyLevel: number, pveVictory: boolean): number {
-	if (!pveVictory) return 0;
+export function calcBattleTotalXp(avgEnemyLevel: number, rewardEligible: boolean): number {
+	if (!rewardEligible) return 0;
 	if (!isValidXpAmount(avgEnemyLevel) || avgEnemyLevel < MIN_LEVEL || avgEnemyLevel > MAX_LEVEL) return 0;
 	return XP_BATTLE_BASE + XP_BATTLE_PER_ENEMY_LEVEL * avgEnemyLevel;
 }
@@ -261,10 +261,10 @@ export function calcFighterSlotXp(
  */
 export function calcPostBattleTeamXp(
 	avgEnemyLevel: number,
-	pveVictory: boolean,
+	rewardEligible: boolean,
 	team: readonly [(FighterXpInput | undefined)?, (FighterXpInput | undefined)?, (FighterXpInput | undefined)?],
 ): readonly [number, number, number] {
-	const totalBattleXp = calcBattleTotalXp(avgEnemyLevel, pveVictory);
+	const totalBattleXp = calcBattleTotalXp(avgEnemyLevel, rewardEligible);
 	const fractions = calcTeamXpShareFractions(team);
 	const shares: [number, number, number] = [0, 0, 0];
 	for (const index of $range(0, TEAM_XP_SLOTS - 1)) {

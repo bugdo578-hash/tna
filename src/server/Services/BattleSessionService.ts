@@ -1,3 +1,6 @@
+import { calcAverageLevel, calcRewardBracket } from "../../shared/RewardMath";
+import { PVP_MIN_QUIT_DAMAGE_FRACTION, PVP_MIN_RESOLVED_HITS, PVP_REWARD_FACTOR, REWARD_BRACKET_MIN_LEVEL } from "../../shared/Config";
+import type { BattleEndReason, RewardBlockedReason } from "../../shared/Remotes";
 import { Players, RunService } from "@rbxts/services";
 import {
 	ATB_SYNC_INTERVAL_SECONDS,
@@ -6,7 +9,6 @@ import {
 	FLOAT_TOLERANCE,
 	MIN_CLIENT_FIGHTER_INDEX,
 	PVE_PAUSE_MAX_SECONDS,
-	TINYES_WIN_BY_TIER,
 	S3_UNLOCK_LEVEL,
 	TEAM_XP_SLOTS,
 } from "../../shared/Config";
@@ -24,7 +26,7 @@ import type {
 	StateChangedPayload,
 	SwitchPerformedPayload,
 } from "../../shared/Remotes";
-import type { FighterXpReward, SkillSlot } from "../../shared/TypeDefs";
+import type { FighterInventoryItem, FighterXpReward, SkillSlot } from "../../shared/TypeDefs";
 import { FIGHTER_DATA, type RealFighterId } from "../../shared/FighterData";
 import { calcXpForNextLevel } from "../../shared/ProgressionMath";
 import type { ProgressionService, TeamBattleXpEntry } from "./ProgressionService";
@@ -42,7 +44,11 @@ interface SessionParticipant {
 }
 
 interface BattleSessionRecord {
-	onFinished?: () => void;
+	reason?: BattleEndReason;
+	resolvedHits: number;
+	readonly averageLevels: readonly [number, number];
+	readonly totalMaxHp: readonly [number, number];
+	onFinished?: (firstSideWon: boolean) => void;
 	readonly rewardRng: () => number;
 	rewardPaid: boolean;
 	readonly id: number;
@@ -103,7 +109,7 @@ export class BattleSessionService {
 		secondSide: BattleSide,
 		rng: () => number,
 		mode: SessionMode = secondPlayer === undefined ? "PVE" : "PVP",
-		onFinished?: () => void,
+		onFinished?: (firstSideWon: boolean) => void,
 	): boolean {
 		if (firstPlayer.Parent !== Players) return false;
 		if (secondPlayer !== undefined && secondPlayer.Parent !== Players) return false;
@@ -130,6 +136,9 @@ export class BattleSessionService {
 		if (secondPlayer !== undefined) participants.push({ player: secondPlayer, side: secondSide, sideId: secondSideId });
 
 		const session: BattleSessionRecord = {
+			resolvedHits: 0,
+			averageLevels: [calcAverageLevel(firstSide.fighters.map(f => f.level)), calcAverageLevel(secondSide.fighters.map(f => f.level))],
+			totalMaxHp: [firstSide.fighters.reduce((sum, f) => sum + f.hpMax, 0), secondSide.fighters.reduce((sum, f) => sum + f.hpMax, 0)],
 			onFinished,
 			rewardRng: rng,
 			rewardPaid: false,
@@ -304,7 +313,7 @@ export class BattleSessionService {
 		const session = playerSession.session;
 		const losingSide = playerSession.side;
 		const winnerSide = session.sides[0] === losingSide ? session.sides[1] : session.sides[0];
-		const [ok, failure] = pcall(() => this.finishSession(session, winnerSide, disconnected ? player : undefined));
+		const [ok, failure] = pcall(() => this.finishSession(session, winnerSide, disconnected ? "disconnect" : "quit"));
 		this.destroySession(session);
 		if (!ok) warn(`[BattleSessionService] erro ao sair: ${tostring(failure)}`);
 		if (disconnected) this.remoteService.forgetPlayer(player);
@@ -318,7 +327,7 @@ export class BattleSessionService {
 			const [ok, result] = pcall(() => this.stepSession(session, clampedDt));
 			if (!ok) {
 				warn(`[BattleSessionService] erro na sessão battle-${session.id}: ${tostring(result)}`);
-				const [finishOk, finishError] = pcall(() => this.finishSession(session, undefined));
+				const [finishOk, finishError] = pcall(() => this.finishSession(session, undefined, "error"));
 				if (!finishOk) {
 					warn(`[BattleSessionService] erro ao encerrar sessão battle-${session.id}: ${tostring(finishError)}`);
 				}
@@ -357,10 +366,10 @@ export class BattleSessionService {
 		}
 		if (session.battle.state === "IDLE") session.secondsOutsideIdle = 0;
 		if (!session.ended && session.secondsOutsideIdle >= BATTLE_STALL_TIMEOUT_SECONDS) {
-			this.finishSession(session, undefined);
+			this.finishSession(session, undefined, "timeout");
 		}
 		if (!session.ended && session.secondsWithoutAction >= BATTLE_INACTIVITY_TIMEOUT_SECONDS) {
-			this.finishSession(session, undefined);
+			this.finishSession(session, undefined, "timeout");
 		}
 		if (session.ended) return true;
 		this.syncAtb(session, remainingDt);
@@ -414,6 +423,7 @@ export class BattleSessionService {
 				this.sendToParticipants(session, (player) => this.remoteService.sendAttackStarted(player, payload));
 			}),
 			events.hitResolved.connect(({ hitIndex, hit, crit, damage, target, followUpCancelled }) => {
+				session.resolvedHits++;
 				const payload: HitResolvedPayload = {
 					hitIndex,
 					hit,
@@ -458,7 +468,7 @@ export class BattleSessionService {
 				this.sendToParticipants(session, (player) => this.remoteService.sendFighterDied(player, payload));
 			}),
 			events.battleEnd.connect((winnerSide) => {
-				this.finishSession(session, winnerSide, undefined, true);
+				this.finishSession(session, winnerSide, "victory");
 			}),
 		);
 	}
@@ -466,45 +476,84 @@ export class BattleSessionService {
 	private finishSession(
 		session: BattleSessionRecord,
 		winnerSide: BattleSide | undefined,
-		excludedPlayer?: Player,
-		naturalEnd = false,
+		reason: BattleEndReason = "error",
 	): void {
 		if (session.ended || session.closed) return;
 		session.ended = true;
-		this.releaseSession(session);
+		session.reason = reason;
+		this.releaseSession(session, reason === "victory" && winnerSide === session.sides[0]);
 		for (const participant of session.participants) {
 			const player = participant.player;
-			if (player === excludedPlayer || player.Parent !== Players) continue;
+			if (player.Parent !== Players) continue;
 			let tinyesReward = 0;
+			let rewardBlockedReason: RewardBlockedReason | undefined;
 			let xpRewards: FighterXpReward[] | undefined;
-			if (
-				naturalEnd && session.mode === "PVE" && session.participants.size() === 1 &&
-				participant.side === winnerSide && !session.rewardPaid
-			) {
-				// TODO: PVP casual, Rival e teto diário Bronze aguardam regras do autor.
-				session.rewardPaid = true;
-				xpRewards = this.awardSessionXp(session, participant);
-				if (this.tinyesService !== undefined) {
-					const range = TINYES_WIN_BY_TIER.Bronze;
-					const amount = math.clamp(range.min + math.floor(session.rewardRng() * (range.max - range.min + 1)), range.min, range.max);
-					if (this.tinyesService.addTinyes(player, amount, "PVE_Bronze_victory").ok) tinyesReward = amount;
+			const [rewardOk, rewardError] = pcall(() => {
+				if (
+					reason === "victory" && session.mode === "PVE" && session.participants.size() === 1 &&
+					participant.side === winnerSide && !session.rewardPaid
+				) {
+					// TODO: Rival aguarda regras do autor. Bronze não terá teto diário.
+					session.rewardPaid = true;
+					xpRewards = this.awardSessionXp(session, participant);
+					if (this.tinyesService !== undefined) {
+						// Preserva a economia Bronze do PVE atual, independente do tier da IA.
+						const range = calcRewardBracket(REWARD_BRACKET_MIN_LEVEL.Bronze);
+						const amount = math.clamp(range.min + math.floor(session.rewardRng() * (range.max - range.min + 1)), range.min, range.max);
+						if (this.tinyesService.addTinyes(player, amount, "PVE_Bronze_victory").ok) tinyesReward = amount;
+					}
 				}
-			}
-			this.remoteService.sendBattleEnded(player, {
-				winnerSideId: winnerSide === undefined ? undefined : this.getSideId(session, winnerSide),
-				tinyesReward,
-				xpRewards,
+				if (session.mode === "PVP" && participant.side === winnerSide && !session.rewardPaid &&
+					(reason === "victory" || reason === "quit" || reason === "disconnect")) {
+					// TODO autor: eventual punicao para desistencia; nenhuma aplicada atualmente.
+					session.rewardPaid = true;
+					const loserIndex = session.sides[0] === participant.side ? 1 : 0;
+					let winnerRealDamage = 0;
+					for (const fighter of participant.side.fighters) {
+						if (fighter.itemUuid !== undefined) winnerRealDamage += session.battle.getDamageDealt(participant.side, fighter.itemUuid);
+					}
+					if (session.resolvedHits < PVP_MIN_RESOLVED_HITS ||
+						((reason === "quit" || reason === "disconnect") && winnerRealDamage < PVP_MIN_QUIT_DAMAGE_FRACTION * session.totalMaxHp[loserIndex])) rewardBlockedReason = "luta_curta";
+					else {
+						const opponent = session.participants.find(other => other.side !== participant.side);
+						const range = calcRewardBracket(session.averageLevels[session.sides[0] === participant.side ? 1 : 0]);
+						const amount = math.floor(math.clamp(range.min + math.floor(session.rewardRng() * (range.max - range.min + 1)), range.min, range.max) * PVP_REWARD_FACTOR);
+						if (opponent !== undefined && this.tinyesService !== undefined) {
+							const reward = this.tinyesService.awardPvpWin(player, opponent.player.UserId, amount);
+							tinyesReward = reward.amount;
+							rewardBlockedReason = reward.blockedReason;
+							// Limite do par continua comum; os saldos diários de Tinyes e XP são independentes.
+							if (reward.blockedReason !== "limite_par") {
+								const remainingXp = this.tinyesService.getRemainingPvpXp(player);
+								if (remainingXp === 0) rewardBlockedReason = "limite_diario_xp";
+								else xpRewards = this.awardSessionXp(session, participant, remainingXp);
+							}
+							pcall(() => this.tinyesService?.syncBalance(player));
+						}
+					}
+				}
 			});
+			if (!rewardOk) warn(`[BattleSessionService] erro de recompensa battle-${session.id}: ${tostring(rewardError)}`);
+			const [sent, sendError] = pcall(() => this.remoteService.sendBattleEnded(player, {
+				winnerSideId: winnerSide === undefined ? undefined : this.getSideId(session, winnerSide),
+				tinyesReward: session.mode === "PVP" && participant.side !== winnerSide ? undefined : tinyesReward,
+				reason,
+				rewardBlockedReason,
+				xpRewards,
+			}));
+			if (!sent) warn(`[BattleSessionService] erro de resultado privado: ${tostring(sendError)}`);
 		}
 	}
 
-	private awardSessionXp(session: BattleSessionRecord, participant: SessionParticipant): FighterXpReward[] | undefined {
+	private awardSessionXp(session: BattleSessionRecord, participant: SessionParticipant, maxTotalXp = math.huge): FighterXpReward[] | undefined {
 		const progression = this.progressionService;
 		if (progression === undefined) return undefined;
 		const enemy = session.sides[0] === participant.side ? session.sides[1] : session.sides[0];
 		let levelSum = 0;
 		for (const fighter of enemy.fighters) levelSum += fighter.level;
-		const avgEnemyLevel = levelSum / enemy.fighters.size();
+		const avgEnemyLevel = session.mode === "PVP"
+			? session.averageLevels[session.sides[0] === participant.side ? 1 : 0]
+			: levelSum / enemy.fighters.size();
 		const team: [TeamBattleXpEntry?, TeamBattleXpEntry?, TeamBattleXpEntry?] = [];
 		const previous = participant.side.fighters.map((fighter, index) => {
 			const itemUuid = fighter.itemUuid;
@@ -512,15 +561,19 @@ export class BattleSessionService {
 			team[index] = { itemUuid, damageDealt: session.battle.getDamageDealt(participant.side, itemUuid) };
 			return progression.getFighter(participant.player, itemUuid);
 		});
-		const updated = progression.awardPostBattleTeamXp(participant.player, avgEnemyLevel, true, team);
+		let updated: readonly (FighterInventoryItem | undefined)[] = [];
+		const [xpOk, xpError] = pcall(() => { updated = progression.awardPostBattleTeamXp(participant.player, avgEnemyLevel, true, team, maxTotalXp); });
+		// Mesmo se a notificação falhar após um commit de XP, contabiliza o que entrou no inventário.
 		const rewards: FighterXpReward[] = [];
+		let totalXpGained = 0;
 		for (const index of $range(0, TEAM_XP_SLOTS - 1)) {
-			const item = updated[index];
 			const before = previous[index];
+			const item = xpOk ? updated[index] : before !== undefined ? progression.getFighter(participant.player, before.itemUuid) : undefined;
 			if (item === undefined || before === undefined) continue;
 			// Diferença acumulada da curva: inclui múltiplos níveis e somente XP útil no cap.
 			let xpGained = item.xp - before.xp;
 			for (let level = before.level; level < item.level; level++) xpGained += calcXpForNextLevel(level);
+			totalXpGained += xpGained;
 			const definition = FIGHTER_DATA[item.fighterId as RealFighterId];
 			rewards.push({
 				itemUuid: item.itemUuid,
@@ -537,6 +590,8 @@ export class BattleSessionService {
 				leveledUp: item.level > before.level,
 			});
 		}
+		if (session.mode === "PVP") this.tinyesService?.recordPvpXp(participant.player, totalXpGained);
+		if (!xpOk) error(xpError);
 		return rewards;
 	}
 
@@ -566,7 +621,10 @@ export class BattleSessionService {
 			mode: session.mode,
 			canPause: session.mode === "PVE",
 		};
-		this.sendToParticipants(session, (player) => this.remoteService.sendBattleStarted(player, payload));
+		for (const participant of session.participants) {
+			const opponentId = session.sideIds[0] === participant.sideId ? session.sideIds[1] : session.sideIds[0];
+			this.remoteService.sendBattleStarted(participant.player, { ...payload, sides: [participant.sideId, opponentId] });
+		}
 	}
 
 	private syncAtb(session: BattleSessionRecord, dt: number): void {
@@ -600,10 +658,10 @@ export class BattleSessionService {
 		this.releaseSession(session);
 		session.paused = false;
 		for (const aiController of session.aiControllers) {
-			aiController.destroy();
+			this.cleanupSessionStep("IA", () => aiController.destroy());
 		}
 		session.aiControllers.clear();
-		for (const disconnect of session.disconnectors) disconnect();
+		for (const disconnect of session.disconnectors) this.cleanupSessionStep("conexao", disconnect);
 		session.disconnectors.clear();
 		for (const participant of session.participants) {
 			const playerSession = this.playerSessions.get(participant.player);
@@ -614,18 +672,24 @@ export class BattleSessionService {
 		this.activeSessions = this.activeSessions.filter((activeSession) => activeSession !== session);
 	}
 
-	private releaseSession(session: BattleSessionRecord): void {
+	private cleanupSessionStep(name: string, cleanup: () => void): void {
+		const [ok, failure] = pcall(cleanup);
+		if (!ok) warn(`[BattleSessionService] limpeza ${name}: ${tostring(failure)}`);
+	}
+
+	private releaseSession(session: BattleSessionRecord, firstSideWon = false): void {
 		const release = session.onFinished;
 		session.onFinished = undefined;
 		if (release !== undefined) {
-			const [ok, failure] = pcall(release);
+			const [ok, failure] = pcall(() => release(firstSideWon));
 			if (!ok) warn(`[BattleSessionService] erro de limpeza: ${tostring(failure)}`);
 		}
 	}
 
 	private abortSession(session: BattleSessionRecord, failure: unknown): void {
 		warn(`[BattleSessionService] erro na sessão battle-${session.id}: ${tostring(failure)}`);
-		pcall(() => this.finishSession(session, undefined));
+		const [finished, finishError] = pcall(() => this.finishSession(session, undefined, "error"));
+		if (!finished) warn(`[BattleSessionService] erro ao abortar battle-${session.id}: ${tostring(finishError)}`);
 		this.destroySession(session);
 	}
 }

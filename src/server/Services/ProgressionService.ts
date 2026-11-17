@@ -238,12 +238,13 @@ export class ProgressionService {
 	public awardPostBattleTeamXp(
 		player: Player,
 		avgEnemyLevel: number,
-		pveVictory: boolean,
+		rewardEligible: boolean,
 		team: readonly [
 			(TeamBattleXpEntry | undefined)?,
 			(TeamBattleXpEntry | undefined)?,
 			(TeamBattleXpEntry | undefined)?,
 		],
+		maxTotalXp = math.huge,
 	): readonly [
 		FighterInventoryItem | undefined,
 		FighterInventoryItem | undefined,
@@ -265,15 +266,20 @@ export class ProgressionService {
 			inputs[index] = { level: fighter.level, damageDealt: entry.damageDealt };
 		}
 
-		// Derrota, fuga e PvP preservam o estado, com undefined nos slots invalidos.
-		if (pveVictory !== true) return [fighters[0], fighters[1], fighters[2]];
+		// Sem elegibilidade, preserva o estado, com undefined nos slots invalidos.
+		if (rewardEligible !== true) return [fighters[0], fighters[1], fighters[2]];
 
 		// Vagas invalidas recebem zero e nao entram na divisao: 1 valido = 100%, 2 = 50%/50%, 3 = 50% maior dano / 25% / 25%.
-		const xpShares = calcPostBattleTeamXp(avgEnemyLevel, pveVictory, inputs);
+		const xpShares = calcPostBattleTeamXp(avgEnemyLevel, rewardEligible, inputs);
+		let remaining = math.max(0, math.floor(maxTotalXp));
 		const results: (FighterInventoryItem | undefined)[] = [undefined, undefined, undefined];
 		for (const index of $range(0, TEAM_XP_SLOTS - 1)) {
 			const fighter = fighters[index];
-			if (fighter !== undefined) results[index] = this.addXp(player, fighter.itemUuid, xpShares[index]);
+			if (fighter !== undefined) {
+				const slotXp = math.min(xpShares[index], remaining);
+				remaining -= slotXp;
+				results[index] = this.addXp(player, fighter.itemUuid, slotXp);
+			}
 		}
 		return [results[0], results[1], results[2]];
 	}

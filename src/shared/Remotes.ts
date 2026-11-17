@@ -20,7 +20,21 @@ export interface ShopStatePayload {
 
 export const REMOTES_FOLDER_NAME = "Remotes";
 
+export type NpcBattleNoticeReason = "em_batalha" | "carregando" | "distancia" | "time_invalido" | "erro";
+export type NpcBattleNoticePayload =
+	| { readonly reason: NpcBattleNoticeReason }
+	| { readonly reason: "cooldown"; readonly npcId: string; readonly remainingSeconds: number };
+
+export type ChallengeStatus = "enviado" | "aceito" | "recusado" | "expirado" | "indisponivel";
+export interface ChallengeReceivedPayload { readonly inviteId: string; readonly challengerName: string; readonly expiresIn: number; }
+export interface RequestChallengeResponsePayload { readonly inviteId: string; readonly accept: boolean; }
+export interface ChallengeStatusPayload { readonly inviteId: string; readonly status: ChallengeStatus; }
+export type BattleEndReason = "victory" | "quit" | "disconnect" | "timeout" | "error";
+export type RewardBlockedReason = "limite_par" | "limite_diario" | "limite_diario_xp" | "luta_curta";
 export const REMOTE_NAMES = {
+	ChallengeReceived: "ChallengeReceived",
+	RequestChallengeResponse: "RequestChallengeResponse",
+	ChallengeStatus: "ChallengeStatus",
 	NpcBattleNotice: "NpcBattleNotice",
 	RequestPurchase: "RequestPurchase",
 	PurchaseResult: "PurchaseResult",
@@ -141,6 +155,8 @@ export interface FighterDiedPayload {
 }
 
 export interface BattleEndedPayload {
+	readonly reason?: BattleEndReason;
+	readonly rewardBlockedReason?: RewardBlockedReason;
 	readonly xpRewards?: readonly FighterXpReward[];
 	readonly winnerSideId?: string;
 	readonly tinyesReward?: number;

@@ -60,6 +60,9 @@ export interface BattleRemoteAdapter {
 }
 
 export class RemoteService implements BattleRemoteAdapter {
+	readonly challengeReceived: RemoteEvent;
+	readonly requestChallengeResponse: RemoteEvent;
+	readonly challengeStatus: RemoteEvent;
 	readonly npcBattleNotice: RemoteEvent;
 	readonly requestPurchase: RemoteEvent;
 	readonly purchaseResult: RemoteEvent;
@@ -94,6 +97,9 @@ export class RemoteService implements BattleRemoteAdapter {
 
 	public constructor(private readonly clock: () => number = os.clock) {
 		const remotesFolder = this.getOrCreateRemotesFolder();
+		this.challengeReceived = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.ChallengeReceived);
+		this.requestChallengeResponse = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.RequestChallengeResponse);
+		this.challengeStatus = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.ChallengeStatus);
 		this.npcBattleNotice = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.NpcBattleNotice);
 		this.requestPurchase = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.RequestPurchase);
 		this.purchaseResult = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.PurchaseResult);

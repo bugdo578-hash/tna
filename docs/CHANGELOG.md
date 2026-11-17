@@ -1,5 +1,131 @@
 # CHANGELOG — Tiny Adventures
 
+## 2026-11-17 — Refatoração modular de Config.ts e atualização de docs
+
+- `src/shared/Config.ts` dividido por domínio em `src/shared/configs/`: `AI.ts`, `Animation.ts`, `Combat.ts`, `Dev.ts`, `Economy.ts`, `Network.ts`, `Persistence.ts`, `Progression.ts`, `Pvp.ts` e `World.ts`. `Config.ts` passa a re-exportar tudo via `export * from` para compatibilidade total de imports, sem mudança de valores, nomes ou comportamento.
+- Pasta nomeada `configs/` (plural) para evitar colisão case-insensitive com o `ModuleScript` `Config` no Windows/Rojo.
+- Constantes visuais de combate do client (`Vector3`/`Color3`/`UDim2`, palco, billboards, cores de feedback, `PLACEHOLDER_*`, `COMBAT_*` e tempos auxiliares visuais) movidas para `src/client/UI/CombatVisualConfig.ts`. Atualizados somente os imports dessas constantes em `src/client/Controllers/CombatController.ts` (mantendo `MIN_DAMAGE` em `Config`) e os `require` em `tools/ora-return-client-qa.luau` e `tools/battle-teardown-client-qa.luau` para `PlayerScripts.TS.UI.CombatVisualConfig`, sem alterar asserts. `server` e `shared` não importam tipos visuais.
+- Removido o alias duplicado sem uso `CRIT_DAMAGE_MULTIPLIER` (0 ocorrências em `src/`, `tools/` e `docs/`). Mantidas com comentário explícito as demais constantes sem uso hoje: `CHARGE_DAMAGE_MULTIPLIER` (`FUTURO: CARREGANDO (T6)`), `DUO_*` (`FUTURO: dupla Bruford/Tarkus`), `DAMAGE_BILLBOARD_SIZE_BANNER` e `DEV_AUTO_BATTLE_STEP_INTERVAL_SECONDS` (`sem uso hoje`).
+- `docs/HANDOFF.md` e `docs/repo_map.md` atualizados e conferidos: Crit `1.5%/pt`, troca por tempo da IA Bronze `20–30s` (em `IDLE`, respeitando `Root`) e pesos de níveis da loja `60/30/10` (corrigido o antigo `70%/25%/5%` em `HANDOFF.md`).
+- Validação: `npx.cmd rbxtsc` com zero erros (`Config.luau` e `configs/*.luau` gerados em `out/shared/` e resolvidos no Studio/Rojo), suíte completa no Studio até `SIMULATION_ALL_PASSED` com as 2.000 lutas idênticas (dummy `49.7%` / `298.98275s`; Jotaro `68%` / `67.5943s`), QAs client (`ORA_RETURN_CLIENT_PASSED`: 105 checks; `BATTLE_TEARDOWN_CLIENT_PASSED`: 538 checks), zero `MessageError` e `git diff --check`.
+
+## 2026-11-16 — Regra definitiva: cooldown NPC ESTRITAMENTE após vitória
+
+- Corrigida a regressão da entrega anterior: `NpcService` só registra prazo quando o callback informa vitória natural do jogador. Dar dano e sair/Quit ou desconectar não conta como vitória. Derrota, respawn, timeout e erros também não geram cooldown. A entrada anterior que aplicava cooldown em todo encerramento está revogada.
+- Regressão explícita no BattleSimulator: causar dano real sem vencer, sair por Quit/desconexão e reenfrentar sem cooldown. Demais encerramentos sem vitória também devem liberar; vitória mantém 300s contados do fim e isolamento por jogador/NPC. Botão FECHAR preservado.
+- Validação desta regra definitiva: `npx.cmd rbxtsc` e `git diff --check` passaram; suíte completa em Play novo chegou a `SIMULATION_ALL_PASSED`, com `NPC_BATTLES_PASSED`, `NPC_REMATCH_COOLDOWN_PASSED` e 2.000 lutas. Casos de dano real seguido de Quit/desconexão passaram sem cooldown. Nenhum MessageError capturado.
+
+## 2026-11-16 — Correção do reinício pelo resultado e cooldown NPC em todo encerramento
+
+- Decisão vigente: Bronze sem teto diário; cooldown por jogador/npcId a partir do fim por qualquer motivo, inclusive derrota, Quit e desconexão. Removida a condição de vitória do callback NPC; prazo vem de `NpcData`, mantendo 300s provisórios e faixa desejada de 5–15 minutos. Aviso privado, UITheme.Npc e limpeza ao sair preservados. Em memória, sem schema novo: reentrar zera provisoriamente.
+- Botão do resultado agora FECHAR: remove o envio de `/testbattle` pelo chat após PVE. Não inicia outra luta ao fechar vitória/derrota; reencontro NPC usa o prompt e validação do servidor. `/testbattle` manual permanece disponível somente no Studio.
+- Regressões NPC agora exigem cooldown completo do fim nos dez caminhos de encerramento/falha, além dos testes existentes com relógio manual de recusa, expiração exata, independência entre NPCs/jogadores e limpeza nas duas ordens de saída.
+- Validação: `npx.cmd rbxtsc` sem erros; suíte completa em Play novo até `SIMULATION_ALL_PASSED`, incluindo `NPC_BATTLES_PASSED`, `NPC_REMATCH_COOLDOWN_PASSED` e 2.000 lutas (dummy 49,7% / 298,98275s; Jotaro 68% / 67,5943s). Sem MessageError capturado. QA client atualizado para exigir ausência de reinício e texto FECHAR: `BATTLE_TEARDOWN_CLIENT_PASSED`, 538 checks. `git diff --check` passou; alterações anteriores preservadas.
+
+## 2026-11-16 — Cooldown NPC exclusivamente após vitória
+
+- Correção da decisão do autor: somente vencer o NPC inicia o cooldown de reencontro. Sair/Quit, perder, desconectar, respawn, timeout e erro não geram cooldown. O callback de encerramento informa se o primeiro lado venceu naturalmente; restauração de movimento continua em todos os caminhos. Sem alterações em recompensas PVP, duração de 300s ou persistência em memória.
+- BattleSimulator verifica a vitória natural com prazo completo a partir do fim e reencontro sem cooldown nos demais caminhos. Testes de isolamento/expiração/limpeza agora estabelecem os prazos por vitória. Reentrada continuar zerando é aceitável para o autor; desaparecimento/reaparecimento e geração futura de NPCs ficam fora desta tarefa.
+- Validação da correção: `npx.cmd rbxtsc`, `git diff --check` e suíte completa em Play novo até `SIMULATION_ALL_PASSED`, incluindo `NPC_BATTLES_PASSED`, `NPC_REMATCH_COOLDOWN_PASSED` e 2.000 lutas, sem MessageError capturado. Fixture de vitória avança `step(0)` para concluir a limpeza da sessão sem espera.
+
+## 2026-11-16 — Bronze sem teto diário e cooldown de reencontro por NPC
+
+- Decisão do autor: não haverá teto diário de recompensa Bronze. Removido esse TODO de `repo_map.md` e `HANDOFF.md`. `NpcDefinition.rematchCooldownSeconds` define o prazo por NPC; `bronze_trainer = 300s` provisório, dentro da faixa Bronze de 5–7 minutos confirmada pelo autor.
+- `NpcService` guarda prazos independentes por jogador/npcId. O callback de fim da sessão inicia a contagem em vitória, derrota, Quit, desconexão, timeout, respawn e erro. Triggered recusa durante o prazo sem criar sessão. NpcBattleNotice privado envia motivo, npcId e segundos restantes arredondados para cima; `UITheme.Npc` centraliza o texto de cooldown e dos avisos anteriores.
+- Estado somente em memória, sem schema novo. Players.PlayerRemoving limpa cooldown/debounce; identidade do mapa impede callback tardio de recriar estado após saída/destroy. Reentrar no jogo zera o cooldown (provisório).
+- `BattleSimulator`: relógio manual, sem espera nos testes novos; recusa/aviso privado sem BattleStarted, liberação no instante exato, batalha mais longa que o cooldown com prazo completo no fim, independência entre NPCs/jogadores e limpeza nas duas ordens de PlayerRemoving/encerramento. Regressões existentes verificam cooldown após os dez caminhos de fim/falha NPC.
+- Validação: `npx.cmd rbxtsc` sem erros; suíte completa em Play novo no Studio retornou com sucesso e chegou a `SIMULATION_ALL_PASSED`, incluindo `NPC_BATTLES_PASSED`, `NPC_REMATCH_COOLDOWN_PASSED` e as 2.000 lutas (dummy 49,7% / 298,98275s; Jotaro 68% / 67,5943s, sem alteração de balanço). Nenhum MessageError capturado. `git diff --check` passou. Diff desta entrega restrito a dados/serviço NPC, contrato/apresentação dos avisos, simulador e três documentos; alterações anteriores preservadas.
+
+## 2026-11-16 — Atualização de docs, Burn/Bleed fechado em 3s e correção de encoding
+
+- `docs/HANDOFF.md`: removidas pendências desatualizadas da loja (client `ShopController` já gera `{ offerId, requestId }` e consome `PurchaseResult`) e da UI de convite PVP (`PvpController` e `ChallengePromptController` implementados), marcada a antiga "Próxima tarefa client PVP" como concluída e removido o aviso de que o duelo PVP com dois clientes reais não havia sido testado (testado pelo autor, ok).
+- Decisão final do autor para Burn/Bleed fechada em 3s (3 ticks, 1/s) em `docs/HANDOFF.md`, `docs/repo_map.md`, `docs/CHANGELOG.md` e comentário de `src/shared/Config.ts`.
+- `DEV_AUTO_START_TEST_BATTLE` mantida como `false` em `src/shared/Config.ts`, com confirmação de que tanto o auto-start quanto `/testbattle` em `src/server/NetworkBootstrap.server.ts` só executam com `RunService.IsStudio()`; item 4 da ordem de tarefas em `docs/HANDOFF.md` atualizado.
+- Regravadas em UTF-8 com acentuação correta as seções de teardown de batalha em `docs/HANDOFF.md` e `docs/CHANGELOG.md`.
+- Confirmadas pelo autor e mantidas sem alteração de gameplay: Crit `+1` por ponto (`1p = 1.5%`, conforme `Config.ts` e GDD) e troca por tempo da IA Bronze (`20–30s` em `IDLE`, respeitando `Root`, em `AIService.ts`).
+
+## 2026-11-16 — Teto diário de XP PVP e participação mínima no quit
+
+- Constantes provisórias: `PVP_DAILY_XP_CAP = 2000` e `PVP_MIN_QUIT_DAMAGE_FRACTION = 0.25`, mantendo três hits mínimos. Em quit/desconexão, o vencedor precisa também causar ao menos 25% do HP máximo total inicial do perdedor; usa o dano real acumulado pela batalha, sem overkill. Falha bloqueia Tinyes e XP com `luta_curta` no ponto único de decisão da sessão.
+- Schema v4: migração de uma versão `v3 -> v4` acrescenta somente `pvp.dailyXp = 0` se ausente. `validatePlayerSaveData` exige inteiro entre zero e `MAX_SAVED_NUMBER`. Pares, moeda, inventário, time, loja e lock são preservados. O mesmo `dayKey = floor(os.time()/86400)` zera os dois contadores na virada do dia; clones/snapshots/load/save preservam XP diário.
+- Tetos de Tinyes e XP independentes; limite do par continua bloqueando ambos. XP calculado normalmente é cortado no saldo diário, em ordem de slots 0/1/2. Saldo zero omite `xpRewards` e informa `limite_diario_xp` (também quando ambos os tetos estão esgotados). `dailyXp` soma somente o ganho efetivo no inventário, respeitando Lv30, inclusive se a notificação de inventário falhar após o commit. Pagamento único preservado.
+- Validação: `npx.cmd rbxtsc` e `git diff --check` passaram. Suíte completa no Studio terminou em `SIMULATION_ALL_PASSED`, incluindo `PVP_DAILY_XP_AND_MINIMUM_FIGHT_PASSED`, migração dedicada, save/load, virada do dia, corte parcial/total, independência dos tetos, Lv30, quit/desconexão em 24%/25%, overkill e dano apenas do oponente. As 2.000 lutas passaram: dummy 48,4%/297,3764s e Jotaro 80%/63,40455s. Sem `MessageError` capturado; testes isolados usam DataStore em memória e participantes simulados.
+
+
+## 2026-11-16 — Teardown da batalha e liberação de sessão
+
+- Diagnóstico e reprodução anteriores à correção registrados em [BATTLE_TEARDOWN_DIAGNOSIS.md](BATTLE_TEARDOWN_DIAGNOSIS.md), por cenário. O HUD continuava habilitado no resultado; “Fechar e reiniciar” PVE escondia apenas o overlay. Falha em cards de XP interrompia a transição de fim; palco dependia de limpeza atrasada e tweens/markers/tasks de combate não tinham cancelamento completo. Falha de recompensa no servidor podia encerrar a sessão sem BattleEnded para nenhum participante.
+- `BattleHUD.teardownBattle()` centraliza limpeza com `pcall`/`warn` por etapa. `CombatController` registra/cancela tweens, tasks, markers e tracks; desconecta callbacks visuais, oculta popups e destrói ClientBattleStage imediatamente. Heartbeat da batalha é desconectado. Nenhum timer de resultado antigo pode apagar a próxima batalha.
+- Resultado normal e cards preservados em `BattleResult`, separado do HUD oculto; fechar/reiniciar limpa os recursos mesmo sem uma nova batalha. Quit confirmado oculta o HUD na hora, espera BattleEnded para destruir o palco e não mostra resultado por padrão (`UITheme.ShowResultOnLocalQuit=false`). Sem vencedor e sem XP também executa teardown e não abre resultado. Fechar/reiniciar e `/testxp` não removem batalha ativa.
+- Servidor isola recompensa e envio por participante, notifica todos ainda em Players (inclusive CharacterRemoving com jogador conectado), preserva pagamento único e ignora quem realmente saiu. Restauração de movimento/atributo, destruição de IA e desconexão têm falhas isoladas com aviso.
+- Validação: `npx.cmd rbxtsc` sem erros; `git diff --check`; suíte completa `SIMULATION_ALL_PASSED`, com as 2.000 lutas e novo `BATTLE_TEARDOWN_LIFECYCLE_PASSED` (14 caminhos/falhas). QA do client: 526 verificações (`BATTLE_TEARDOWN_CLIENT_PASSED`). Nove cenários por RemoteEvents no cliente real: `BATTLE_TEARDOWN_LIVE_PASSED`, todos com HUD oculto, palco destruído, NpcBattleActive falso e movimento restaurado. Scripts em `tools/battle-teardown-*-qa.luau`. Studio expôs um client real; segundo participante PVP simulado, sem declarar duelo manual de dois clientes.
+
+## 2026-11-16 — Correção local da visibilidade do desafio PVP
+
+- `ChallengePromptController` reaplica explicitamente `Enabled`: próprio personagem sempre oculto; demais personagens habilitados fora de batalha; todos ocultos com `LocalPlayer.NpcBattleActive === true`. Não restaura um `Enabled = false` antigo ao terminar a batalha. `PlayerAdded`/`CharacterAdded` reavaliam a associação do dono após replicação, além do acompanhamento existente de novos descendentes.
+- Nos prompts de duelo, `RequiresLineOfSight = false` somente no client evita que a geometria do personagem encubra o prompt dentro do HumanoidRootPart. Destruição do controller desconecta também os listeners de personagens e restaura as propriedades originais. Sem alteração no servidor ou números novos.
+- Contrato do servidor preservado: nome `ProximityPrompt`, `ActionText = "Desafiar"`, `ObjectText = player.Name`; nenhum atributo identificador é definido hoje. Mantido o fallback exato e o reconhecimento opcional de `PvpChallenge = true`. A recusa de autodesafio no servidor permanece intacta.
+- Validação: `npx.cmd rbxtsc` passou com zero erros. Em Play novo no Studio, próprio prompt oculto antes/durante/depois da alternância local de `NpcBattleActive`, respawn local, prompt NPC intacto e limpeza das conexões/estados em `destroy()` passaram. Prompt no servidor continuou habilitado e com linha de visão original. Teste real de dois/três clientes e envio/aceite do convite ainda pendentes: MCP disponibilizou um cliente; tentativa de fixture de segundo Player foi recusada por falta de `WritePlayer`, sem executar os asserts de jogador alheio.
+
+## 2026-11-15 — Visibilidade local dos prompts de desafio
+
+- `ChallengePromptController` criado e registrado em `main.client.ts`: oculta o próprio prompt e todos os prompts de duelo enquanto `LocalPlayer.NpcBattleActive === true`; restaura o estado anterior dos demais ao sair da batalha. `Workspace.DescendantAdded` cobre personagens novos e respawns; remoções e `destroy()` desconectam os listeners e liberam os estados guardados. Sem timers ou números de ajuste.
+- Contrato atual conferido em `PvpService`: nome padrão `ProximityPrompt`, `ActionText = "Desafiar"`, `ObjectText = player.Name`, parent `HumanoidRootPart`. O servidor **não define atributo identificador**. O client aceita `PvpChallenge = true` junto ao nome e mantém fallback pelo contrato atual nos personagens de Players. Servidor e recusa de autodesafio intactos.
+- Validação: `npx.cmd rbxtsc` passou com zero erros. Teste visual em `Test > Clients and Servers` ainda pendente: próprio prompt oculto, prompt alheio visível, respawn local, entrada/saída de batalha e entrada de terceiro jogador. Studio conectado estava em Edit; não se declara esse playtest como executado.
+
+## 2026-11-15 — UI do duelo PVP (client-only)
+
+- **`UITheme.Pvp` (`src/client/UI/UITheme.ts`)**: centralizadas cores, fontes, tamanhos, posicionamento (`DisplayOrder = 9`) e textos (`FormatInviteText`, `StatusTexts`, `RewardBlockedReasons`, `EndReasonTexts`, `EndedNoWinnerTitle`, `CloseResultButton`).
+- **`PvpController` (`src/client/Controllers/PvpController.ts` / `src/client/main.client.ts`)**:
+  - Popup de convite (`ChallengeReceived`) exibe `"<nome> desafiou você"`, botões `Aceitar`/`Recusar` e barra de tempo (`expiresIn`); envia estritamente `RequestChallengeResponse { inviteId, accept }` e desaparece ao responder ou expirar.
+  - Banner de status do desafiante (`ChallengeStatus`) exibe `"Aguardando resposta..."` (`enviado`) e os retornos do servidor (`aceito`, `recusado`, `expirado`, `indisponivel`) sem cobrir `BattleHUD` (`DisplayOrder = 9` abaixo de `10`).
+  - `close()`, `closeInvite()`, `closeStatus()` e `destroy()` desconectam eventos, cancelam timers e evitam erro caso a `ScreenGui` seja destruída externamente.
+- **`BattleHUD` e `CombatController` (`src/client/Controllers/BattleHUD.ts`, `src/client/Controllers/CombatController.ts`)**:
+  - Identificação explícita do lado local via dado enviado pelo servidor (`BattleStarted.sides[0]`, armazenado em `ownSideId`/`opponentSideId`), inclusive para ATB, resultado e banner vencedor.
+  - Tela de resultado PVP exibe `tinyesReward` e eventual aviso de `rewardBlockedReason` apenas para o vencedor; perdedor e encerramentos sem vencedor (`timeout`/`error`) não exibem recompensa, e o botão `FECHAR` fecha via `closeResultOverlay()`.
+- **Validação**:
+  - `npx.cmd rbxtsc` concluído sem erros (`exit 0`).
+  - QA no Roblox Studio Play: `79/79` checks aprovados (convites/expiração, payload `{ inviteId, accept }`, correlação com destinatário no lado interno `1`, resultado vencedor/perdedor/bloqueios, limpeza de timers/conexões e layout com `TextFits = true` sem sobreposição em `667x375`, `844x390`, `1024x768` e áreas úteis `666x316`, `749x330`, `1023x710`); `BattleSimulator.runSimulation()` concluiu `1000` lutas sem avisos no console.
+
+## 2026-11-15 — Duelo PVP casual, servidor e schema v3
+- Relatório prévio confirmou que HUD/CombatController assumem sides[0] local, que o congelamento vivia no NpcService e que createSession aceita dois jogadores/times prontos. Autor aprovou ordem privada, extração idempotente e migração v2→v3; diff do schema informado antes de aplicar. Nomes dos três módulos novos avisados previamente.
+- PvpService ligado ao bootstrap: prompt por personagem, convites privados, validação e revalidação autoritativas, expiração e recusa liberam ambos. Config provisório: 12 studs, 5s entre tentativas, 15s após recusa do mesmo alvo, 15s de validade. Buckets independentes para resposta e cada notificação. Payload de resposta estrito, sem campos de combate. Lados sorteados internamente; cada BattleStarted apresenta primeiro o lado do destinatário sem mudar os IDs usados em ATB/hits/mortes/resultado.
+- BattleMovement extraído do NPC: um snapshot por jogador, sem sobrescrever originais por zero, liberação única nos caminhos de fim e erros. NpcBattleActive preservado por compatibilidade. Falha no envio de um BattleEnded não interrompe o resultado/pagamento do outro participante.
+- RewardMath puro compartilhado: média sem zeros de vagas, faixa econômica separada de tier de IA. PVE preserva Bronze; PVP usa média inicial do perdedor, fator 1, RNG injetável. Vitória por Quit/desconexão paga; timeout/erro não. Mínimo 3 hits resolvidos, XP zero. Motivo fica registrado; TODO de eventual punição de desistência, sem punição implementada.
+- Schema v3 adiciona pvp sem perder campos v2; migra uma versão por etapa. Persistência inclui validação, clones, snapshots, recuperação, load/save. Duas vitórias pagas por par direcional/3600s; teto diário 2000, prêmio parcial; até 200 janelas ativas, sem expulsão para abrir espaço. Saldo e contadores atualizados sincronamente sob flag de pagamento único, notificação posterior. Contas novas já nascem com dayKey atual; migração acrescenta bloco zerado e load normaliza o dia.
+- BattleSimulator: ambos os sorteios e controle dos dois jogadores; time/rolls salvos; convite inválido/duplicado/cruzado/expirado, recusa, revalidação, bucket; média 3×6/1×3 em fixtures; vitória/quit/desconexão/timeout/erro/respawn/falhas de envio; movimento e pagamento único; Ouro para Lv1 vencendo Lv30 e Bronze no sentido inverso; terceira vitória sem prêmio, direção independente, expiração de janela, teto/dia, migração e reentrada persistida. Fixtures de schema atual receberam o novo campo obrigatório; migrações antigas mantêm versões explícitas.
+- Entrega apenas servidor/shared: client de convite continua pendente e o contrato está no HANDOFF. Validação de persistência usa DataStore mock; não demonstra quotas ou durabilidade em produção.
+- Validação final: `npx.cmd rbxtsc` sem erros; Play novo/cache de require limpo, suíte completa com captura de marcadores e zero MessageError. Prompt real conferido no HRP do jogador: Desafiar/nome/12 studs. Dummies: 48,4%, 297,3764000000331s; Jotaro: 80%, 63,404549999998665s, ambos 1.000 lutas. Asserções antigas preservadas; a suíte revelou e permitiu corrigir a faixa PVE e a normalização inicial do dayKey antes desta execução final.
+- Marcadores finais, em ordem (`SIMULATION_ALL_PASSED` emitido pelo executor após retorno da suíte):
+
+```text
+DAY_NIGHT_CYCLE_PASSED
+NPC_BATTLES_PASSED
+PVP_BATTLES_PASSED
+PVP_INVITES_AND_PERSISTENCE_PASSED
+PURCHASE_AND_ALLOCATION_RESULTS_PASSED
+SHOP_SYNCHRONIZATION_PASSED
+SHOP_PASSED
+POST_BATTLE_XP_PASSED
+S3_UNLOCK_PASSED
+PROGRESSION_SNAPSHOTS_PASSED
+INVENTORY_TEST_BATTLES_PASSED
+TINYES_ECONOMY_PASSED
+SET_RETRY_SHUTDOWN_BUDGET_PASSED
+LOAD_GUARDS_AND_INVALID_LOCK_PASSED
+LEAVING_DURING_LOAD_PASSED
+CORRUPTION_BACKUP_AND_INVENTORY_PASSED
+XP_CURVE_AND_TEAM_DISTRIBUTION_PASSED
+SURGICAL_1_CREATE_SESSION_PLAYERS_PASSED
+SURGICAL_2_SESSION_ERROR_ISOLATION_PASSED
+SURGICAL_3_SKILL_SLOT_PASSED
+SURGICAL_4_ITEM_UUID_PASSED
+SURGICAL_5_TOKEN_BUCKET_PASSED
+SURGICAL_6_SIDE_TRIGGERS_PASSED
+SURGICAL_7_TROCAR_PASSED
+SIMULATION_ALL_PASSED
+```
+
 ## 2026-11-15 — Mock de SetAttribute e suíte completa revalidada
 - Na entrada desta tarefa, os dois mocks de Player em validateNpcBattles já usavam sintaxe de método e o Luau local já recebia self. O mock principal foi ajustado à assinatura explícita pedida: `SetAttribute(name: string, value: AttributeValue): void { attributes.set(name, value); }`. Nenhum código de produção alterado.
 - Auditoria de todos os objetos literais do BattleSimulator: nenhuma arrow encontrada como método de Instance/Player. O SetAttribute do segundo jogador, GetAttribute/SetAttribute do Workspace e GetChildren do proxy de Lighting já eram métodos; não há mocks de Kick/FireClient. UpdateAsync/SetAsync dos mocks de DataStore também já usam métodos. Arrows restantes são callbacks injetados, não métodos de Instance/Player.
@@ -386,3 +512,36 @@ Client (`src/client/`):
 - Flag persistente de level-up nao visto adiada: exige schema/ack. ShopService nao existe; criacao via ProgressionService ja notifica. Template removido envia unavailable, displayName=fighterId e className/rarity ausentes se desconhecidos.
 - Contrato tipado em src/server/Services/InventoryService.ts; nenhum client/shared alterado.
 - Validacao: npx.cmd rbxtsc e git diff --check passaram. Suite atual no Studio bloqueada por cache/resolucao de BattleService antigo (getDamageDealt ausente); resultado da suite antiga nao valida esta entrega. Novos asserts compilados, execucao pendente em sessao limpa.
+
+## XP no PVP (2026-11-16)
+- Vencedor recebe XP pela mesma formula PVE, com media congelada do perdedor. Quit/desconexao pagam; derrota, timeout e erro nao.
+- A concessao de Tinyes decide o XP: valor positivo libera, inclusive corte parcial diario; bloqueio total nao paga XP. rewardPaid preserva pagamento unico. BattleEnded entrega os cards somente ao vencedor.
+- Parametro da progressao renomeado para rewardEligible; PVE preservado.
+- Pendencias do autor: **Teto di?rio de XP no PVP: decidir ap?s playtest.** Apenas TODO; nenhum teto de XP implementado.
+- Validacao final: npx.cmd rbxtsc sem erros; suite completa em Play novo chegou a SIMULATION_ALL_PASSED (inclui bloqueio diario total, corte parcial, quit/desconexao, persistencia e pagamento unico); git diff --check passou.
+
+## 2026-11-16 ? Multi-hit ap?s morte do ativo (provis?rio)
+- BattleService adia troca autom?tica at? fim de ATTACK, antes de RETURN; hits posteriores n?o rolam Dodge/crit, n?o causam dano nem emitem HitResolved. FighterDied continua imediato; substituto aleat?rio intacto, ATB zero e Root ignorado. ?ltimo lutador encerra imediatamente; Burn/Bleed removidos na morte.
+- CombatController mant?m KO no campo e aguarda fim da sequ?ncia de hits para apresentar SwitchPerformed; hits ausentes n?o geram n?meros nem bloqueiam fila. Sem payload/schema novo, reordena??o de IDs, constantes novas ou ajuste de balan?o.
+- BattleSimulator cobre ORA ORA matando no hit 2, hits 3?5 ignorados, RNG, Root, ATB, ordem death/switch/return, ?ltimo lutador, dano real e contador de hits. Regress?o PVP overkill agora exige 1 hit/1 dano e continua bloqueando recompensas por luta_curta.
+- npx.cmd rbxtsc: zero erros. Su?te completa em Play novo: SIMULATION_ALL_PASSED. Teste client isolado: MULTI_HIT_CLIENT_QUEUE_PASSED. git diff --check passou. Anima??o real n?o inspecionada visualmente.
+- Antes/depois (mesmas seeds, 1.000 lutas por grupo): dummy 48,4% / 297,3764s ? 49,7% / 298,98275s; Jotaro vs Anubis 80% / 63,40455s ? 68% / 67,5943s.
+# 2026-11-16 — ORA ORA: retorno absoluto do Stand (client)
+
+- Ajuste visual corrigido conforme esclarecimento do autor: removido deslocamento de repouso de 1,5 studs em C0; base original do asset restaurada. Somente no ORA ORA (Jotaro S2), pulso avança mais 1,1 studs além do avanço existente (total 2,2). `PLACEHOLDER_ORA_EXTRA_ADVANCE_STUDS` em Config; retorno absoluto em C1 preservado.
+
+- Diagnóstico antes da edição: base do corpo já definida na criação do palco (`homeCFrame`, atualizada somente ao trocar de slot); avanço do corpo usa destino absoluto. O Stand recapturava `StandJoint.C1` **por hit**, somava 1,1 stud e retornava ao valor parcial capturado. Cinco hits separados por 0,10s disputavam tweens de avanço/recuo de 0,07s cada. Reprodução no client antigo, cinco sequências: desvio de C1 3,51 / 7,08 / 9,85 / 13,06 / 16,46 studs. Ambos os tweens eram registrados no teardown, mas Cancel preservava o deslocamento intermediário. Hits sem HitResolved após KO ainda pulsavam antes de consumir a fila; não eram a origem do acúmulo. Asset Jotaro inspecionado sem Animation: sem evidência de RootMotion neste bug.
+- Correção restrita a CombatController e constantes visuais de Config: base imutável por clone; destinos absolutos; um tween ativo por Stand e geração para invalidar recuos atrasados. Restauração explícita ao concluir/cancelar follow-up, morrer e limpar batalha; restaura corpo à home antes de destruir palco. Não altera corpo caído durante multi-hit, timelines, dano, servidor ou AnimationTrack. Amplitude anterior movida para `PLACEHOLDER_STAND_STRIKE_STUDS`, sem mudança de valor.
+- Novo QA `tools/ora-return-client-qa.luau`: 105 checks, cinco ORA ORA seguidos por cenário acerto/esquiva/KO intermediário sem resultados restantes; compara C1, corpo e HRP real do Stand, preserva KO, cobre avanço/recuo interrompidos pelo teardown usado em Quit/último KO e callbacks obsoletos. Tolerância em Config de 0,0001 stud para precisão espacial de CFrame. Controllers isolados, sem perfis/recompensas reais. Não valida animações futuras com RootMotion.
+- Validação em Play novo/Rojo conferido: `npx.cmd rbxtsc` sem erros; `ORA_RETURN_CLIENT_PASSED` (105); `BATTLE_TEARDOWN_CLIENT_PASSED` (526); suíte completa terminou em `SIMULATION_ALL_PASSED`, incluindo `MULTI_HIT_DEATH_PASSED`, `BATTLE_TEARDOWN_LIFECYCLE_PASSED`, PVP/XP/economia/persistência e 2.000 lutas. Dummy manteve 49,7% / 298,98275s. Sem MessageError capturado na suíte. `git diff --check` passou; mudanças anteriores do workspace preservadas.
+# Caminhada customizada (2026-11-17)
+- ID centralizado e controller client com pré-carregamento assíncrono, ajuste do Animate, velocidade proporcional e limpeza por personagem.
+- Studio: asset carregou (duração 1s), track Movement tocou ao andar e parou em repouso e com WalkSpeed zero; retomou em nova entrada de movimento. Batalha real e instantaneidade no primeiro passo não foram confirmadas.
+# Caminhada durante pulo e queda (2026-11-17)
+- Controller aguarda Animate e mantém walk/run atualizados após recriação; track manual para ao sair do chão ou entrar em Jumping, Freefall ou FallingDown e retoma somente quando permitido. Conexões são limpas por personagem.
+- Validação visual no Studio pendente.
+
+## Animate principal e caminhada em 1,23× (2026-11-17)
+- Corrigida duplicação: com Animate, somente IDs de walk/run e velocidade das tracks nativas existentes são ajustados. ChildAdded observa pastas e animações recriadas. Track manual só existe no fallback após timeout, com bloqueio no ar/pulo/queda e parada de 0,1s; Animate tardio destrói o fallback.
+- Tempos, limite de movimento e fator de reprodução centralizados em Config. Fator 1,23× aplicado somente à animação, sem escrever WalkSpeed. Limpeza inclui CharacterRemoving, ChildAdded, StateChanged e ajuste das tracks nativas.
+- `npx.cmd rbxtsc` passou sem erros. Validação visual desta versão pendente: andar, pular, cair de plataforma, batalha e respawn; conferir prioridade Core/Movement e dono/permissões da animação.

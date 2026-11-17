@@ -1,7 +1,7 @@
 import { ReplicatedStorage, TweenService, Workspace } from "@rbxts/services";
+import { MIN_DAMAGE } from "../../shared/Config";
 import {
 	ASSETS_FOLDER_NAME,
-	BATTLE_END_CLEANUP_DELAY_SECONDS,
 	BENCH_FIGHTER_TRANSPARENCY,
 	COMBAT_ACTIVE_SEPARATION_STUDS,
 	COMBAT_BENCH_LATERAL_SPACING_STUDS,
@@ -9,7 +9,6 @@ import {
 	COMBAT_FEEDBACK_COLORS,
 	COMBAT_STAGE_ORIGIN,
 	DAMAGE_BILLBOARD_POOL_SIZE,
-	DAMAGE_BILLBOARD_SIZE_BANNER,
 	DAMAGE_BILLBOARD_SIZE_CRIT,
 	DAMAGE_BILLBOARD_SIZE_DOT,
 	DAMAGE_BILLBOARD_SIZE_NORMAL,
@@ -18,23 +17,25 @@ import {
 	FIGHTER_ASSETS_FOLDER_NAME,
 	HIT_RESULT_WAIT_SECONDS,
 	HIT_WAIT_POLL_INTERVAL_SECONDS,
-	MIN_DAMAGE,
 	PLACEHOLDER_ADVANCE_FRACTION,
 	PLACEHOLDER_DODGE_OFFSET_STUDS,
 	PLACEHOLDER_DODGE_TWEEN_SECONDS,
 	PLACEHOLDER_HIT_KNOCKBACK_STUDS,
 	PLACEHOLDER_HIT_REACT_TWEEN_SECONDS,
 	PLACEHOLDER_KO_TWEEN_SECONDS,
+	PLACEHOLDER_ORA_EXTRA_ADVANCE_STUDS,
+	PLACEHOLDER_ORA_ADVANCE_FRACTION,
 	PLACEHOLDER_STRIKE_TWEEN_SECONDS,
+	PLACEHOLDER_STAND_STRIKE_STUDS,
+	STAND_ATTACK_FRONT_STUDS,
 	PLACEHOLDER_SWITCH_TWEEN_SECONDS,
 	RIG_ATTACHMENT_NAMES,
 	STAND_SUBMODEL_NAME,
 	WORKSPACE_BATTLE_FOLDER_NAME,
-} from "../../shared/Config";
+} from "../UI/CombatVisualConfig";
 import { FIGHTER_DATA, type RealFighterId } from "../../shared/FighterData";
 import type {
 	AttackStartedPayload,
-	BattleEndedPayload,
 	BattleFighterSnapshot,
 	BattleStartedPayload,
 	EffectAppliedPayload,
@@ -46,6 +47,7 @@ import type {
 } from "../../shared/Remotes";
 import { ANUBIS_SKILL_DATA, JOTARO_SKILL_DATA, type SkillData } from "../../shared/SkillData";
 import type { SkillSlot, StatusEffect } from "../../shared/TypeDefs";
+import { battleCleanupStep } from "./BattleCleanup";
 import { BattleRemotes } from "./BattleRemotes";
 
 export interface RigAttachmentMap {
@@ -65,6 +67,7 @@ interface FighterVisualEntry {
 	readonly rootPart: BasePart;
 	readonly humanoid: Humanoid | undefined;
 	readonly standModel: Model | undefined;
+	readonly standMotion: { readonly joint: Motor6D; readonly baseC1: CFrame; generation: number; tween?: Tween } | undefined;
 	readonly attachments: RigAttachmentMap;
 	readonly originalTransparency: Map<BasePart, number>;
 	hp: number;
@@ -89,10 +92,15 @@ export class CombatController {
 	private readonly fightersByTargetId = new Map<string, FighterVisualEntry>();
 	private readonly hitResultsByIndex = new Map<number, HitResolvedPayload[]>();
 	private readonly consumedHitIndices = new Set<number>();
+	private readonly pendingSwitches: SwitchPerformedPayload[] = [];
 	private readonly pendingDeaths = new Map<string, PendingDeathRecord>();
 	private readonly billboardPool: BillboardPoolItem[] = [];
-	private readonly hpVisualListeners: ((targetId: string, hp: number, hpMax: number) => void)[] = [];
-	private readonly deathVisualListeners: ((payload: FighterDiedPayload) => void)[] = [];
+	private readonly hpVisualListeners = new Set<(targetId: string, hp: number, hpMax: number) => void>();
+	private readonly deathVisualListeners = new Set<(payload: FighterDiedPayload) => void>();
+	private readonly battleTweens = new Set<Tween>();
+	private readonly battleConnections = new Set<RBXScriptConnection>();
+	private readonly battleTasks = new Set<thread>();
+	private readonly battleTracks = new Set<AnimationTrack>();
 
 	private stageFolder: Folder | undefined;
 	private poolContainer: Folder | undefined;
@@ -132,9 +140,6 @@ export class CombatController {
 		BattleRemotes.switchPerformed.OnClientEvent.Connect((payload) => {
 			this.onSwitchPerformed(payload as SwitchPerformedPayload);
 		});
-		BattleRemotes.battleEnded.OnClientEvent.Connect((payload) => {
-			this.onBattleEnded(payload as BattleEndedPayload);
-		});
 		BattleRemotes.stateChanged.OnClientEvent.Connect(() => {});
 		BattleRemotes.atbSync.OnClientEvent.Connect(() => {});
 	}
@@ -145,13 +150,15 @@ export class CombatController {
 	}
 
 	/** Registra callback disparado quando o HP visual é atualizado após consumir hit/tick/KO. */
-	public onFighterHpVisualChanged(listener: (targetId: string, hp: number, hpMax: number) => void): void {
-		this.hpVisualListeners.push(listener);
+	public onFighterHpVisualChanged(listener: (targetId: string, hp: number, hpMax: number) => void): () => void {
+		this.hpVisualListeners.add(listener);
+		return () => { this.hpVisualListeners.delete(listener); };
 	}
 
 	/** Registra callback disparado quando um KO e eventual troca automática são efetivados visualmente. */
-	public onFighterDeathVisualFlushed(listener: (payload: FighterDiedPayload) => void): void {
-		this.deathVisualListeners.push(listener);
+	public onFighterDeathVisualFlushed(listener: (payload: FighterDiedPayload) => void): () => void {
+		this.deathVisualListeners.add(listener);
+		return () => { this.deathVisualListeners.delete(listener); };
 	}
 
 	private notifyHpVisualChanged(targetId: string, hp: number, hpMax: number): void {
@@ -226,12 +233,12 @@ export class CombatController {
 		label.TextTransparency = 0;
 		label.TextStrokeTransparency = 0.15;
 
-		const moveTween = TweenService.Create(
+		const moveTween = this.createBattleTween(
 			billboard,
 			new TweenInfo(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 			{ StudsOffset: new Vector3(0, 1.2 + DAMAGE_POPUP_RISE_STUDS, 0) },
 		);
-		const fadeTween = TweenService.Create(
+		const fadeTween = this.createBattleTween(
 			label,
 			new TweenInfo(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
 			{ TextTransparency: 1, TextStrokeTransparency: 1 },
@@ -239,7 +246,7 @@ export class CombatController {
 		moveTween.Play();
 		fadeTween.Play();
 
-		task.delay(duration, () => {
+		this.delayBattle(duration, () => {
 			billboard.Enabled = false;
 			billboard.Adornee = undefined;
 			item.inUse = false;
@@ -282,6 +289,7 @@ export class CombatController {
 			}
 
 			const standModel = this.resolveStandSubmodel(clonedModel);
+			const standJoint = rootPart.FindFirstChild("StandJoint");
 			const attachments = this.resolveAttachments(clonedModel, rootPart);
 			const originalTransparency = this.captureBaseTransparency(clonedModel);
 
@@ -302,6 +310,9 @@ export class CombatController {
 				rootPart,
 				humanoid,
 				standModel,
+				standMotion: standJoint?.IsA("Motor6D")
+					? { joint: standJoint, baseC1: standJoint.C1, generation: 0 }
+					: undefined,
 				attachments,
 				originalTransparency,
 				hp: snapshot.hp,
@@ -486,12 +497,13 @@ export class CombatController {
 		const timeline = this.resolveSkillTimeline(attacker.fighterId, payload.slot);
 		const totalHits = timeline.hits.size();
 		this.activePendingHits = totalHits;
+		this.positionStandForAttack(attacker, math.max(timeline.hits[0]?.time ?? 0.1, 0.05) * 0.8);
 
 		const track = this.tryPlaySlotAnimation(attacker, payload.slot, timeline);
 		if (track !== undefined) {
-			this.bindAnimationMarkers(track, attacker, target, timeline, attackToken);
+			this.bindAnimationMarkers(track, attacker, target, timeline, attackToken, payload.slot);
 		} else {
-			this.runPlaceholderAttackSequence(attacker, target, timeline, attackToken);
+			this.runPlaceholderAttackSequence(attacker, target, timeline, attackToken, payload.slot);
 		}
 	}
 
@@ -520,6 +532,7 @@ export class CombatController {
 		const [ok, loadedTrack] = pcall(() => animator.LoadAnimation(fighterAnim));
 		if (!ok || loadedTrack === undefined) return undefined;
 
+		this.battleTracks.add(loadedTrack);
 		loadedTrack.Play(0.1, 1, 1);
 
 		// Se o modelo tiver sub-modelo "Stand" com Animator e Animation correspondente, toca sincronizado
@@ -530,6 +543,7 @@ export class CombatController {
 			if (standAnimator !== undefined) {
 				pcall(() => {
 					const standTrack = standAnimator.LoadAnimation(standAnim);
+					this.battleTracks.add(standTrack);
 					standTrack.Play(0.1, 1, 1);
 				});
 			}
@@ -544,20 +558,24 @@ export class CombatController {
 		target: FighterVisualEntry,
 		timeline: SkillData,
 		attackToken: number,
+		slot: SkillSlot,
 	): void {
 		const totalHits = timeline.hits.size();
 		for (const index of $range(1, totalHits)) {
 			const markerName = `Hit${index}`;
-			track.GetMarkerReachedSignal(markerName).Connect(() => {
+			this.battleConnections.add(track.GetMarkerReachedSignal(markerName).Connect(() => {
 				if (this.currentAttackToken !== attackToken || this.battleEnded) return;
-				task.spawn(() => {
+				if (this.consumedHitIndices.has(index) || this.followUpCancelledForCurrentAttack) return;
+				this.pulseStandStrike(attacker, PLACEHOLDER_STAND_STRIKE_STUDS +
+					(attacker.fighterId.lower() === "jotaro" && slot === 2 ? PLACEHOLDER_ORA_EXTRA_ADVANCE_STUDS : 0));
+				this.spawnBattle(() => {
 					this.waitForAndConsumeHitIndex(index, attacker, target, timeline, attackToken);
 				});
-			});
+			}));
 
 			// Fallback se o marker não disparar na AnimationTrack: usa o tempo de SkillData + HIT_RESULT_WAIT_SECONDS
 			const scheduledHit = timeline.hits[index - 1];
-			task.delay(scheduledHit.time + HIT_RESULT_WAIT_SECONDS, () => {
+			this.delayBattle(scheduledHit.time + HIT_RESULT_WAIT_SECONDS, () => {
 				if (this.currentAttackToken !== attackToken || this.battleEnded) return;
 				if (!this.consumedHitIndices.has(index)) {
 					this.waitForAndConsumeHitIndex(index, attacker, target, timeline, attackToken);
@@ -571,10 +589,14 @@ export class CombatController {
 		target: FighterVisualEntry,
 		timeline: SkillData,
 		attackToken: number,
+		slot: SkillSlot,
 	): void {
 		const startCFrame = attacker.homeCFrame;
 		const targetPos = target.homeCFrame.Position;
-		const approachPos = startCFrame.Position.Lerp(targetPos, PLACEHOLDER_ADVANCE_FRACTION);
+		const advanceFraction = attacker.fighterId.lower() === "jotaro" && slot === 2
+			? PLACEHOLDER_ORA_ADVANCE_FRACTION
+			: PLACEHOLDER_ADVANCE_FRACTION;
+		const approachPos = startCFrame.Position.Lerp(targetPos, advanceFraction);
 		const strikeBaseCFrame = CFrame.lookAt(approachPos, targetPos);
 
 		const firstHitTime = timeline.hits.size() > 0 ? math.max(timeline.hits[0].time, 0.05) : 0.1;
@@ -583,7 +605,7 @@ export class CombatController {
 		const totalHits = timeline.hits.size();
 		for (const index of $range(1, totalHits)) {
 			const hitSpec = timeline.hits[index - 1];
-			task.delay(hitSpec.time, () => {
+			this.delayBattle(hitSpec.time, () => {
 				if (this.currentAttackToken !== attackToken || this.battleEnded) return;
 				if (this.followUpCancelledForCurrentAttack && index > 1) return;
 
@@ -593,35 +615,83 @@ export class CombatController {
 				this.tweenModelTo(attacker.model, punchCFrame, PLACEHOLDER_STRIKE_TWEEN_SECONDS);
 
 				// Se tiver Stand (ex.: Star Platinum), projeta o Stand levemente à frente no golpe
-				this.pulseStandStrike(attacker);
+				const extraAdvance = attacker.fighterId.lower() === "jotaro" && slot === 2
+					? PLACEHOLDER_ORA_EXTRA_ADVANCE_STUDS
+					: 0;
+				this.pulseStandStrike(attacker, PLACEHOLDER_STAND_STRIKE_STUDS + extraAdvance);
 
 				this.waitForAndConsumeHitIndex(index, attacker, target, timeline, attackToken);
 			});
 		}
 	}
 
-	private pulseStandStrike(attacker: FighterVisualEntry): void {
-		if (attacker.standModel === undefined) return;
-		const standJoint = attacker.rootPart.FindFirstChild("StandJoint");
-		if (standJoint !== undefined && standJoint.IsA("Motor6D")) {
-			const originalC1 = standJoint.C1;
-			const forwardC1 = originalC1.mul(new CFrame(0, 0, 1.1));
-			const punchIn = TweenService.Create(
+	/** Resolve a pose no eixo do dono, removendo o desvio lateral da pose de descanso. */
+	private standAttackC1(attacker: FighterVisualEntry, advanceStuds = 0): CFrame | undefined {
+		const motion = attacker.standMotion;
+		const part0 = motion?.joint.Part0;
+		if (motion === undefined || part0 === undefined) return undefined;
+		const jointFrame = attacker.rootPart.CFrame.ToObjectSpace(part0.CFrame).mul(motion.joint.C0);
+		const restFrame = jointFrame.mul(motion.baseC1.Inverse());
+		const frontFrame = new CFrame(0, restFrame.Y, -STAND_ATTACK_FRONT_STUDS - advanceStuds);
+		return frontFrame.Inverse().mul(jointFrame);
+	}
+
+	private positionStandForAttack(attacker: FighterVisualEntry, duration: number): void {
+		const motion = attacker.standMotion;
+		const frontC1 = this.standAttackC1(attacker);
+		if (motion === undefined || frontC1 === undefined) return;
+		motion.generation += 1;
+		motion.tween?.Cancel();
+		motion.tween = this.createBattleTween(motion.joint,
+			new TweenInfo(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { C1: frontC1 });
+		motion.tween.Play();
+	}
+
+	private pulseStandStrike(attacker: FighterVisualEntry, advanceStuds = PLACEHOLDER_STAND_STRIKE_STUDS): void {
+		const motion = attacker.standMotion;
+		if (attacker.standModel === undefined || motion === undefined) return;
+		const standJoint = motion.joint;
+		if (standJoint.Parent !== undefined) {
+			motion.generation += 1;
+			const generation = motion.generation;
+			motion.tween?.Cancel();
+			const forwardC1 = this.standAttackC1(attacker, advanceStuds);
+			const frontC1 = this.standAttackC1(attacker);
+			if (forwardC1 === undefined || frontC1 === undefined) return;
+			const punchIn = this.createBattleTween(
 				standJoint,
 				new TweenInfo(PLACEHOLDER_STRIKE_TWEEN_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 				{ C1: forwardC1 },
 			);
+			motion.tween = punchIn;
 			punchIn.Play();
-			task.delay(PLACEHOLDER_STRIKE_TWEEN_SECONDS, () => {
-				if (standJoint.Parent) {
-					TweenService.Create(
+			this.delayBattle(PLACEHOLDER_STRIKE_TWEEN_SECONDS, () => {
+				if (standJoint.Parent && motion.generation === generation) {
+					motion.tween = this.createBattleTween(
 						standJoint,
 						new TweenInfo(PLACEHOLDER_STRIKE_TWEEN_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-						{ C1: originalC1 },
-					).Play();
+						{ C1: frontC1 },
+					);
+					motion.tween.Play();
 				}
 			});
 		}
+	}
+
+	private restoreStandBase(entry: FighterVisualEntry, duration = 0): void {
+		const motion = entry.standMotion;
+		if (motion === undefined) return;
+		// Invalida também recuos atrasados: Cancel sozinho preserva o deslocamento parcial.
+		motion.generation += 1;
+		motion.tween?.Cancel();
+		motion.tween = undefined;
+		if (duration > 0 && motion.joint.Parent !== undefined) {
+			motion.tween = this.createBattleTween(motion.joint,
+				new TweenInfo(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { C1: motion.baseC1 });
+			motion.tween.Play();
+			return;
+		}
+		motion.joint.C1 = motion.baseC1;
 	}
 
 	private waitForAndConsumeHitIndex(
@@ -634,7 +704,7 @@ export class CombatController {
 		if (this.consumedHitIndices.has(hitIndex)) return;
 
 		const deadline = os.clock() + HIT_RESULT_WAIT_SECONDS;
-		while (this.hitResultsByIndex.get(hitIndex) === undefined && os.clock() < deadline) {
+		while (this.hitResultsByIndex.get(hitIndex) === undefined && !defaultTarget.dead && os.clock() < deadline) {
 			if (this.currentAttackToken !== attackToken || this.battleEnded) return;
 			task.wait(HIT_WAIT_POLL_INTERVAL_SECONDS);
 		}
@@ -659,8 +729,11 @@ export class CombatController {
 			const returnDuration = this.followUpCancelledForCurrentAttack
 				? timeline.dodgeReturnTime
 				: timeline.returnTime;
+			this.restoreStandBase(attacker, math.max(returnDuration, 0.08));
 			this.tweenModelTo(attacker.model, attacker.homeCFrame, math.max(returnDuration, 0.08));
 			this.flushPendingDeaths();
+			for (const pending of this.pendingSwitches) this.onSwitchPerformed(pending);
+			this.pendingSwitches.clear();
 		}
 	}
 
@@ -692,7 +765,7 @@ export class CombatController {
 		const size = result.crit ? DAMAGE_BILLBOARD_SIZE_CRIT : DAMAGE_BILLBOARD_SIZE_NORMAL;
 
 		this.showFloatingText(target.attachments.Peito, text, color, size);
-		this.playHitReaction(target, result.crit);
+		if (!target.dead) this.playHitReaction(target, result.crit);
 	}
 
 	private playHitReaction(target: FighterVisualEntry, isCrit: boolean): void {
@@ -701,7 +774,7 @@ export class CombatController {
 		const knockedCF = baseCF.add(baseCF.LookVector.mul(-knockbackDist));
 
 		this.tweenModelTo(target.model, knockedCF, PLACEHOLDER_HIT_REACT_TWEEN_SECONDS);
-		task.delay(PLACEHOLDER_HIT_REACT_TWEEN_SECONDS, () => {
+		this.delayBattle(PLACEHOLDER_HIT_REACT_TWEEN_SECONDS, () => {
 			if (!target.dead && target.model.Parent !== undefined) {
 				this.tweenModelTo(target.model, target.homeCFrame, PLACEHOLDER_HIT_REACT_TWEEN_SECONDS);
 			}
@@ -713,7 +786,7 @@ export class CombatController {
 		const dodgeCF = baseCF.add(baseCF.RightVector.mul(PLACEHOLDER_DODGE_OFFSET_STUDS));
 
 		this.tweenModelTo(target.model, dodgeCF, PLACEHOLDER_DODGE_TWEEN_SECONDS);
-		task.delay(PLACEHOLDER_DODGE_TWEEN_SECONDS, () => {
+		this.delayBattle(PLACEHOLDER_DODGE_TWEEN_SECONDS, () => {
 			if (!target.dead && target.model.Parent !== undefined) {
 				this.tweenModelTo(target.model, target.homeCFrame, PLACEHOLDER_DODGE_TWEEN_SECONDS);
 			}
@@ -781,15 +854,15 @@ export class CombatController {
 	private onFighterDied(payload: FighterDiedPayload): void {
 		if (this.battleEnded) return;
 		this.pendingDeaths.set(payload.fighterId, { payload });
-		if (this.activePendingHits <= 0) {
-			this.flushPendingDeaths();
-		}
+		// Provis?rio: KO imediato; a troca chega separadamente ao fim de ATTACK.
+		this.flushPendingDeaths();
 	}
 
 	private flushPendingDeaths(): void {
 		for (const [deadTargetId, record] of this.pendingDeaths) {
 			const deadFighter = this.fightersByTargetId.get(deadTargetId);
 			if (deadFighter !== undefined && !deadFighter.dead) {
+				this.restoreStandBase(deadFighter);
 				deadFighter.dead = true;
 				deadFighter.active = false;
 				deadFighter.hp = 0;
@@ -807,8 +880,8 @@ export class CombatController {
 					.add(new Vector3(0, -0.6, 0))
 					.mul(CFrame.Angles(math.rad(-80), 0, 0));
 				this.tweenModelTo(deadFighter.model, koCFrame, PLACEHOLDER_KO_TWEEN_SECONDS);
-				task.delay(PLACEHOLDER_KO_TWEEN_SECONDS, () => {
-					if (deadFighter.model.Parent !== undefined) {
+				this.delayBattle(PLACEHOLDER_KO_TWEEN_SECONDS, () => {
+					if (deadFighter.model.Parent !== undefined && record.payload.nextActive !== undefined) {
 						deadFighter.homeCFrame = this.computeBenchSlotCFrame(
 							deadFighter.sideIndex,
 							deadFighter.benchIndex,
@@ -836,6 +909,10 @@ export class CombatController {
 
 	private onSwitchPerformed(payload: SwitchPerformedPayload): void {
 		if (this.battleEnded) return;
+		if (this.activePendingHits > 0) {
+			this.pendingSwitches.push(payload);
+			return;
+		}
 		const previous = this.fightersByTargetId.get(payload.previousFighterId);
 		const nextActive = this.fightersByTargetId.get(payload.activeFighterId);
 
@@ -854,41 +931,6 @@ export class CombatController {
 		}
 	}
 
-	private onBattleEnded(payload: BattleEndedPayload): void {
-		// Não espera RETURN nem IDLE: encerra imediatamente
-		this.battleEnded = true;
-		this.currentAttackToken += 1;
-		this.activePendingHits = 0;
-		this.flushPendingDeaths();
-
-		const playerSideId = this.sideIds[0];
-		const isVictory = payload.winnerSideId !== undefined && payload.winnerSideId === playerSideId;
-		const bannerText = isVictory ? "VICTORY" : "DEFEAT";
-		const bannerColor = isVictory
-			? COMBAT_FEEDBACK_COLORS.victoryBanner
-			: COMBAT_FEEDBACK_COLORS.defeatBanner;
-
-		// Exibe resultado sobre o lutador ativo vencedor (ou primeiro disponível)
-		for (const [, entry] of this.fightersByTargetId) {
-			if (entry.active || entry.sideId === payload.winnerSideId) {
-				this.showFloatingText(
-					entry.attachments.Cabeca,
-					bannerText,
-					bannerColor,
-					DAMAGE_BILLBOARD_SIZE_BANNER,
-					BATTLE_END_CLEANUP_DELAY_SECONDS,
-				);
-				break;
-			}
-		}
-
-		task.delay(BATTLE_END_CLEANUP_DELAY_SECONDS, () => {
-			if (this.battleEnded) {
-				this.cleanupStage();
-			}
-		});
-	}
-
 	private tweenModelTo(model: Model, targetCFrame: CFrame, duration: number): void {
 		const root = model.PrimaryPart;
 		if (root === undefined || !model.Parent) return;
@@ -896,7 +938,7 @@ export class CombatController {
 			model.PivotTo(targetCFrame);
 			return;
 		}
-		const tween = TweenService.Create(
+		const tween = this.createBattleTween(
 			root,
 			new TweenInfo(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 			{ CFrame: targetCFrame },
@@ -904,22 +946,68 @@ export class CombatController {
 		tween.Play();
 	}
 
-	private cleanupStage(): void {
-		for (const [, entry] of this.fightersByTargetId) {
-			for (const [, emitter] of entry.effectEmitters) {
-				emitter.Enabled = false;
-				emitter.Destroy();
-			}
-			entry.effectEmitters.clear();
+	private createBattleTween<T extends Instance>(object: T, info: TweenInfo, goal: Partial<ExtractMembers<T, Tweenable>>): Tween {
+		const tween = TweenService.Create(object, info, goal);
+		this.battleTweens.add(tween);
+		const connection = tween.Completed.Connect(() => {
+			connection.Disconnect();
+			this.battleConnections.delete(connection);
+			this.battleTweens.delete(tween);
+		});
+		this.battleConnections.add(connection);
+		return tween;
+	}
+
+	private delayBattle(seconds: number, callback: () => void): void {
+		const pending = task.delay(seconds, () => {
+			callback();
+			this.battleTasks.delete(pending);
+		});
+		this.battleTasks.add(pending);
+	}
+
+	private spawnBattle(callback: () => void): void {
+		// defer registers the thread before it can yield waiting for a hit.
+		const pending = task.defer(() => {
+			callback();
+			this.battleTasks.delete(pending);
+		});
+		this.battleTasks.add(pending);
+	}
+
+	/** Called only by the client teardown, or before replacing a stage on BattleStarted. */
+	public cleanupStage(): void {
+		this.battleEnded = true;
+		this.currentAttackToken += 1;
+		this.activePendingHits = 0;
+		for (const connection of this.battleConnections) battleCleanupStep("combat connection", () => connection.Disconnect());
+		this.battleConnections.clear();
+		for (const pending of this.battleTasks) battleCleanupStep("combat task", () => task.cancel(pending));
+		this.battleTasks.clear();
+		for (const tween of this.battleTweens) battleCleanupStep("combat tween", () => tween.Cancel());
+		this.battleTweens.clear();
+		for (const track of this.battleTracks) {
+			battleCleanupStep("animation stop", () => track.Stop(0));
+			battleCleanupStep("animation destroy", () => track.Destroy());
 		}
+		this.battleTracks.clear();
+		for (const [, entry] of this.fightersByTargetId) {
+			battleCleanupStep("stand base", () => this.restoreStandBase(entry));
+			battleCleanupStep("fighter base", () => entry.model.PivotTo(entry.homeCFrame));
+		}
+		for (const item of this.billboardPool) {
+			battleCleanupStep("damage popup", () => {
+				item.billboard.Enabled = false;
+				item.billboard.Adornee = undefined;
+				item.inUse = false;
+			});
+		}
+		battleCleanupStep("stage destroy", () => this.stageFolder?.Destroy());
+		this.stageFolder = undefined;
+		this.pendingSwitches.clear();
 		this.fightersByTargetId.clear();
 		this.hitResultsByIndex.clear();
 		this.consumedHitIndices.clear();
 		this.pendingDeaths.clear();
-
-		if (this.stageFolder !== undefined) {
-			this.stageFolder.Destroy();
-			this.stageFolder = undefined;
-		}
 	}
 }

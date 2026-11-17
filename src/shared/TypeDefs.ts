@@ -121,6 +121,8 @@ export interface SessionLockInfo {
 
 /** Schema versionado de persistência de dados do jogador no DataStore (T7.2). */
 export interface PlayerSaveData {
+	/** Ausente somente nos schemas anteriores a v3. */
+	readonly pvp?: PvpSaveData;
 	/** Ausente apenas nos registros legados v0/v1. Obrigatório na validação v2. */
 	readonly shopRestockCounts?: number[];
 	readonly version: number;
@@ -128,4 +130,11 @@ export interface PlayerSaveData {
 	readonly inventory: FighterInventoryItem[];
 	readonly activeTeam: string[];
 	readonly sessionLock?: SessionLockInfo;
+}
+
+export interface PvpSaveData {
+	pairs: Record<string, { count: number; windowStart: number }>;
+	dailyTinyes: number;
+	dailyXp: number;
+	dayKey: number;
 }

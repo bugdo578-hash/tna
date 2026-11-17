@@ -1,6 +1,7 @@
 import { CollectionService, Players, ProximityPromptService, ReplicatedStorage, StarterGui, Workspace } from "@rbxts/services";
 import { BATTLE_NPC_TAG, NPC_BATTLE_ACTIVE_ATTRIBUTE } from "../../shared/Config";
-import { REMOTE_NAMES, REMOTES_FOLDER_NAME } from "../../shared/Remotes";
+import { REMOTE_NAMES, REMOTES_FOLDER_NAME, type NpcBattleNoticePayload } from "../../shared/Remotes";
+import { UITheme } from "../UI/UITheme";
 import { BattleRemotes } from "./BattleRemotes";
 
 const player = Players.LocalPlayer;
@@ -39,7 +40,10 @@ ProximityPromptService.PromptShown.Connect((prompt) => hide(prompt));
 Workspace.DescendantAdded.Connect((descendant) => { if (descendant.IsA("ProximityPrompt")) hide(descendant); });
 CollectionService.GetInstanceAddedSignal(BATTLE_NPC_TAG).Connect(() => update(inBattle));
 const notice = ReplicatedStorage.WaitForChild(REMOTES_FOLDER_NAME).WaitForChild(REMOTE_NAMES.NpcBattleNotice) as RemoteEvent;
-notice.OnClientEvent.Connect((message: string) => {
-	pcall(() => StarterGui.SetCore("SendNotification", { Title: "Batalha", Text: message }));
+notice.OnClientEvent.Connect((payload: NpcBattleNoticePayload) => {
+	const message = payload.reason === "cooldown"
+		? UITheme.Npc.FormatRematchCooldown(payload.remainingSeconds)
+		: UITheme.Npc.NoticeTexts[payload.reason];
+	pcall(() => StarterGui.SetCore("SendNotification", { Title: UITheme.Npc.NoticeTitle, Text: message }));
 });
 update(inBattle);

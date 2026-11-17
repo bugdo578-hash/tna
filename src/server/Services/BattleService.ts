@@ -146,6 +146,8 @@ export class BattleService {
 	private returnDuration = 0;
 	private nextTickSideIndex: 0 | 1 = 0;
 	private battleEnded = false;
+	// Provisório: manter o ativo morto até terminar ATTACK; ignorar os hits restantes.
+	private pendingSwitchSide: BattleSide | undefined;
 
 	public constructor(
 		firstSide: BattleSide,
@@ -296,6 +298,7 @@ export class BattleService {
 		const slot = this.skillSlot;
 		if (side === undefined || slot === undefined) return false;
 		const defenderSide = side === this.sides[0] ? this.sides[1] : this.sides[0];
+		if (this.pendingSwitchSide === defenderSide) return false;
 		const attacker = side.getActiveFighter();
 		const target = defenderSide.getActiveFighter();
 		const result = this.damageService.resolveHit(attacker, target, slot, hitTimeline.damageShare, this.rng);
@@ -372,8 +375,13 @@ export class BattleService {
 	}
 
 	private handleFighterDeath(defenderSide: BattleSide, deadFighter: Fighter): void {
+		deadFighter.statusEffects.delete("Burn");
+		deadFighter.statusEffects.delete("Bleed");
 		let nextActive: Fighter | undefined;
-		if (!defenderSide.getActiveFighter().isAlive()) {
+		if (this.state === "ATTACK" && defenderSide.getActiveFighter() === deadFighter && !defenderSide.isDefeated()) {
+			this.pendingSwitchSide = defenderSide;
+			defenderSide.resetAtb();
+		} else if (!defenderSide.getActiveFighter().isAlive()) {
 			const nextIndex = defenderSide.onActiveFighterDeath(this.rng);
 			nextActive = nextIndex === undefined ? undefined : defenderSide.getActiveFighter();
 		} else {
@@ -396,6 +404,14 @@ export class BattleService {
 	}
 
 	private enterReturn(duration: number): void {
+		const side = this.pendingSwitchSide;
+		this.pendingSwitchSide = undefined;
+		if (side !== undefined) {
+			const previousFighter = side.getActiveFighter();
+			if (side.onActiveFighterDeath(this.rng) !== undefined) {
+				this.events.switchPerformed.fire({ side, previousFighter, activeFighter: side.getActiveFighter() });
+			}
+		}
 		this.phaseElapsed = 0;
 		this.returnDuration = duration;
 		this.setState("RETURN");

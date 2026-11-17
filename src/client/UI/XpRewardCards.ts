@@ -1,3 +1,4 @@
+import { battleCleanupStep } from "../Controllers/BattleCleanup";
 import { TweenService } from "@rbxts/services";
 import { S3_UNLOCK_LEVEL } from "../../shared/Config";
 import type { FighterXpReward } from "../../shared/TypeDefs";
@@ -15,13 +16,13 @@ export class XpRewardCards {
     }
     private release(destroyRoot: boolean): void {
         this.generation++;
-        for (const connection of this.connections) connection.Disconnect();
+        for (const connection of this.connections) battleCleanupStep("XP connection", () => connection.Disconnect());
         this.connections.clear();
-        for (const tween of this.tweens) tween.Cancel();
+        for (const tween of this.tweens) battleCleanupStep("XP tween", () => tween.Cancel());
         this.tweens.clear();
         const root = this.root;
         this.root = undefined;
-        if (destroyRoot && root !== undefined && root.Parent !== undefined) root.Destroy();
+        if (destroyRoot && root !== undefined) battleCleanupStep("XP root", () => root.Destroy());
     }
     public show(overlay: Frame | undefined, rewards?: readonly FighterXpReward[]): void {
         this.clear();
