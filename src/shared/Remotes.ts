@@ -39,6 +39,8 @@ export const REMOTE_NAMES = {
 	RequestPurchase: "RequestPurchase",
 	PurchaseResult: "PurchaseResult",
 	ShopState: "ShopState",
+	InventoryState: "InventoryState",
+	RequestSetTeam: "RequestSetTeam",
 	TinyesChanged: "TinyesChanged",
 	RequestSkill: "RequestSkill",
 	RequestSwitch: "RequestSwitch",

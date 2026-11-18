@@ -2,6 +2,12 @@
 
 Registro conciso de mudanças a partir de `2026-11-14` (ordem cronológica reversa). Histórico anterior a `2026-11-14` (base inicial T1–T5, T7.1, T7.2 e primeira correção de DataStore/autosave): [CHANGELOG_ARCHIVE.md](CHANGELOG_ARCHIVE.md). Estado operacional atual: [HANDOFF.md](HANDOFF.md).
 
+## 2026-11-18 — Refatoração: remotes e `Signal` para `shared`
+
+- `src/shared/Remotes.ts`, `src/server/Services/RemoteService.ts`, `src/client/Controllers/InventoryController.ts`: adicionados `InventoryState` e `RequestSetTeam` em `REMOTE_NAMES` com strings idênticas e substituídas as strings literais nos consumidores.
+- `src/shared/Signal.ts`, `src/server/Services/BattleService.ts`, `docs/repo_map.md`: movida a classe `Signal<T>` de `BattleService.ts` para `src/shared/Signal.ts` (sem `pcall` em `fire`, sem mudança de comportamento), com re-export em `BattleService.ts` e atualização de `docs/repo_map.md`.
+- Validação em Play novo no Studio: `npx.cmd rbxtsc` (0 erros), `BattleSimulator.runSimulation()` (1.000 lutas dummy `49.7% / 298.98275s`; Jotaro vs Anubis `68% / 67.5943s`; sem erros até o fim), `VFX_CONTROLLER_QA_PASSED` (179), `BATTLE_TEARDOWN_CLIENT_PASSED` (538), `ORA_RETURN_CLIENT_PASSED` (105) e `git diff --check`.
+
 ## 2026-11-17 — Listener de `VFXEvent` no mundo, rate limit client e diagnóstico (`VFXController`)
 
 - `src/client/UI/VFXConfig.ts`: adicionadas constantes `VFX_REMOTE_EVENT_NAME = "VFXEvent"`, `VFX_DEBUG = false` e rate limit provisório (`VFX_REMOTE_BUCKET_CAPACITY = 12`, `VFX_REMOTE_REFILL_PER_SECOND = 10`, `VFX_REMOTE_RATE_LIMIT_TOLERANCE = 1e-6`).

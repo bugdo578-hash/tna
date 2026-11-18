@@ -6,6 +6,7 @@ import {
 	S3_UNLOCK_LEVEL,
 } from "../../shared/Config";
 import { calcCusto } from "../../shared/MathUtils";
+import { Signal } from "../../shared/Signal";
 import type { SkillData, SkillHitTimeline } from "../../shared/SkillData";
 import type { BattleGlobalState, SkillSlot, StatusEffect } from "../../shared/TypeDefs";
 import { BattleSide, type FighterIndex } from "../Components/BattleSide";
@@ -15,28 +16,7 @@ import { DamageService, type HitResult } from "./DamageService";
 
 const STATUS_EFFECT_ORDER: readonly StatusEffect[] = ["Bleed", "Burn", "Root"];
 
-type Listener<T> = (value: T) => void;
-
-interface ListenerRecord<T> {
-	readonly callback: Listener<T>;
-	connected: boolean;
-}
-
-export class Signal<T> {
-	private readonly listeners: ListenerRecord<T>[] = [];
-
-	public connect(listener: Listener<T>): () => void {
-		const record: ListenerRecord<T> = { callback: listener, connected: true };
-		this.listeners.push(record);
-		return () => (record.connected = false);
-	}
-
-	public fire(value: T): void {
-		for (const listener of this.listeners) {
-			if (listener.connected) listener.callback(value);
-		}
-	}
-}
+export { Signal };
 
 export interface AttackStartedEvent {
 	readonly attacker: Fighter;

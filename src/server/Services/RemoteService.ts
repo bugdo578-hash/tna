@@ -104,8 +104,8 @@ export class RemoteService implements BattleRemoteAdapter {
 		this.requestPurchase = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.RequestPurchase);
 		this.purchaseResult = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.PurchaseResult);
 		this.shopState = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.ShopState);
-		this.inventoryState = this.getOrCreateRemote(remotesFolder, "InventoryState");
-		this.requestSetTeam = this.getOrCreateRemote(remotesFolder, "RequestSetTeam");
+		this.inventoryState = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.InventoryState);
+		this.requestSetTeam = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.RequestSetTeam);
 		this.tinyesChanged = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.TinyesChanged);
 		this.requestSkill = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.RequestSkill);
 		this.requestSwitch = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.RequestSwitch);

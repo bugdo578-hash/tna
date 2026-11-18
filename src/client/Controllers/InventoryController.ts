@@ -48,7 +48,7 @@ export class InventoryController {
 		}));
 		this.lifetime.push(this.gui.Destroying.Connect(() => this.destroy()));
 		const folder = ReplicatedStorage.WaitForChild(REMOTES_FOLDER_NAME);
-		const inventory = folder.WaitForChild("InventoryState") as RemoteEvent;
+		const inventory = folder.WaitForChild(REMOTE_NAMES.InventoryState) as RemoteEvent;
 		this.lifetime.push(inventory.OnClientEvent.Connect((payload: InventoryState) => {
 			this.state = payload;
 			if (this.panel !== undefined) this.render();
@@ -64,7 +64,7 @@ export class InventoryController {
 			this.toggle.Visible = true;
 		}));
 		this.allocate = folder.WaitForChild(REMOTE_NAMES.RequestAllocate) as RemoteEvent;
-		this.setTeam = folder.WaitForChild("RequestSetTeam") as RemoteEvent;
+		this.setTeam = folder.WaitForChild(REMOTE_NAMES.RequestSetTeam) as RemoteEvent;
 	}
 
 	public close(): void {

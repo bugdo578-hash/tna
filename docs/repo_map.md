@@ -11,7 +11,7 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `Services/AIService.ts`: IA Bronze PVE (reação, erro 30%, S3 bloqueado < Lv5, trocas por HP/tempo; só envia intenções).
 - `Services/ATBService.ts`: avança barra ATB (`0–10`) em `IDLE` quando ativo está vivo e `NORMAL`.
 - `Services/BattleMovement.ts`: congela/restaura `WalkSpeed`/`JumpPower`/`JumpHeight`/`UseJumpPower` e `NpcBattleActive` (NPC/PVP).
-- `Services/BattleService.ts`: núcleo puro (`IDLE/PREPARE/ATTACK/RETURN`), hits, DoT/Root, troca adiada em KO e classe `Signal` (baixa prioridade: mover para `shared`).
+- `Services/BattleService.ts`: núcleo puro (`IDLE/PREPARE/ATTACK/RETURN`), hits, DoT/Root, troca adiada em KO (re-exporta `Signal` de `shared/Signal`).
 - `Services/BattleSessionService.ts`: sessões isoladas por jogador, `Heartbeat`, pause/quit/timeouts e recompensas PVE/PVP.
 - `Services/BattleTeamFactory.ts`: monta `BattleSide` a partir do inventário (`createPlayerInventorySide`) ou real (`makeRealFighter`).
 - `Services/DamageService.ts`: rola Dodge/Crit por hit e aplica dano base, counter e `CRIT_MULTIPLIER`.
@@ -62,6 +62,7 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `RewardMath.ts`: `calcAverageLevel` (só presentes) e `calcRewardBracket` (Bronze/Prata/Ouro).
 - `DayNightCycle.ts`: funções puras e `DayNightCycleApplier` para ciclo solar e interpolação Gamma 2.0.
 - `Remotes.ts`: `REMOTE_NAMES` e tipos de payloads; `RemoteService` também cria `InventoryState` e `RequestSetTeam`.
+- `Signal.ts`: classe `Signal<T>` (`fire` sem `pcall`, re-exportada por `BattleService.ts`).
 - `tools/`: QAs Luau para Client/Server no Studio (`vfx-controller-qa`, `ora-return-client-qa`, `battle-teardown-*-qa`, `shop-ui-qa`) e `compress-log.py`.
 
 ## Remotes (`src/shared/Remotes.ts` → `ReplicatedStorage/Remotes`)
@@ -93,4 +94,3 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 ## FUTURO (não existe)
 - **Funções puras/constantes sem uso em combate (FUTURO):** `CARREGANDO` (`CHARGE_DAMAGE_MULTIPLIER = 1.5`), dupla `Bruford/Tarkus` (`DuoState`/`DUO_*`), `BuffMulti`/`WeakMulti` (`MathUtils`: `capFinal * min(aplicações, 4) / 4`) e `Time Stop` real (Jotaro S3 é 1 hit provisório).
 - **Não existem no código:** `Hamon`, `Block`, `Stun`, `Silence`, `Weaken`, `Clean`, `Vulnerabilidade`, `Resistência`, `Freeze`, chips equipáveis, reorganizar skills, soft counter Support/Controller, tiers/NPCs `Rival`/`Prata`/`Ouro`/`Boss`, `Torneio`, `Crate`, `Arena`/`ServerStorage/Arenas`, `Tag`, `Input`, `Camera`, `Cutscene`, `Sound`, `ShopData`, `AIBrain` e `Components/Skill`.
-- **Manutenção:** mover `Signal` de `BattleService.ts` para `src/shared/` (`fire` sem `pcall`).
