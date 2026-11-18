@@ -1,5 +1,5 @@
 // Constantes de animação de caminhada do jogador (client).
-export const PLAYER_WALK_ANIMATION_ID = "rbxassetid://111044613384520";
+export const PLAYER_WALK_ANIMATION_ID = "rbxassetid://104496379340405";
 export const PLAYER_WALK_SPEED_MULTIPLIER = 1.4;
 export const PLAYER_WALK_MIN_SPEED = 0.5;
 export const PLAYER_WALK_FADE_IN_SECONDS = 0.15;
