@@ -18,7 +18,8 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `Services/DayNightService.ts`: publica âncora solar e atributos replicáveis do ciclo dia/noite no `Workspace`.
 - `Services/InventoryService.ts`: monta snapshot privado `InventoryState` (`effectiveStats`, `s3Unlocked`, `unavailable`) e `setTeam`.
 - `Services/NpcService.ts`: vincula `BattleNpc`/`Workspace.Npc_Luta`, `ProximityPrompt`, validações e cooldown pós-vitória em memória.
-- `Services/PlayerDataService.ts`: persistência DataStore (`UpdateAsync`, schema `v4`, locks, backups, autosave, PVP/Tinyes/time).
+- `Services/PlayerDataService.ts`: persistência DataStore (`UpdateAsync`, schema `v4`, locks, backups, autosave, PVP/Tinyes/time; re-exporta `PlayerDataValidation`).
+- `Services/PlayerDataValidation.ts`: validação pura de save/itens/stats/skills, migração de schema, clonagem profunda e `InMemoryDataStore`.
 - `Services/ProgressionService.ts`: inventário clonado em memória, `addXp`, `awardPostBattleTeamXp` e `allocatePoints`.
 - `Services/PvpService.ts`: `ProximityPrompt` de duelo no `HumanoidRootPart`, convites/expiração/buckets e início PVP.
 - `Services/RemoteService.ts`: cria 26 `RemoteEvent`s em `ReplicatedStorage/Remotes`, valida payloads e aplica token buckets.
