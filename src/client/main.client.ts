@@ -15,6 +15,7 @@ import { DayNightController } from "./Controllers/DayNightController";
 import { PvpController } from "./Controllers/PvpController";
 import { ChallengePromptController } from "./Controllers/ChallengePromptController";
 import { CharacterAnimationController } from "./Controllers/CharacterAnimationController";
+import { VFXController } from "./Controllers/VFXController";
 
 new CharacterAnimationController().start();
 
@@ -27,8 +28,11 @@ dayNightController.start();
 const pvpController = new PvpController();
 pvpController.start();
 
-const combatController = new CombatController();
+const vfxController = new VFXController();
+vfxController.start();
+
+const combatController = new CombatController(vfxController);
 combatController.start();
 
-const battleHud = new BattleHUD(combatController);
+const battleHud = new BattleHUD(combatController, vfxController);
 battleHud.start();

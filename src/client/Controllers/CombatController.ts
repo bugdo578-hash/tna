@@ -49,6 +49,15 @@ import { ANUBIS_SKILL_DATA, JOTARO_SKILL_DATA, type SkillData } from "../../shar
 import type { SkillSlot, StatusEffect } from "../../shared/TypeDefs";
 import { battleCleanupStep } from "./BattleCleanup";
 import { BattleRemotes } from "./BattleRemotes";
+import {
+	VFX_ASSETS_FOLDER_NAME,
+	VFX_ATTR_IGNORAR_CULLING,
+	VFX_GLOBAL_CRIT_NAME,
+	VFX_GLOBAL_HIT_NAME,
+	VFX_GLOBAL_KO_NAME,
+	VFX_PRIORIDADE_ESSENCIAL,
+} from "../UI/VFXConfig";
+import type { VFXController, VfxOrigem, VfxPrioridade } from "./VFXController";
 
 export interface RigAttachmentMap {
 	readonly Peito: Attachment | BasePart;
@@ -101,6 +110,9 @@ export class CombatController {
 	private readonly battleConnections = new Set<RBXScriptConnection>();
 	private readonly battleTasks = new Set<thread>();
 	private readonly battleTracks = new Set<AnimationTrack>();
+	private readonly preloadedVfxEntries: { readonly folder: Instance; readonly generation: number }[] = [];
+	private readonly battleVfxWorkingCopies = new Map<string, Instance>();
+	private readonly vfxCarrierParts = new Map<Instance, BasePart>();
 
 	private stageFolder: Folder | undefined;
 	private poolContainer: Folder | undefined;
@@ -109,7 +121,13 @@ export class CombatController {
 	private activePendingHits = 0;
 	private followUpCancelledForCurrentAttack = false;
 	private battleEnded = false;
+	private battleVfxGeneration = 0;
 	private started = false;
+
+	public constructor(
+		private readonly vfxController?: VFXController,
+		private readonly assetsRoot: Instance = ReplicatedStorage,
+	) {}
 
 	public start(): void {
 		if (this.started) return;
@@ -142,6 +160,26 @@ export class CombatController {
 		});
 		BattleRemotes.stateChanged.OnClientEvent.Connect(() => {});
 		BattleRemotes.atbSync.OnClientEvent.Connect(() => {});
+	}
+
+	/** Retorna a geração atual da batalha para proteger o deload contra teardowns atrasados. */
+	public getBattleGeneration(): number {
+		return this.battleVfxGeneration;
+	}
+
+	/** Descarrega as pastas de VFX pré-carregadas desta batalha, ignorando gerações já substituídas. */
+	public deloadBattleVfx(expectedGeneration?: number): void {
+		if (expectedGeneration !== undefined && expectedGeneration !== this.battleVfxGeneration) {
+			return;
+		}
+		if (this.vfxController !== undefined) {
+			for (const entry of this.preloadedVfxEntries) {
+				this.vfxController.deload(entry.folder, entry.generation);
+			}
+		}
+		this.preloadedVfxEntries.clear();
+		this.battleVfxWorkingCopies.clear();
+		this.vfxCarrierParts.clear();
 	}
 
 	/** Retorna o modelo instanciado para `targetId` (útil para câmera e HUD). */
@@ -255,6 +293,7 @@ export class CombatController {
 
 	private onBattleStarted(payload: BattleStartedPayload): void {
 		this.cleanupStage();
+		this.battleVfxGeneration += 1;
 		this.battleEnded = false;
 		this.sideIds = payload.sides;
 		this.currentAttackToken += 1;
@@ -326,10 +365,12 @@ export class CombatController {
 			this.fightersByTargetId.set(snapshot.targetId, entry);
 			this.applyActiveVisualState(entry);
 		}
+
+		this.preloadBattleVfx(payload);
 	}
 
 	private cloneFighterAsset(fighterId: string): Model {
-		const assetsFolder = ReplicatedStorage.FindFirstChild(ASSETS_FOLDER_NAME);
+		const assetsFolder = this.assetsRoot.FindFirstChild(ASSETS_FOLDER_NAME);
 		const fightersFolder = assetsFolder?.FindFirstChild(FIGHTER_ASSETS_FOLDER_NAME);
 		const template = fightersFolder?.FindFirstChild(fighterId) ?? fightersFolder?.FindFirstChild(fighterId.lower());
 		if (template !== undefined && template.IsA("Model")) {
@@ -569,7 +610,7 @@ export class CombatController {
 				this.pulseStandStrike(attacker, PLACEHOLDER_STAND_STRIKE_STUDS +
 					(attacker.fighterId.lower() === "jotaro" && slot === 2 ? PLACEHOLDER_ORA_EXTRA_ADVANCE_STUDS : 0));
 				this.spawnBattle(() => {
-					this.waitForAndConsumeHitIndex(index, attacker, target, timeline, attackToken);
+					this.waitForAndConsumeHitIndex(index, attacker, target, timeline, attackToken, slot);
 				});
 			}));
 
@@ -578,7 +619,7 @@ export class CombatController {
 			this.delayBattle(scheduledHit.time + HIT_RESULT_WAIT_SECONDS, () => {
 				if (this.currentAttackToken !== attackToken || this.battleEnded) return;
 				if (!this.consumedHitIndices.has(index)) {
-					this.waitForAndConsumeHitIndex(index, attacker, target, timeline, attackToken);
+					this.waitForAndConsumeHitIndex(index, attacker, target, timeline, attackToken, slot);
 				}
 			});
 		}
@@ -620,7 +661,7 @@ export class CombatController {
 					: 0;
 				this.pulseStandStrike(attacker, PLACEHOLDER_STAND_STRIKE_STUDS + extraAdvance);
 
-				this.waitForAndConsumeHitIndex(index, attacker, target, timeline, attackToken);
+				this.waitForAndConsumeHitIndex(index, attacker, target, timeline, attackToken, slot);
 			});
 		}
 	}
@@ -700,6 +741,7 @@ export class CombatController {
 		defaultTarget: FighterVisualEntry,
 		timeline: SkillData,
 		attackToken: number,
+		slot: SkillSlot,
 	): void {
 		if (this.consumedHitIndices.has(hitIndex)) return;
 
@@ -716,7 +758,7 @@ export class CombatController {
 
 		const results = this.hitResultsByIndex.get(hitIndex) ?? [];
 		for (const result of results) {
-			this.presentHitResult(result, defaultTarget);
+			this.presentHitResult(result, defaultTarget, attacker, timeline, slot);
 			if (result.followUpCancelled) {
 				this.followUpCancelledForCurrentAttack = true;
 			}
@@ -737,7 +779,13 @@ export class CombatController {
 		}
 	}
 
-	private presentHitResult(result: HitResolvedPayload, fallbackTarget: FighterVisualEntry): void {
+	private presentHitResult(
+		result: HitResolvedPayload,
+		fallbackTarget: FighterVisualEntry,
+		attacker?: FighterVisualEntry,
+		timeline?: SkillData,
+		slot?: SkillSlot,
+	): void {
 		const target = this.fightersByTargetId.get(result.targetId) ?? fallbackTarget;
 
 		if (!result.hit) {
@@ -765,6 +813,9 @@ export class CombatController {
 		const size = result.crit ? DAMAGE_BILLBOARD_SIZE_CRIT : DAMAGE_BILLBOARD_SIZE_NORMAL;
 
 		this.showFloatingText(target.attachments.Peito, text, color, size);
+		if (attacker !== undefined && timeline !== undefined && slot !== undefined) {
+			this.emitHitVfx(attacker, target, timeline, slot, result.crit);
+		}
 		if (!target.dead) this.playHitReaction(target, result.crit);
 	}
 
@@ -874,6 +925,7 @@ export class CombatController {
 					emitter.Destroy();
 				}
 				deadFighter.effectEmitters.clear();
+				this.emitKoVfx(deadFighter);
 
 				// Animação placeholder de KO (tomba para trás)
 				const koCFrame = deadFighter.homeCFrame
@@ -1002,6 +1054,8 @@ export class CombatController {
 				item.inUse = false;
 			});
 		}
+		battleCleanupStep("vfx clear", () => this.vfxController?.clear());
+		battleCleanupStep("vfx deload", () => this.deloadBattleVfx());
 		battleCleanupStep("stage destroy", () => this.stageFolder?.Destroy());
 		this.stageFolder = undefined;
 		this.pendingSwitches.clear();
@@ -1009,5 +1063,230 @@ export class CombatController {
 		this.hitResultsByIndex.clear();
 		this.consumedHitIndices.clear();
 		this.pendingDeaths.clear();
+		this.preloadedVfxEntries.clear();
+		this.battleVfxWorkingCopies.clear();
+		this.vfxCarrierParts.clear();
+	}
+
+	private getGlobalVfxRoot(): Instance | undefined {
+		const assetsFolder = this.assetsRoot.FindFirstChild(ASSETS_FOLDER_NAME);
+		return assetsFolder?.FindFirstChild(VFX_ASSETS_FOLDER_NAME);
+	}
+
+	private preloadBattleVfx(payload: BattleStartedPayload): void {
+		if (this.vfxController === undefined) return;
+		const gen = this.battleVfxGeneration;
+		const seen = new Set<Instance>();
+		const registrarPreload = (folder: Instance | undefined): void => {
+			if (folder === undefined || folder.Parent === undefined || seen.has(folder)) return;
+			seen.add(folder);
+			this.vfxController?.preload(folder, gen);
+			this.preloadedVfxEntries.push({ folder, generation: gen });
+		};
+
+		const vfxRoot = this.getGlobalVfxRoot();
+		if (vfxRoot !== undefined) {
+			registrarPreload(vfxRoot.FindFirstChild(VFX_GLOBAL_HIT_NAME));
+			registrarPreload(vfxRoot.FindFirstChild(VFX_GLOBAL_CRIT_NAME));
+			registrarPreload(vfxRoot.FindFirstChild(VFX_GLOBAL_KO_NAME));
+
+			for (const snapshot of payload.fighters) {
+				const fighterFolder =
+					vfxRoot.FindFirstChild(snapshot.fighterId) ?? vfxRoot.FindFirstChild(snapshot.fighterId.lower());
+				registrarPreload(fighterFolder);
+			}
+		}
+
+		for (const [, entry] of this.fightersByTargetId) {
+			registrarPreload(entry.model.FindFirstChild(VFX_ASSETS_FOLDER_NAME));
+		}
+	}
+
+	private resolveSkillVfx(
+		attacker: FighterVisualEntry,
+		timeline: SkillData,
+		slot: SkillSlot,
+	): { readonly instance: Instance; readonly isInModel: boolean; readonly key: string } | undefined {
+		const skillName = timeline.name ?? `S${slot}`;
+		const slotName = `S${slot}`;
+
+		const modelVfx = attacker.model.FindFirstChild(VFX_ASSETS_FOLDER_NAME);
+		if (modelVfx !== undefined) {
+			const direct = modelVfx.FindFirstChild(skillName) ?? modelVfx.FindFirstChild(slotName);
+			if (direct !== undefined) {
+				return { instance: direct, isInModel: true, key: `model:${attacker.targetId}:${direct.Name}` };
+			}
+		}
+
+		const vfxRoot = this.getGlobalVfxRoot();
+		if (vfxRoot === undefined) return undefined;
+
+		const fighterVfx =
+			vfxRoot.FindFirstChild(attacker.fighterId) ?? vfxRoot.FindFirstChild(attacker.fighterId.lower());
+		if (fighterVfx !== undefined) {
+			const found = fighterVfx.FindFirstChild(skillName) ?? fighterVfx.FindFirstChild(slotName);
+			if (found !== undefined) {
+				return { instance: found, isInModel: false, key: `fighter:${attacker.fighterId.lower()}:${found.Name}` };
+			}
+		}
+
+		return undefined;
+	}
+
+	private resolveNamedCombatVfx(
+		fighter: FighterVisualEntry,
+		effectName: string,
+	): { readonly instance: Instance; readonly isInModel: boolean; readonly key: string } | undefined {
+		const modelVfx = fighter.model.FindFirstChild(VFX_ASSETS_FOLDER_NAME);
+		const modelHit = modelVfx?.FindFirstChild(effectName);
+		if (modelHit !== undefined) {
+			return { instance: modelHit, isInModel: true, key: `model:${fighter.targetId}:${effectName}` };
+		}
+
+		const vfxRoot = this.getGlobalVfxRoot();
+		if (vfxRoot === undefined) return undefined;
+
+		const fighterVfx =
+			vfxRoot.FindFirstChild(fighter.fighterId) ?? vfxRoot.FindFirstChild(fighter.fighterId.lower());
+		const fighterScoped = fighterVfx?.FindFirstChild(effectName);
+		if (fighterScoped !== undefined) {
+			return {
+				instance: fighterScoped,
+				isInModel: false,
+				key: `fighter:${fighter.fighterId.lower()}:${effectName}`,
+			};
+		}
+
+		const globalVfx = vfxRoot.FindFirstChild(effectName);
+		if (globalVfx !== undefined) {
+			return { instance: globalVfx, isInModel: false, key: `global:${effectName}` };
+		}
+
+		return undefined;
+	}
+
+	private emitHitVfx(
+		attacker: FighterVisualEntry,
+		target: FighterVisualEntry,
+		timeline: SkillData,
+		slot: SkillSlot,
+		isCrit: boolean,
+	): void {
+		if (this.vfxController === undefined) return;
+		const origem = target.attachments.Peito;
+
+		const skillVfx = this.resolveSkillVfx(attacker, timeline, slot);
+		if (skillVfx !== undefined) {
+			this.emitResolvedBattleVfx(skillVfx, origem, VFX_PRIORIDADE_ESSENCIAL);
+		}
+
+		const impactName = isCrit ? VFX_GLOBAL_CRIT_NAME : VFX_GLOBAL_HIT_NAME;
+		let impactVfx = this.resolveNamedCombatVfx(attacker, impactName);
+		if (impactVfx === undefined && isCrit) {
+			impactVfx = this.resolveNamedCombatVfx(attacker, VFX_GLOBAL_HIT_NAME);
+		}
+		if (impactVfx !== undefined) {
+			this.emitResolvedBattleVfx(impactVfx, origem, VFX_PRIORIDADE_ESSENCIAL);
+		}
+	}
+
+	private emitKoVfx(deadFighter: FighterVisualEntry): void {
+		if (this.vfxController === undefined) return;
+		const koVfx = this.resolveNamedCombatVfx(deadFighter, VFX_GLOBAL_KO_NAME);
+		if (koVfx !== undefined) {
+			this.emitResolvedBattleVfx(koVfx, deadFighter.attachments.Peito, VFX_PRIORIDADE_ESSENCIAL);
+		}
+	}
+
+	private emitResolvedBattleVfx(
+		resolved: { readonly instance: Instance; readonly isInModel: boolean; readonly key: string },
+		origem: VfxOrigem,
+		prioridade: VfxPrioridade,
+	): void {
+		if (this.vfxController === undefined || this.battleEnded) return;
+		if (resolved.isInModel) {
+			this.vfxController.emit(resolved.instance, origem, prioridade, true);
+			return;
+		}
+
+		const working = this.getOrCreateWorkingVfxCopy(resolved.key, resolved.instance, origem);
+		if (working === undefined) return;
+		this.vfxController.emit(working, origem, prioridade, true);
+	}
+
+	private getOrCreateWorkingVfxCopy(key: string, template: Instance, origem: VfxOrigem): Instance | undefined {
+		if (this.stageFolder === undefined || !this.stageFolder.Parent) return undefined;
+
+		let working = this.battleVfxWorkingCopies.get(key);
+		if (working === undefined || !working.Parent) {
+			working = template.Clone();
+			working.Name = `BattleVFX_${key}`;
+			working.SetAttribute(VFX_ATTR_IGNORAR_CULLING, true);
+			this.parentAndPositionWorkingVfx(working, origem);
+			this.battleVfxWorkingCopies.set(key, working);
+			return working;
+		}
+
+		this.positionWorkingVfx(working, origem);
+		return working;
+	}
+
+	private resolveOrigemCFrame(origem: VfxOrigem): CFrame {
+		if (typeIs(origem, "CFrame")) return origem;
+		if (typeIs(origem, "Vector3")) return new CFrame(origem);
+		if (origem.IsA("Attachment")) return origem.WorldCFrame;
+		if (origem.IsA("BasePart")) return origem.CFrame;
+		return origem.GetPivot();
+	}
+
+	private parentAndPositionWorkingVfx(working: Instance, origem: VfxOrigem): void {
+		if (this.stageFolder === undefined) return;
+		const cf = this.resolveOrigemCFrame(origem);
+		const needsCarrier =
+			working.IsA("Attachment") ||
+			working.IsA("ParticleEmitter") ||
+			(working.IsA("Folder") && this.hasDirectEmitterOrAttachment(working));
+
+		if (needsCarrier) {
+			const carrier = new Instance("Part");
+			carrier.Name = `Carrier_${working.Name}`;
+			carrier.Size = new Vector3(0.2, 0.2, 0.2);
+			carrier.Transparency = 1;
+			carrier.Anchored = true;
+			carrier.CanCollide = false;
+			carrier.CanQuery = false;
+			carrier.CanTouch = false;
+			carrier.CFrame = cf;
+			carrier.Parent = this.stageFolder;
+			this.vfxCarrierParts.set(working, carrier);
+			working.Parent = carrier;
+			return;
+		}
+
+		working.Parent = this.stageFolder;
+		this.positionWorkingVfx(working, origem);
+	}
+
+	private hasDirectEmitterOrAttachment(folder: Instance): boolean {
+		for (const child of folder.GetChildren()) {
+			if (child.IsA("Attachment") || child.IsA("ParticleEmitter")) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private positionWorkingVfx(working: Instance, origem: VfxOrigem): void {
+		const cf = this.resolveOrigemCFrame(origem);
+		const carrier = this.vfxCarrierParts.get(working);
+		if (carrier !== undefined && carrier.Parent !== undefined) {
+			carrier.CFrame = cf;
+			return;
+		}
+		if (working.IsA("Model")) {
+			working.PivotTo(cf);
+		} else if (working.IsA("BasePart")) {
+			working.CFrame = cf;
+		}
 	}
 }

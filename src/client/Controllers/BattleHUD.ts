@@ -25,6 +25,7 @@ import { XpRewardCards } from "../UI/XpRewardCards";
 import { UITheme } from "../UI/UITheme";
 import { BattleRemotes } from "./BattleRemotes";
 import type { CombatController } from "./CombatController";
+import type { VFXController } from "./VFXController";
 
 interface HudFighterState {
 	readonly targetId: string;
@@ -133,6 +134,7 @@ export class BattleHUD {
 	private quitConfirmTimer?: thread;
 	private battleActive = false;
 	private battleEnded = false;
+	private battleVfxGeneration: number | undefined;
 
 	private playerTargetAtb = 0;
 	private playerDisplayAtb = 0;
@@ -142,7 +144,10 @@ export class BattleHUD {
 	private started = false;
 	private destroyed = false;
 
-	public constructor(private readonly combatController?: CombatController) {}
+	public constructor(
+		private readonly combatController?: CombatController,
+		private readonly vfxController?: VFXController,
+	) {}
 
 	public start(): void {
 		if (this.started || this.destroyed) return;
@@ -1076,6 +1081,7 @@ export class BattleHUD {
 		this.battleActive = true;
 		this.battleEnded = false;
 		this.quitRequested = false;
+		this.battleVfxGeneration = this.combatController?.getBattleGeneration();
 		if (this.resultScreenGui !== undefined) this.resultScreenGui.Enabled = false;
 		for (const disconnect of this.battleDisconnectors) battleCleanupStep("previous HUD connection", disconnect);
 		this.battleDisconnectors.clear();
@@ -1287,7 +1293,23 @@ export class BattleHUD {
 		battleCleanupStep("XP cards", () => this.xpCards.clear());
 		for (const disconnect of this.battleDisconnectors) battleCleanupStep("HUD battle connection", disconnect);
 		this.battleDisconnectors.clear();
-		battleCleanupStep("combat resources", () => this.combatController?.cleanupStage());
+		const expectedVfxGeneration = this.battleVfxGeneration;
+		this.battleVfxGeneration = undefined;
+		const matchesCurrentCombatGeneration = (): boolean => {
+			const currentGen = this.combatController?.getBattleGeneration();
+			return expectedVfxGeneration === undefined || currentGen === undefined || expectedVfxGeneration === currentGen;
+		};
+		battleCleanupStep("vfx clear", () => {
+			if (matchesCurrentCombatGeneration()) {
+				this.vfxController?.clear();
+			}
+		});
+		battleCleanupStep("vfx deload", () => this.combatController?.deloadBattleVfx(expectedVfxGeneration));
+		battleCleanupStep("combat resources", () => {
+			if (matchesCurrentCombatGeneration()) {
+				this.combatController?.cleanupStage();
+			}
+		});
 		battleCleanupStep("HUD fighters", () => {
 			this.fightersByTargetId.clear();
 			this.playerTeamOrder.clear();
