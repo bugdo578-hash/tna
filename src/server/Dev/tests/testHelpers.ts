@@ -7,7 +7,7 @@ import type { BattleGlobalState, FighterInventoryItem, SkillSlot } from "../../.
 import { BattleSide, type FighterIndex } from "../../Components/BattleSide";
 import { Fighter } from "../../Components/Fighter";
 import { BattleService } from "../../Services/BattleService";
-import { InMemoryDataStore } from "../../Services/PlayerDataService";
+import { InMemoryDataStore } from "../../Services/PlayerDataValidation";
 import { ProgressionService } from "../../Services/ProgressionService";
 import type { BattleRemoteAdapter } from "../../Services/RemoteService";
 import { createDummySide } from "../DummyFighters";

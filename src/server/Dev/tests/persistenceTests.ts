@@ -22,15 +22,15 @@ import { FIGHTER_DATA } from "../../../shared/FighterData";
 import { calcSkillSlotRoll } from "../../../shared/MathUtils";
 import { calcTotalPointsForLevel, calcXpForNextLevel } from "../../../shared/ProgressionMath";
 import type { FighterInventoryItem, SkillSlots } from "../../../shared/TypeDefs";
+import { PlayerDataService } from "../../Services/PlayerDataService";
 import {
 	InMemoryDataStore,
 	migratePlayerData,
-	PlayerDataService,
 	validatePlayerSaveData,
 	type DataStoreLike,
 	type PlayerSaveData,
 	type SchemaMigrationFn,
-} from "../../Services/PlayerDataService";
+} from "../../Services/PlayerDataValidation";
 import { ProgressionService } from "../../Services/ProgressionService";
 import { RemoteService } from "../../Services/RemoteService";
 import {

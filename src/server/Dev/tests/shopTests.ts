@@ -22,14 +22,14 @@ import type {
 } from "../../../shared/Remotes";
 import type { FighterInventoryItem } from "../../../shared/TypeDefs";
 import { InventoryService } from "../../Services/InventoryService";
+import { PlayerDataService } from "../../Services/PlayerDataService";
 import {
 	InMemoryDataStore,
 	migratePlayerData,
-	PlayerDataService,
 	validatePlayerSaveData,
 	type DataStoreLike,
 	type PlayerSaveData,
-} from "../../Services/PlayerDataService";
+} from "../../Services/PlayerDataValidation";
 import { ProgressionService } from "../../Services/ProgressionService";
 import { RemoteService } from "../../Services/RemoteService";
 import { ShopService } from "../../Services/ShopService";

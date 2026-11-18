@@ -45,13 +45,13 @@ import { AIService } from "../../Services/AIService";
 import { BattleService } from "../../Services/BattleService";
 import { BattleSessionService } from "../../Services/BattleSessionService";
 import { InventoryService } from "../../Services/InventoryService";
+import { PlayerDataService } from "../../Services/PlayerDataService";
 import {
 	InMemoryDataStore,
-	PlayerDataService,
 	validatePlayerSaveData,
 	type DataStoreLike,
 	type PlayerSaveData,
-} from "../../Services/PlayerDataService";
+} from "../../Services/PlayerDataValidation";
 import { ProgressionService } from "../../Services/ProgressionService";
 import { RemoteService, type BattleRemoteAdapter } from "../../Services/RemoteService";
 import { TinyesService } from "../../Services/TinyesService";

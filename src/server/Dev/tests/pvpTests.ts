@@ -33,14 +33,14 @@ import { freezeBattleMovement } from "../../Services/BattleMovement";
 import { BattleService } from "../../Services/BattleService";
 import { BattleSessionService } from "../../Services/BattleSessionService";
 import { InventoryService } from "../../Services/InventoryService";
+import { PlayerDataService } from "../../Services/PlayerDataService";
 import {
 	InMemoryDataStore,
 	migratePlayerData,
-	PlayerDataService,
 	validatePlayerSaveData,
 	type DataStoreLike,
 	type PlayerSaveData,
-} from "../../Services/PlayerDataService";
+} from "../../Services/PlayerDataValidation";
 import { ProgressionService } from "../../Services/ProgressionService";
 import { PvpService } from "../../Services/PvpService";
 import { RemoteService } from "../../Services/RemoteService";
