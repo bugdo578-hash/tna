@@ -27,7 +27,9 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `Services/TinyesService.ts`: valida/delega saldo, gasto e contadores PVP para `PlayerDataService`.
 - `Components/BattleSide.ts`: lineup de até 3 `Fighter`s, ATB único do lado, `trocar` (respeita `Root`) e substituição em morte.
 - `Components/Fighter.ts`: estado do lutador em combate (`hp`, `localState`, `stats`, `slots`, `statusEffects`).
-- `Dev/BattleSimulator.ts`: suíte de testes/simulação no Studio (`runSimulation`, 2.000 lutas e regressões).
+- `Dev/BattleSimulator.ts`: ponto de entrada da suíte de testes/simulação no Studio (`runSimulation`, re-exports e demais suítes).
+- `Dev/tests/testHelpers.ts`: constantes de simulação, `createSeededRng`, asserts (`assertInvariant`, `assertStoredEqual`), `runBattleWithSides`/`runBattle`, `createSurgicalMockAdapter` e `SpyProgressionService`.
+- `Dev/tests/coreTests.ts`: testes do núcleo de batalha, IA Bronze, efeitos, pause/quit, crítico, multi-hit, dia/noite, rate limit, `runDummy1000Battles` e `validateJotaroAndAnubis`.
 - `Dev/DummyBattleSession.ts`: cria sessões dev (`createDummyBattleSession`, `createJotaroVsAnubisBattleSession`).
 - `Dev/DummyFighters.ts`: cria times dummy/fixos dev (`createDummySide`, `createDevOpponentSide`) e re-exporta factory.
 ### Client (`src/client/`)

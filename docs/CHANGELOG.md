@@ -2,6 +2,11 @@
 
 Registro conciso de mudanças a partir de `2026-11-14` (ordem cronológica reversa). Histórico anterior a `2026-11-14` (base inicial T1–T5, T7.1, T7.2 e primeira correção de DataStore/autosave): [CHANGELOG_ARCHIVE.md](CHANGELOG_ARCHIVE.md). Estado operacional atual: [HANDOFF.md](HANDOFF.md).
 
+## 2026-11-18 — Refatoração: simulador, helpers e núcleo
+
+- `src/server/Dev/tests/testHelpers.ts`, `src/server/Dev/tests/coreTests.ts`, `src/server/Dev/BattleSimulator.ts`, `docs/repo_map.md`: extraídos por faixa de linhas os helpers/constantes/mocks (`createSeededRng`, `assertInvariant`, `assertStoredEqual`, `findBackupKey`, `xpToReach`, `runBattleWithSides`, `runBattle`, `createSurgicalMockAdapter`, `SpyProgressionService`) para `testHelpers.ts` e as validações do núcleo, IA Bronze, efeitos, pause/quit, crítico, multi-hit, dia/noite, rate limit, `runDummy1000Battles` e `validateJotaroAndAnubis` para `coreTests.ts`, preservando a ordem exata de execução e do RNG.
+- Validação em Play novo no Studio: `npx.cmd rbxtsc` (0 erros), `BattleSimulator.runSimulation()` (1.000 lutas dummy `49.7% / 298.98275s`; Jotaro vs Anubis `68% / 67.5943s`; `SIMULATION_ALL_PASSED`), `VFX_CONTROLLER_QA_PASSED` (179), `BATTLE_TEARDOWN_CLIENT_PASSED` (538), `ORA_RETURN_CLIENT_PASSED` (105) e `git diff --check`.
+
 ## 2026-11-18 — Refatoração: `PlayerDataValidation`
 
 - `src/server/Services/PlayerDataValidation.ts`, `src/server/Services/PlayerDataService.ts`, `docs/repo_map.md`: movido o bloco puro do topo de `PlayerDataService.ts` (`InMemoryDataStore`, `migratePlayerData`, `validatePlayerSaveData`, `validateStatBlock`, `validateSkillSlotRoll`, `validateFighterInventoryItem`, `deepCloneUnknown` e tipos/helpers de clonagem e validação) para `PlayerDataValidation.ts`, mantendo `PlayerDataService.ts` importando e re-exportando tudo via `export * from "./PlayerDataValidation"` sem alterar comportamento nem tocar em locks, snapshots, retries, autosave ou `BindToClose`.
