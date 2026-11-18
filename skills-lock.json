@@ -1,6 +1,13 @@
 {
   "version": 2,
   "skills": {
+    "graphify": {
+      "source": "Graphify-Labs/graphify",
+      "commit": "480b61ed91cbc08177dc2c60caa9ffd6c9b95749",
+      "sourceType": "github",
+      "skillPath": "graphify/SKILL.md",
+      "computedHash": "7fe2e1347678fe2063617a4afa14a0b50811b4285cc3e20ec0492624854dbc5d"
+    },
     "headroom": {
       "source": "headroomlabs-ai/headroom",
       "sourceType": "github",

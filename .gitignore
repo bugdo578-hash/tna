@@ -9,6 +9,7 @@ sourcemap.json
 
 # Local tools, Studio places and temporary runners
 .openclaude/
+.tmp/
 *.rbxl
 *.rbxlx
 **/BattleSimulatorRunner*
