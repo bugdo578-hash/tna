@@ -42,3 +42,14 @@ Roblox (`Players`, `Workspace`, `ReplicatedStorage`, `RunService`).
   - **3 bonecos = 50% maior dano / 25% / 25%** (`XP_SHARE_TRIO_TOP_DAMAGE = 0.5` para quem causou mais `damageDealt`; `XP_SHARE_TRIO_OTHER = 0.25` para os demais; empate no maior dano desempata deterministicamente pela ordem dos slots: `índice 0 > índice 1 > índice 2`).
 - **Slots vazios/inválidos/duplicados:** ignorados antes da divisão (não contam nem roubam percentual dos lutadores válidos).
 - **Ordem do pipeline:** pool total -> fração por tamanho do time -> multiplicador individual por diferença de nível (`diff = charLevel - avgEnemyLevel`, tabela em `Config.ts`) -> `math.max(XP_MIN_AWARD, math.floor(rawXp))` se a fatia base > 0 (limitado ao teto útil até `MAX_LEVEL = 30`, residual zerado no cap).
+
+# Organização do código
+
+- Um módulo, uma responsabilidade. Arquivo acima de ~500 linhas: dividir antes de adicionar feature.
+- Feature nova vai em módulo novo e é chamada por um ponto de integração mínimo. Não inflar `BattleSessionService`, `CombatController` ou `BattleHUD`.
+- Server decide gameplay; client só apresenta; `shared` sem tipos visuais (`Vector3`, `Color3`, `UDim2` só no client).
+- Constantes só em `src/shared/configs/` (gameplay) ou `src/client/UI/` (visual). Provisório marcado.
+- Todo recurso (conexão, task, tween, track, VFX) registrado e liberado no teardown, com `pcall`/`warn` por etapa.
+- Todo evento de rede validado no server, com rate limit e resposta privada.
+- Testes novos vão em `src/server/Dev/tests/` (ou `tools/` para client), nunca num arquivo único.
+- Docs: `HANDOFF` só o estado atual; histórico vai para `CHANGELOG`; `repo_map` atualizado quando criar ou mover arquivo.

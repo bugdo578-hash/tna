@@ -11,6 +11,7 @@ Histórico recente de correções, detalhes de APIs/payloads/assets e resultados
 ## Stack e fluxo
 - roblox-ts v3 + Rojo; `npm run watch` + `rojo serve`. Salvar com Ctrl+S a cada alteração.
 - Antes de concluir alterações de código, rodar `npx rbxtsc` com zero erros (`npx.cmd rbxtsc` se o PowerShell bloquear `npx.ps1`). Não editar `out/`; não usar Lune, pois o compilado depende de `game`.
+- Ao fim de cada tarefa, rodar `powershell -NoProfile -ExecutionPolicy Bypass -File tools/check-structure.ps1` (`./tools/check-structure.ps1`) para auditar arquivos de `src/` acima de 500 linhas, imports cruzados `client`/`server`, uso de `Vector3`/`Color3`/`UDim2` em `src/shared/` e strings literais de nomes de Remote fora de `Remotes.ts`.
 - Usar `@rbxts/services`, sem `game.GetService` no TypeScript. Sem APIs de Node/navegador; usar serviços Roblox e `task.wait/spawn/delay`. Arrays usam `.size()` e os métodos do compilador.
 - Uma tarefa por vez, `/clear` entre elas. Animações e assets são feitos à mão no Studio pelo autor; agente cuida de código. Combinar nomes de assets antes.
 
