@@ -27,9 +27,15 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `Services/TinyesService.ts`: valida/delega saldo, gasto e contadores PVP para `PlayerDataService`.
 - `Components/BattleSide.ts`: lineup de até 3 `Fighter`s, ATB único do lado, `trocar` (respeita `Root`) e substituição em morte.
 - `Components/Fighter.ts`: estado do lutador em combate (`hp`, `localState`, `stats`, `slots`, `statusEffects`).
-- `Dev/BattleSimulator.ts`: ponto de entrada da suíte de testes/simulação no Studio (`runSimulation`, re-exports e demais suítes).
+- `Dev/BattleSimulator.ts`: ponto de entrada enxuto da suíte de testes/simulação no Studio (`runSimulation` e re-exports das `validate*` públicas).
 - `Dev/tests/testHelpers.ts`: constantes de simulação, `createSeededRng`, asserts (`assertInvariant`, `assertStoredEqual`), `runBattleWithSides`/`runBattle`, `createSurgicalMockAdapter` e `SpyProgressionService`.
 - `Dev/tests/coreTests.ts`: testes do núcleo de batalha, IA Bronze, efeitos, pause/quit, crítico, multi-hit, dia/noite, rate limit, `runDummy1000Battles` e `validateJotaroAndAnubis`.
+- `Dev/tests/progressionTests.ts`: testes de progressão, curva/distribuição de XP, snapshots, desbloqueio de S3, inventário e economia de Tinyes.
+- `Dev/tests/pvpTests.ts`: testes de duelos PVP 1v1, convites, persistência v4, tetos diários de Tinyes/XP e regra de luta mínima.
+- `Dev/tests/npcTests.ts`: testes de batalhas contra NPCs do mundo, validação de proximidade/prompts e cooldown de reencontro pós-vitória.
+- `Dev/tests/shopTests.ts`: testes da loja rotativa, preços determinísticos, sincronização de estado e resultados de compra e alocação.
+- `Dev/tests/persistenceTests.ts`: testes de persistência no DataStore, locks de sessão, tokens, backups de corrupção, saída durante load e orçamento de shutdown.
+- `Dev/tests/teardownTests.ts`: testes de ciclo de vida de teardown de sessão de batalha, exigência de `Players.Parent` e isolamento de erros entre sessões.
 - `Dev/DummyBattleSession.ts`: cria sessões dev (`createDummyBattleSession`, `createJotaroVsAnubisBattleSession`).
 - `Dev/DummyFighters.ts`: cria times dummy/fixos dev (`createDummySide`, `createDevOpponentSide`) e re-exporta factory.
 ### Client (`src/client/`)
