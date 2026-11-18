@@ -172,14 +172,13 @@ export class CombatController {
 		if (expectedGeneration !== undefined && expectedGeneration !== this.battleVfxGeneration) {
 			return;
 		}
-		if (this.vfxController !== undefined) {
-			for (const entry of this.preloadedVfxEntries) {
-				this.vfxController.deload(entry.folder, entry.generation);
-			}
-		}
+		const entries = [...this.preloadedVfxEntries];
 		this.preloadedVfxEntries.clear();
 		this.battleVfxWorkingCopies.clear();
 		this.vfxCarrierParts.clear();
+		for (const entry of entries) {
+			battleCleanupStep("vfx deload folder", () => this.vfxController?.deload(entry.folder, entry.generation));
+		}
 	}
 
 	/** Retorna o modelo instanciado para `targetId` (útil para câmera e HUD). */
@@ -292,8 +291,8 @@ export class CombatController {
 	}
 
 	private onBattleStarted(payload: BattleStartedPayload): void {
-		this.cleanupStage();
-		this.battleVfxGeneration += 1;
+		const generation = this.cleanupStage();
+		if (generation !== this.battleVfxGeneration) return;
 		this.battleEnded = false;
 		this.sideIds = payload.sides;
 		this.currentAttackToken += 1;
@@ -305,7 +304,6 @@ export class CombatController {
 
 		const folder = new Instance("Folder");
 		folder.Name = WORKSPACE_BATTLE_FOLDER_NAME;
-		folder.Parent = Workspace;
 		this.stageFolder = folder;
 
 		const benchCounterBySide: [number, number] = [0, 0];
@@ -316,6 +314,10 @@ export class CombatController {
 			benchCounterBySide[sideIndex] += 1;
 
 			const clonedModel = this.cloneFighterAsset(snapshot.fighterId);
+			if (!this.isCurrentBattle(generation)) {
+				battleCleanupStep("stale fighter clone", () => clonedModel.Destroy());
+				return;
+			}
 			clonedModel.Name = `${snapshot.targetId}_${snapshot.fighterId}`;
 			clonedModel.Parent = folder;
 
@@ -366,7 +368,12 @@ export class CombatController {
 			this.applyActiveVisualState(entry);
 		}
 
-		this.preloadBattleVfx(payload);
+		this.preloadBattleVfx(payload, generation);
+		if (this.isCurrentBattle(generation)) folder.Parent = Workspace;
+	}
+
+	private isCurrentBattle(generation: number): boolean {
+		return !this.battleEnded && this.battleVfxGeneration === generation;
 	}
 
 	private cloneFighterAsset(fighterId: string): Model {
@@ -1028,7 +1035,9 @@ export class CombatController {
 	}
 
 	/** Called only by the client teardown, or before replacing a stage on BattleStarted. */
-	public cleanupStage(): void {
+	public cleanupStage(expectedVfxGeneration?: number): number {
+		const ownsVfx = expectedVfxGeneration === undefined || expectedVfxGeneration === this.battleVfxGeneration;
+		const generation = ++this.battleVfxGeneration;
 		this.battleEnded = true;
 		this.currentAttackToken += 1;
 		this.activePendingHits = 0;
@@ -1054,8 +1063,6 @@ export class CombatController {
 				item.inUse = false;
 			});
 		}
-		battleCleanupStep("vfx clear", () => this.vfxController?.clear());
-		battleCleanupStep("vfx deload", () => this.deloadBattleVfx());
 		battleCleanupStep("stage destroy", () => this.stageFolder?.Destroy());
 		this.stageFolder = undefined;
 		this.pendingSwitches.clear();
@@ -1063,9 +1070,13 @@ export class CombatController {
 		this.hitResultsByIndex.clear();
 		this.consumedHitIndices.clear();
 		this.pendingDeaths.clear();
-		this.preloadedVfxEntries.clear();
 		this.battleVfxWorkingCopies.clear();
 		this.vfxCarrierParts.clear();
+		if (ownsVfx) {
+			battleCleanupStep("vfx clear", () => this.vfxController?.clear());
+			battleCleanupStep("vfx deload", () => this.deloadBattleVfx(generation));
+		}
+		return generation;
 	}
 
 	private getGlobalVfxRoot(): Instance | undefined {
@@ -1073,15 +1084,19 @@ export class CombatController {
 		return assetsFolder?.FindFirstChild(VFX_ASSETS_FOLDER_NAME);
 	}
 
-	private preloadBattleVfx(payload: BattleStartedPayload): void {
-		if (this.vfxController === undefined) return;
-		const gen = this.battleVfxGeneration;
+	private preloadBattleVfx(payload: BattleStartedPayload, generation: number): void {
+		const vfx = this.vfxController;
+		if (vfx === undefined) return;
 		const seen = new Set<Instance>();
 		const registrarPreload = (folder: Instance | undefined): void => {
-			if (folder === undefined || folder.Parent === undefined || seen.has(folder)) return;
+			if (!this.isCurrentBattle(generation) || folder === undefined || folder.Parent === undefined || seen.has(folder)) return;
 			seen.add(folder);
-			this.vfxController?.preload(folder, gen);
-			this.preloadedVfxEntries.push({ folder, generation: gen });
+			vfx.preload(folder, generation);
+			if (!this.isCurrentBattle(generation)) {
+				battleCleanupStep("stale vfx preload", () => vfx.deload(folder, generation));
+				return;
+			}
+			this.preloadedVfxEntries.push({ folder, generation });
 		};
 
 		const vfxRoot = this.getGlobalVfxRoot();

@@ -186,7 +186,7 @@ export class BattleHUD {
 	public destroy(): void {
 		if (this.destroyed) return;
 		this.destroyed = true;
-		this.teardownBattle();
+		this.teardownBattle(true);
 		for (const connection of this.lifetime) battleCleanupStep("HUD lifetime connection", () => connection.Disconnect());
 		this.lifetime.clear();
 		const gui = this.screenGui;
@@ -1295,7 +1295,7 @@ export class BattleHUD {
 	}
 
 	/** All authoritative ends and result dismissal converge here; every step can fail independently. */
-	private teardownBattle(): void {
+	private teardownBattle(clearCurrentVfx = false): void {
 		this.battleActive = false;
 		this.battleEnded = true;
 		this.isPaused = false;
@@ -1309,36 +1309,29 @@ export class BattleHUD {
 		battleCleanupStep("XP cards", () => this.xpCards.clear());
 		for (const disconnect of this.battleDisconnectors) battleCleanupStep("HUD battle connection", disconnect);
 		this.battleDisconnectors.clear();
-		const expectedVfxGeneration = this.battleVfxGeneration;
+		const expectedVfxGeneration = clearCurrentVfx ? undefined : this.battleVfxGeneration;
 		this.battleVfxGeneration = undefined;
-		const matchesCurrentCombatGeneration = (): boolean => {
-			const currentGen = this.combatController?.getBattleGeneration();
-			return expectedVfxGeneration === undefined || currentGen === undefined || expectedVfxGeneration === currentGen;
-		};
-		battleCleanupStep("vfx clear", () => {
-			if (matchesCurrentCombatGeneration()) {
-				this.vfxController?.clear();
-			}
-		});
-		battleCleanupStep("vfx deload", () => this.combatController?.deloadBattleVfx(expectedVfxGeneration));
-		battleCleanupStep("combat resources", () => {
-			if (matchesCurrentCombatGeneration()) {
-				this.combatController?.cleanupStage();
-			}
-		});
 		battleCleanupStep("HUD fighters", () => {
 			this.fightersByTargetId.clear();
 			this.playerTeamOrder.clear();
 			this.opponentTeamOrder.clear();
 		});
+		if (this.combatController !== undefined) {
+			battleCleanupStep("combat resources", () => this.combatController?.cleanupStage(expectedVfxGeneration));
+		} else {
+			battleCleanupStep("vfx clear", () => this.vfxController?.clear());
+		}
 	}
 
 	private onBattleEnded(payload: BattleEndedPayload): void {
-		if (!this.battleActive) return;
+		if (!this.battleActive) {
+			battleCleanupStep("combat resources", () => this.combatController?.cleanupStage());
+			return;
+		}
 		const suppressResult = (!UITheme.ShowResultOnLocalQuit && (this.quitRequested ||
 			(payload.reason === "quit" && payload.winnerSideId !== this.ownSideId))) ||
 			(payload.winnerSideId === undefined && (payload.xpRewards === undefined || payload.xpRewards.size() === 0));
-		this.teardownBattle();
+		this.teardownBattle(true);
 		if (suppressResult) return;
 		const [ok, failure] = pcall(() => this.showBattleResult(payload));
 		if (!ok) {

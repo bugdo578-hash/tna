@@ -108,6 +108,45 @@ local function checkQuitRetry()
 	check(attempts == before + 1 and c.stageFolder == nil, "destroy left a Quit retry or a stage")
 end
 
+local function checkBattleEndedDuringPreload()
+	local payload = { sides = { "A", "B" }, mode = "PVE", fighters = {
+		{ sideId = "A", targetId = "qa-race", fighterId = "dummy", className = "Fury", level = 1, hp = 100, hpMax = 100, active = true },
+	} }
+	local root = Instance.new("Folder")
+	local hit = Instance.new("Folder")
+	hit.Name = require(ts.UI.VFXConfig).VFX_GLOBAL_HIT_NAME
+	hit.Parent = root
+	local loaded, suspended, finished = {}, false, false
+	c.getGlobalVfxRoot = function() return root end
+	c.vfxController = {
+		preload = function(_, _, generation)
+			suspended = true
+			task.wait(0.12)
+			loaded[generation] = true
+		end,
+		deload = function(_, _, generation) loaded[generation] = nil end,
+		clear = function() end,
+	}
+	local hudGeneration = c:getBattleGeneration()
+	h:onBattleStarted(payload)
+	task.spawn(function()
+		c:onBattleStarted(payload)
+		finished = true
+	end)
+	check(suspended and hudGeneration ~= c:getBattleGeneration(), "missing preload race fixture")
+	local stage = c.stageFolder
+	if stage then stage.Name = "ClientBattleStageTeardownQA" end
+	h:onBattleEnded({ reason = "quit" })
+	local removedImmediately = c.stageFolder == nil and (stage == nil or stage.Parent == nil)
+	task.wait(0.2)
+	c.vfxController = nil
+	c.getGlobalVfxRoot = nil
+	root:Destroy()
+	check(stage and removedImmediately and #stage:GetChildren() == 0, "BattleEnded skipped stage cleanup on generation mismatch")
+	check(finished and next(loaded) == nil and next(c.preloadedVfxEntries) == nil, "late preload survived BattleEnded")
+	assertEnded()
+end
+
 local ok, failure = pcall(function()
 	for _, case in {
 		{ "PVE victory", "PVE", true, "victory", true },
@@ -222,6 +261,7 @@ local ok, failure = pcall(function()
 	check(c.stageFolder ~= nil and h.screenGui.Enabled and h.battleActive, "old cleanup destroyed next battle")
 	h:onBattleEnded({ reason = "error" })
 	assertEnded()
+	checkBattleEndedDuringPreload()
 	checkQuitRetry()
 end)
 remotes.requestQuit = originalQuit

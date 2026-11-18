@@ -2,6 +2,13 @@
 
 Registro conciso de mudanças a partir de `2026-11-14` (ordem cronológica reversa). Histórico anterior a `2026-11-14` (base inicial T1–T5, T7.1, T7.2 e primeira correção de DataStore/autosave): [CHANGELOG_ARCHIVE.md](CHANGELOG_ARCHIVE.md). Estado operacional atual: [HANDOFF.md](HANDOFF.md).
 
+## 2026-11-18 — Confirmação, reenvio e teardown de Quit
+
+- `RequestQuit` usa um bucket próprio por jogador com capacidade provisória de 2 e reposição de 2/s. Após a confirmação, o HUD mostra “Saindo...” e envia até 8 pedidos, espaçados por 0,35 s. O servidor encerra a sessão e o HUD cancela o reenvio no teardown.
+- `BattleEnded` limpa o palco mesmo durante o preload. A montagem valida a geração após clone e preload. O deload por geração impede que a limpeza atrasada descarregue VFX da luta seguinte.
+- Regressões cobrem saturação de habilidades, Quit repetido, dois descartes no cliente, fim durante preload de 120 ms, fim entre cliques, oito combinações de fase e modo, cancelamento no destroy e início imediato de outra luta.
+- Studio confirmou duas saídas pelo botão em batalha real contra NPC. Cada saída recebeu um único `BattleEnded`, removeu os cinco bonecos e restaurou o movimento. Passaram `BATTLE_TEARDOWN_CLIENT_PASSED` (804), `VFX_CONTROLLER_QA_PASSED` (179), `ORA_RETURN_CLIENT_PASSED` (105), `SIMULATION_ALL_PASSED`, `rbxtsc` e `git diff --check`. As 1.000 lutas dummy repetiram 49,7% / 298,98275 s e as 1.000 de Jotaro vs Anubis repetiram 68% / 67,5943 s.
+
 ## 2026-11-18 — Regras de organização do código e auditoria `tools/check-structure.ps1`
 
 - `CLAUDE.md`: adicionada a seção `Organização do código` (limite de ~500 linhas por módulo, feature nova em módulo novo com integração mínima sem inflar `BattleSessionService`/`CombatController`/`BattleHUD`, separação server/client/shared sem `Vector3`/`Color3`/`UDim2` em `shared`, constantes apenas em `src/shared/configs/` ou `src/client/UI/`, teardown com `pcall`/`warn` por etapa, validação/rate limit/resposta privada em eventos de rede, testes em `src/server/Dev/tests/` ou `tools/` e regras de docs `HANDOFF`/`CHANGELOG`/`repo_map`).
