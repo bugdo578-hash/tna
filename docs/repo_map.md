@@ -1,134 +1,96 @@
 # Repo Map — Tiny Adventures (Mundo 1)
 
-Roblox RPG ATB 1v1 com tag (3 bonecos por lado). roblox-ts + Rojo.
-Leia este arquivo primeiro. Não escaneie o projeto. Não leia o GDD inteiro.
+Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run watch` + `rojo serve`). Leia este arquivo primeiro; não escaneie o repo nem leia o GDD inteiro.
+- **Regras:** edite só `src/` (nunca `out/` ou `node_modules/`); tabs, `readonly`, constantes em `src/shared/configs/*`, comentários em PT-BR; CLIENT = visual (nunca calcula dano); SERVER = gameplay autoritativo. Rode `npx.cmd rbxtsc` (0 erros) após alterar código.
+- **Refs:** estado/pendências em [HANDOFF.md](HANDOFF.md), histórico em [CHANGELOG.md](CHANGELOG.md), GDD em [GDD.md](GDD.md) (só a seção necessária); MCP lê workspace/rigs/playtest/Output (não editar scripts via MCP).
 
-## Regras para o agente
-- Edite só `src/`. Nunca `out/` nem `node_modules/`.
-- Leia só os arquivos necessários.
-- Mudanças pequenas. Sem refatorar sem pedir.
-- CLIENT = visual. SERVER = gameplay (dano, ATB, hit/dodge, compra, troca).
-- Client nunca calcula dano.
-- Itens marcados FUTURO: não implementar.
-- Dúvida de regra: pergunte. Não invente número.
+## Estrutura real
+- `src/server/NetworkBootstrap.server.ts`: entrypoint servidor; cria serviços, ciclo login/logout e comandos Studio (`/shop`, `/buy`, `/addtinyes`, `/give`, `/testbattle`).
+- `src/client/main.client.ts`: entrypoint client; instancia e inicia controllers e UI na ordem de assinatura dos snapshots.
+### Server (`src/server/`)
+- `Services/AIService.ts`: IA Bronze PVE (reação, erro 30%, S3 bloqueado < Lv5, trocas por HP/tempo; só envia intenções).
+- `Services/ATBService.ts`: avança barra ATB (`0–10`) em `IDLE` quando ativo está vivo e `NORMAL`.
+- `Services/BattleMovement.ts`: congela/restaura `WalkSpeed`/`JumpPower`/`JumpHeight`/`UseJumpPower` e `NpcBattleActive` (NPC/PVP).
+- `Services/BattleService.ts`: núcleo puro (`IDLE/PREPARE/ATTACK/RETURN`), hits, DoT/Root, troca adiada em KO e classe `Signal` (baixa prioridade: mover para `shared`).
+- `Services/BattleSessionService.ts`: sessões isoladas por jogador, `Heartbeat`, pause/quit/timeouts e recompensas PVE/PVP.
+- `Services/BattleTeamFactory.ts`: monta `BattleSide` a partir do inventário (`createPlayerInventorySide`) ou real (`makeRealFighter`).
+- `Services/DamageService.ts`: rola Dodge/Crit por hit e aplica dano base, counter e `CRIT_MULTIPLIER`.
+- `Services/DayNightService.ts`: publica âncora solar e atributos replicáveis do ciclo dia/noite no `Workspace`.
+- `Services/InventoryService.ts`: monta snapshot privado `InventoryState` (`effectiveStats`, `s3Unlocked`, `unavailable`) e `setTeam`.
+- `Services/NpcService.ts`: vincula `BattleNpc`/`Workspace.Npc_Luta`, `ProximityPrompt`, validações e cooldown pós-vitória em memória.
+- `Services/PlayerDataService.ts`: persistência DataStore (`UpdateAsync`, schema `v4`, locks, backups, autosave, PVP/Tinyes/time).
+- `Services/ProgressionService.ts`: inventário clonado em memória, `addXp`, `awardPostBattleTeamXp` e `allocatePoints`.
+- `Services/PvpService.ts`: `ProximityPrompt` de duelo no `HumanoidRootPart`, convites/expiração/buckets e início PVP.
+- `Services/RemoteService.ts`: cria 26 `RemoteEvent`s em `ReplicatedStorage/Remotes`, valida payloads e aplica token buckets.
+- `Services/ShopService.ts`: gera 3 ofertas determinísticas por janela/contador e processa compras com rollback.
+- `Services/TinyesService.ts`: valida/delega saldo, gasto e contadores PVP para `PlayerDataService`.
+- `Components/BattleSide.ts`: lineup de até 3 `Fighter`s, ATB único do lado, `trocar` (respeita `Root`) e substituição em morte.
+- `Components/Fighter.ts`: estado do lutador em combate (`hp`, `localState`, `stats`, `slots`, `statusEffects`).
+- `Dev/BattleSimulator.ts`: suíte de testes/simulação no Studio (`runSimulation`, 2.000 lutas e regressões).
+- `Dev/DummyBattleSession.ts`: cria sessões dev (`createDummyBattleSession`, `createJotaroVsAnubisBattleSession`).
+- `Dev/DummyFighters.ts`: cria times dummy/fixos dev (`createDummySide`, `createDevOpponentSide`) e re-exporta factory.
+### Client (`src/client/`)
+- `Controllers/BattleCleanup.ts`: helper `battleCleanupStep` (`pcall`/`warn`) para etapas independentes de teardown.
+- `Controllers/BattleHUD.ts`: HUD de combate (ATB, HP, S1–S3/trava Lv5, Tag/Root, pause/quit), `BattleResult` e teardown.
+- `Controllers/BattleNpcController.ts`: oculta prompts `BattleNpc` em batalha e exibe notificações de `NpcBattleNotice`.
+- `Controllers/BattleRemotes.ts`: resolve e expõe referências dos remotes de batalha via `WaitForChild`.
+- `Controllers/ChallengePromptController.ts`: oculta próprio prompt PVP e todos durante `NpcBattleActive` (`RequiresLineOfSight=false`).
+- `Controllers/CharacterAnimationController.ts`: controla animação de caminhada via `Animate` nativo ou fallback `Movement`.
+- `Controllers/CombatController.ts`: palco `Workspace/ClientBattleStage`, rigs, `AnimationTrack`/markers, tweens placeholder, popups e VFX.
+- `Controllers/DayNightController.ts`: lê perfis no `MaterialService` e interpola `Lighting`/efeitos/`Sky` no `Heartbeat`.
+- `Controllers/InventoryController.ts`: painel de inventário, seleção de `activeTeam` e alocação sem mutação otimista.
+- `Controllers/PvpController.ts`: popup de convite PVP (`Aceitar`/`Recusar`) e banner de status do desafio.
+- `Controllers/ShopController.ts`: painel da loja (3 prateleiras, `requestId`/`PurchaseResult`, preview `/testshop`).
+- `Controllers/VFXController.ts`: runtime client do `Part_Icles` (`emit`, `preload`, `deload`, `clear`), orçamento por FPS/teto/qualidade, prioridade com teto duro para essenciais, culling só no mundo e varredura ativa sob demanda.
+- `UI/CombatVisualConfig.ts`: constantes visuais de palco, placeholders, billboards e cores de combate no client.
+- `UI/InventoryState.ts`: interfaces espelho do snapshot de inventário consumidas pelo `InventoryController`.
+- `UI/ShopPreview.ts`: fixture visual estática para `/testshop` somente no Studio.
+- `UI/TinyesDisplay.ts`: contador de saldo Tinyes no `PlayerGui` com animação `+N`.
+- `UI/UITheme.ts`: tema centralizado (cores, fontes, layout, textos, política `ShowResultOnLocalQuit`).
+- `UI/VFXConfig.ts`: constantes client-side de orçamento, prioridade, culling e pastas de VFX (`Part_Icles`).
+- `UI/XpRewardCards.ts`: cards animados de XP pós-batalha em `BattleResult` com guarda de ciclo de vida.
+- `types/Part_Icles.d.ts`: declaração TypeScript do módulo externo `ReplicatedStorage.Part_Icles`.
+### Shared (`src/shared/`, além do template não usado `module.ts`) & `tools/`
+- `Config.ts`: re-exporta os 10 módulos de `configs/` (`AI`, `Animation`, `Combat`, `Dev`, `Economy`, `Network`, `Persistence`, `Progression`, `Pvp`, `World`).
+- `ClassData.ts`: ranges de `baseStats` das 5 classes e triângulo de counter (`×1.175`).
+- `FighterData.ts`: catálogo `FIGHTER_DATA` (`jotaro`, `anubis`) e `rollClassBaseStats`.
+- `SkillData.ts`: timelines provisórias de skills (`JOTARO_SKILL_DATA`, `ANUBIS_SKILL_DATA`).
+- `NpcData.ts`: definições PVE (`bronze_trainer`: Jotaro Lv1 + Anubis Lv2, seed `20261115`, `rematchCooldownSeconds = 300`).
+- `TypeDefs.ts`: tipos compartilhados (`ClassName`, `Rarity`, estados, `FighterInventoryItem`, `PlayerSaveData`, `DuoState`).
+- `MathUtils.ts`: fórmulas puras de custo, mult, dano, cura, counter, crit, preço e alocação (`BuffMulti`/`WeakMulti` sem uso).
+- `ProgressionMath.ts`: fórmulas puras de nível, pontos, curva XP, pool/divisão pós-batalha e `calcEffectiveStats`.
+- `RewardMath.ts`: `calcAverageLevel` (só presentes) e `calcRewardBracket` (Bronze/Prata/Ouro).
+- `DayNightCycle.ts`: funções puras e `DayNightCycleApplier` para ciclo solar e interpolação Gamma 2.0.
+- `Remotes.ts`: `REMOTE_NAMES` e tipos de payloads; `RemoteService` também cria `InventoryState` e `RequestSetTeam`.
+- `tools/`: QAs Luau para Client/Server no Studio (`vfx-controller-qa`, `ora-return-client-qa`, `battle-teardown-*-qa`, `shop-ui-qa`) e `compress-log.py`.
 
-## Stack
-- TS → Luau. Rojo sync. `npm run watch` + `rojo serve`.
+## Remotes (`src/shared/Remotes.ts` → `ReplicatedStorage/Remotes`)
+- **Combate & Sessão (15):** ações (`RequestSkill/Switch/Pause/Quit`), ciclo/ATB (`BattleStarted`, `StateChanged`, `AtbSync`, `FighterDied`, `BattleEnded`) e timeline/efeitos (`AttackStarted`, `HitResolved`, `SwitchPerformed`, `Effect*`).
+- **PVP & NPC (4):** convite/status de duelo (`Challenge*`, `RequestChallengeResponse`) e avisos/cooldown NPC (`NpcBattleNotice`).
+- **Loja, Tinyes & Inventário (7):** compras/ofertas (`RequestPurchase`, `PurchaseResult`, `ShopState`), saldo (`TinyesChanged`) e alocação/time (`RequestAllocate`, além de `InventoryState` e `RequestSetTeam` criados em `RemoteService`).
 
-## Estrutura (confirme caminhos reais)
-- `src/server/`: Services (Arena, Battle, ATB, Damage, Tag, AI, PlayerData, NPC, Shop, Crate), Components (Fighter, Skill, Arena, AIBrain)
-- `src/client/`: Controllers (Input, BattleHUD, Camera, VFX, Cutscene, Sound, Crate), `UI/CombatVisualConfig` (constantes visuais de combate)
-- `src/shared/`: FighterData, SkillData, ClassData, TypeDefs, ShopData, Signal, Config (`configs/`: AI, Animation, Combat, Dev, Economy, Network, Persistence, Progression, Pvp, World), MathUtils
-- Remotes: Battle, ATB, Tag, VFX, Skill, Shop, Crate
-- Arenas: ServerStorage/Arenas (npc, pvp, boss), clonadas por batalha, destruídas ao fim
-- Init: `init.server` / `init.client` (ordem Init → Start)
-
-## Estados de batalha
-- IDLE → PREPARE → ATTACK → RETURN → IDLE
-- Ação e troca só em IDLE. Troca grátis.
-- PREPARE/ATTACK/RETURN pausam ATB dos dois lados.
-- CARREGANDO: pausa só ATB do caster (dano ×1.5).
-- CAÍDO: pausa só ATB de quem caiu.
-- Morte: troca automática aleatória, ATB do novo = 0.
-- Derrota: todos os selecionados mortos.
-
-## ATB
-- Uma barra por lado, range 0–10.
-- `BASE_ATB_SPEED = 0.588` (constante, só calibração de dano).
-- `fighter.currentAtbSpeed` (variável de runtime) enche a barra.
-- Troca mantém ATB. Morte zera.
+## Estados, ATB e morte
+- `IDLE → PREPARE → ATTACK → RETURN → IDLE`; ação/troca grátis só em `IDLE`; `PREPARE`/`ATTACK`/`RETURN` pausam ATB.
+- Barra ATB `0–10` por lado (`BASE_ATB_SPEED = 0.588`, runtime `fighter.currentAtbSpeed`). Troca mantém ATB; morte zera.
+- `CAÍDO` pausa ATB e DoT; `CARREGANDO` pausa ATB e não congela DoT.
+- **Morte em `ATTACK`:** troca automática aleatória fica adiada até o fim de `ATTACK` (antes de `RETURN`), ignorando hits restantes (provisório); fora de `ATTACK`, troca imediata. Ignora `Root`, zera ATB e remove `Burn`/`Bleed`; derrota quando todos caem.
 
 ## Fórmulas
-- Roll `t` (0–1) por slot, na oferta. Define custo E mult juntos. Permanente no `itemUuid`.
-- `custo = lerp(custoMin, custoMax, t)`
-- Custos: S1 0.75–3.0 | S2 4.0–7.0 | S3 8.0–10.0
-- `mult = D_slot * (custo / BASE_ATB_SPEED)`
-- `D_slot`: S1 0.2145 | S2 0.1373 | S3 0.1825
-- `levelScale = 0.5 + ((level - 1) / 29) * 0.5`
-- `dano = round(ATK_final * mult * levelScale)`
-- Animação nunca entra na fórmula de dano.
-- Counter de classe: ×1.175 (`COUNTER_DAMAGE_MULTIPLIER`).
-- Cura: `ATK_cura = base + alocado + chips` (sem buffs, sem levelScale)
-  - `cura = round(min(ATK_cura * healMult, HP_MAX * capHP))`
-  - healMult: S1 0.55 | S2 1.10 | S3 1.40
-  - capHP: S1 20% | S2 30% | S3 45%
-  - AoE: `curaSingle / aliadosVivos`
-- Hamon: ×1.30 / 1.8 / 2.20 por slot. 3 cargas. Multi-hit gasta 2.
-- BuffMulti: `capFinal * min(aplicações,4) / 4`; `dano += dano * BuffMulti`
-- WeakMulti: `dano *= (1 - capFinal * min(aplicações,4)/4)`; mínimo 1 de dano
-- Bleed 25% / Burn 20% do dano REAL. 3 ticks, 1/s (3s — decisão final fechada pelo autor). Renovam, não empilham.
-  Tick < 1: acumula; último tick garante ≥ 1. Nunca mostrar "0".
+- Roll `t` (`0–1`) por slot na oferta define custo e mult juntos (permanente no `itemUuid`): `custo = lerp(min, max, t)`; S1 `0.75–3.0`, S2 `4.0–7.0`, S3 `8.0–10.0`.
+- `mult = D_slot * (custo / BASE_ATB_SPEED)` (`D_slot`: S1 `0.2145`, S2 `0.1373`, S3 `0.1825`).
+- `levelScale = 0.5 + ((level - 1) / 29) * 0.5`; `dano = round(ATK_final * mult * levelScale)`; counter `×1.175` (`COUNTER_DAMAGE_MULTIPLIER`); animação nunca entra no dano; mínimo `1`.
+- Cura (funções puras): `ATK_cura = base + alocado + chips` (sem buffs/levelScale); `cura = round(min(ATK_cura * healMult, HP_MAX * capHP))` (S1 `0.55/20%`, S2 `1.10/30%`, S3 `1.40/45%`); AoE `round(curaSingle / aliadosVivos)`.
+- Bleed `25%` / Burn `20%` do dano REAL conectado (`3 ticks`, `1/s`, `3s` — decisão final fechada pelo autor); renovam, não empilham; tick `< 1` acumula, último tick garante `≥ 1`, nunca emite `"0"`. `Root`: `5/8/12s` (S1/S2/S3), bloqueia só troca voluntária.
+- Dodge/Crit: server rola por hit no tempo da timeline e envia `HitResolved`; hit único esquivado cancela follow-up (`dodgeReturnTime`); multi-hit não cancela próximos hits. Dodge `1%/pt`, Crit `1.5%/pt` (`CRIT_MULTIPLIER = 1.5`, mínimo `1`).
 
-## Dodge e hit
-- Server rola Dodge ANTES da animação, por hit e por alvo.
-- Envia `{ hit, damage, target }`. Client só toca animação.
-- Projétil/delay: roll no impacto real.
-- Dodge: 1 ponto = 1%. Crit: 1 ponto = 1.5%.
+## Classes, progressão e economia
+- **Classes (`ClassData.ts`):** triângulo `Fury → Menace → Dominator → Fury`; Support/Controller sem counter. Base (`hp/atk/dodge/crit`, roll separado dos skills): Fury `13–17/8–12/5–8/8–12`; Support `8–15/4–7/8–14/3–6`; Controller `16–20/6–10/5–8/5–8`; Dominator `14–18/7–11/3–6/6–10`; Menace `12–16/9–13/4–7/7–11`.
+- **Progressão:** Lv `1–30`; `+2` pts/nível (`0` no Lv1, `58` no Lv30); HP `+12.5/pt`, ATK `+1/pt`, Dodge `+1/pt` (`1%`), Crit `+1/pt` (`1.5%`); cap = nível; pares `|ATK−Dodge| ≤ 5` e `|HP−Crit| ≤ 5`. **S3 bloqueado até Lv5 (`S3_UNLOCK_LEVEL = 5`)** — regra implementada.
+- **XP pós-batalha:** só vitória PVE; pool `75 + 15 * nível médio inimigo` (inválido/fora de `1–30` = `0`); divisão válida `1=100%`, `2=50%/50%`, `3=50%` maior `damageDealt`/`25%/25%` (empate menor slot; inválidos/duplicados ignorados) → multiplicador por `diff = nível − média` (`≤-3: 1.35`, `≤-1: 1.15`, `≤1: 1`, `≤3: 0.60`, `≤5: 0.25`, `>5: 0.05`) → `max(1, floor(raw))`; curva `100 * nível` (teto útil `43.500`).
+- **PVE/NPC, PVP e Loja:** `TINYES_WIN_BY_TIER` Bronze `50–150` (PVE ativo), Prata `150–250`, Ouro `170–350` (usados por `RewardMath` no PVP; `TINYES_MAX_ADD_PER_CALL = 1000`). **NPC PVE:** sem teto diário Bronze; cooldown `300s` em memória contado estritamente após vitória natural. **PVP casual:** existe (`PvpService`/`PvpController`), paga Tinyes + XP pela média do perdedor (fator `1`, `≥ 3` hits, quit/desconexão `≥ 25%` HP inicial, 2/par/3600s, tetos diários `2000` Tinyes e `2000` XP em schema `v4`). **Loja:** 3 prateleiras (`60/30/10%`), `shopRestockCounts` no DataStore, `requestId`/`PurchaseResult`. **IA Bronze:** reação `1.5–3s`, Ultimate `2–4s`, erro `30%`, troca HP `<25%` (`50%`) e tempo `20–30s` em `IDLE`.
+- **IDs & Anti-exploit:** `fighterId` (template), `offerId` (temporário), `itemUuid` (permanente). Server valida tudo e envia só dados da própria batalha; token buckets `10/10s` (batalha), `5/2s` (alocação/time), `3/1s` (loja e resposta PVP).
 
-## Classes (`ClassData.ts`)
-- Triângulo: Fury → Menace → Dominator → Fury.
-- Support/Controller: soft counter FUTURO.
-- Ranges base (hp / atk / dodge / crit):
-  - Fury 13–17 / 8–12 / 5–8 / 8–12
-  - Support 8–15 / 4–7 / 8–14 / 3–6
-  - Controller 16–20 / 6–10 / 5–8 / 5–8
-  - Dominator 14–18 / 7–11 / 3–6 / 6–10
-  - Menace 12–16 / 9–13 / 4–7 / 7–11
-- Roll de baseStats é separado do roll de custo/mult.
-
-## Progressão
-- Lv máx 30. Lv1 sem pontos. +2 pontos/nível (58 no Lv30).
-- HP +12.5/ponto. ATK +1/ponto, Dodge +1/ponto (1%/pt), Crit +1/ponto (1.5%/pt).
-- Cap por stat = nível atual.
-- Pares: |ATK−Dodge| ≤ 5 e |HP−Crit| ≤ 5.
-- S3 desbloqueia no Lv5 (decisão em aberto).
-- XP pós-batalha só em vitória PvE: pool `75 + 15 * nível médio inimigo`, sem teto no pool; nível médio não finito ou fora de `[MIN_LEVEL, MAX_LEVEL]` (1–30) gera 0 XP.
-- Divisão entre lutadores válidos: 1 = 100%; 2 = 50%/50%; 3 = 50% ao maior `damageDealt` e 25%/25% aos demais. Empate favorece o menor índice de slot; dano inválido vale 0. Slots vazios, inválidos ou UUIDs duplicados são ignorados pelo serviço antes da divisão.
-- Ordem: fração do pool → multiplicador individual por `diff = nível do lutador - nível médio inimigo` → `max(1, floor(rawXp))` se positivo → teto útil derivado de `sum(calcXpForNextLevel(1..29))`. Multiplicadores: diff ≤ -3: 1.35; ≤ -1: 1.15; ≤ 1: 1; ≤ 3: 0.60; ≤ 5: 0.25; acima: 0.05.
-- Curva: `100 * nível` para subir; teto útil total 43.500 XP. `addXp`/`resolveXpAndLevelUp` limitam XP útil e resolvem múltiplos níveis, zerando o residual no Lv30.
-
-## Economia de Tinyes (valores provisórios, decisão do autor em 2026-11-14)
-- `TINYES_WIN_BY_TIER`: Bronze 50–150, Prata 150–250, Ouro 170–350. Só Bronze está ligado; substitui o antigo 55–150.
-- `TINYES_MAX_ADD_PER_CALL = 1000`; gasto não usa esse teto: inteiro positivo, até `MAX_SAVED_NUMBER` e limitado pelo saldo.
-- Saldo único em PlayerDataService; TinyesService valida/delega, sem save próprio. Autosave e saída persistem.
-- Vitória natural PVE contra IA paga uma vez; derrota, Quit, desconexão, timeout, erro e jogador fora de Players não pagam.
-- `TinyesChanged { balance }` e `BattleEnded.tinyesReward?` são enviados só ao respectivo jogador.
-- Decisão definitiva do autor (2026-11-16): não haverá teto diário de recompensa Bronze. Reenfrentar usa `NpcData.rematchCooldownSeconds` por jogador/npcId, contado ESTRITAMENTE do fim de uma vitória natural do jogador. Dar dano e sair, derrota, Quit, desconexão, respawn, timeout e erro NÃO geram cooldown. `bronze_trainer = 300s` provisório (faixa desejada: 5–15 min). Somente em memória: saída limpa e reentrada zera; sem schema novo. Recusa no Triggered sem sessão, aviso privado em NpcBattleNotice e texto em UITheme.Npc. Botão do resultado apenas fecha; não inicia `/testbattle` nem contorna o prompt.
-- Loja: 3 prateleiras; pesos de nível 1/2/3 = `60%/30%/10%` (`SHOP_LEVEL_WEIGHTS`).
-- TODO: PVP casual paga vitória, valor pendente; Rival paga mais que Ouro, valor pendente. Não implementar nesta etapa.
-
-## IA Bronze
-- Reação normal `1.5–3.0s`, Ultimate `2.0–4.0s`, erro `30%` (força S1), troca por HP `<25%` (`50%` de chance) e troca por tempo `20–30s` acumulados em `IDLE` (respeitando `Root`).
-
-## IDs
-- `fighterId`: template. `offerId`: oferta temporária. `itemUuid`: boneco permanente.
-- ShopState em memória. Inventário no DataStore.
-- Estoque da loja é pessoal por client.
-
-## Dupla Bruford + Tarkus
-- 1 slot, HP separado. Ativo 100% do dano, parceiro 34%.
-- Sobrevivente: HP_MAX vira 1/3, +10% dano.
-- Conta como 1 morte só quando os dois caírem.
-
-## Time Stop (DIO Pt3, Jotaro)
-- Conjura 2×. ATB do dono a 75% da velocidade base. Máx 2 ações.
-- Ações dentro ignoram Dodge. Escudo ainda bloqueia o 1º hit.
-
-## Efeitos no lançamento
-- Só Burn, Bleed e Root.
-- FUTURO: Block, Stun, Silence, Weaken, Clean, Vulnerabilidade, Resistência, Freeze, chips equipáveis, reorganizar skills, Torneio.
-
-## Anti-exploit
-- Rate limit 10 req/s.
-- Server valida: ATB, estado, custo, alvo, dano, troca, morte, compra.
-- Server só manda dados da SUA batalha.
-
-## Convenções
-- Tabs. `readonly`. Constantes nomeadas. Comentários em português.
-
-## Arquivos de referência
-- GDD completo: `docs/GDD.md` (grande — leia só a seção necessária).
-
-principal:
-- Scripts: só em src/ (Rojo). Não criar nem editar script pelo MCP.
-- MCP: ler workspace, conferir rigs/Attachments, rodar playtest, ler Output.
+## FUTURO (não existe)
+- **Funções puras/constantes sem uso em combate (FUTURO):** `CARREGANDO` (`CHARGE_DAMAGE_MULTIPLIER = 1.5`), dupla `Bruford/Tarkus` (`DuoState`/`DUO_*`), `BuffMulti`/`WeakMulti` (`MathUtils`: `capFinal * min(aplicações, 4) / 4`) e `Time Stop` real (Jotaro S3 é 1 hit provisório).
+- **Não existem no código:** `Hamon`, `Block`, `Stun`, `Silence`, `Weaken`, `Clean`, `Vulnerabilidade`, `Resistência`, `Freeze`, chips equipáveis, reorganizar skills, soft counter Support/Controller, tiers/NPCs `Rival`/`Prata`/`Ouro`/`Boss`, `Torneio`, `Crate`, `Arena`/`ServerStorage/Arenas`, `Tag`, `Input`, `Camera`, `Cutscene`, `Sound`, `ShopData`, `AIBrain` e `Components/Skill`.
+- **Manutenção:** mover `Signal` de `BattleService.ts` para `src/shared/` (`fire` sem `pcall`).
