@@ -6,6 +6,10 @@ import type { AllocationReason, ChallengeStatus, NpcBattleNoticeReason, Purchase
  * Tema centralizado do HUD de Batalha (T3).
  * Centraliza todas as cores, fontes, tamanhos (Scale), aspect ratios, constantes de animação e textos.
  */
+// Provisórios: a primeira tentativa conta no total e as demais aguardam este intervalo.
+export const QUIT_RETRY_INTERVAL_SECONDS = 0.35;
+export const QUIT_RETRY_MAX_ATTEMPTS = 8;
+
 export const UITheme = {
 	ResultScreenGuiName: "BattleResult",
 	ShowResultOnLocalQuit: false,
@@ -368,6 +372,7 @@ export const UITheme = {
 		QuitButtonWithPauseSize: UDim2.fromScale(0.48, 1),
 		QuitButtonSoloPos: UDim2.fromScale(0.15, 0),
 		QuitButtonSoloSize: UDim2.fromScale(0.7, 1),
+		QuitStatusSize: UDim2.fromScale(0.27, 0.065),
 		StateBannerPos: UDim2.fromScale(0.08, 0.72),
 		StateBannerSize: UDim2.fromScale(0.84, 0.26),
 
@@ -440,6 +445,7 @@ export const UITheme = {
 		ResumeButton: "RETOMAR",
 		QuitButton: "SAIR",
 		QuitConfirmButton: "CONFIRMAR?",
+		QuitInProgress: "Saindo...",
 		PausedOverlayTitle: "PAUSADO",
 		PausedOverlaySubtitle: "Combate PVE em pausa. Toque abaixo para continuar.",
 		PausedOverlayResumeButton: "CONTINUAR LUTA",

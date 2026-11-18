@@ -12,6 +12,7 @@ import { AIService } from "../../Services/AIService";
 import { freezeBattleMovement } from "../../Services/BattleMovement";
 import { BattleService } from "../../Services/BattleService";
 import { BattleSessionService } from "../../Services/BattleSessionService";
+import { RemoteService } from "../../Services/RemoteService";
 import { TinyesService } from "../../Services/TinyesService";
 import { createDummySide } from "../DummyFighters";
 import {
@@ -20,6 +21,53 @@ import {
 	createSurgicalMockAdapter,
 	FIRST_SIMULATION_SEED,
 } from "./testHelpers";
+
+export function validateQuitRequestRateLimit(): void {
+	let now = 0;
+	const remote = new RemoteService(() => now);
+	type Handler = (player: Player, payload?: unknown) => void;
+	const handlers = new Map<RemoteEvent, Handler>();
+	const fakeRemote = (): RemoteEvent => {
+		const event = { OnServerEvent: { Connect: (_self: unknown, callback: Handler) => handlers.set(event as unknown as RemoteEvent, callback) } };
+		return event as unknown as RemoteEvent;
+	};
+	const requests: { -readonly [Key in keyof RemoteService]: RemoteService[Key] } = remote;
+	requests.requestSkill = fakeRemote();
+	requests.requestSwitch = fakeRemote();
+	requests.requestPause = fakeRemote();
+	requests.requestQuit = fakeRemote();
+
+	const player = { Parent: Players, Name: "QuitRateLimit", UserId: 993003 } as unknown as Player;
+	const endings: BattleEndedPayload[] = [];
+	let expectedWinner: string | undefined;
+	const sessions = new BattleSessionService(createSurgicalMockAdapter({
+		onBattleStarted: (_, payload) => expectedWinner = payload.sides[1],
+		onBattleEnded: (_, payload) => endings.push(payload),
+	}));
+	let skills = 0;
+	let quits = 0;
+	remote.bindRequests(() => skills++, () => {}, () => {}, sender => {
+		quits++;
+		sessions.requestQuit(sender);
+	});
+	const skill = handlers.get(requests.requestSkill)!;
+	const quit = handlers.get(requests.requestQuit)!;
+	const rng = () => 0.5;
+	assertInvariant(sessions.createSession(player, undefined, createDummySide(rng), createDummySide(rng), rng, "PVE"), "Quit: session setup");
+	for (let i = 0; i < 10; i++) skill(player, { slot: 1 });
+	quit(player);
+	assertInvariant(!sessions.hasActiveSession(player) && endings.size() === 1 &&
+		expectedWinner !== undefined && endings[0].winnerSideId === expectedWinner && endings[0].reason === "quit",
+		"Quit: saturated skill bucket blocked session end");
+	skill(player, { slot: 1 });
+	assertInvariant(skills === 10, "Quit: skill burst limit changed");
+	now += 1;
+	for (let i = 0; i < 11; i++) skill(player, { slot: 1 });
+	assertInvariant(skills === 20, "Quit: skill refill limit changed");
+	quit(player);
+	assertInvariant(quits === 2 && endings.size() === 1, "Quit: repeat should reach the handler without duplicating BattleEnded");
+	print("QUIT_REQUEST_RATE_LIMIT_PASSED");
+}
 
 /** End-of-session notifications cannot depend on rewards or optional cleanup succeeding. Studio mocks only. */
 export function validateBattleTeardownLifecycle(): void {

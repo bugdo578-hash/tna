@@ -22,7 +22,7 @@ import type {
 import { ANUBIS_SKILL_DATA, JOTARO_SKILL_DATA, type SkillDataSlots } from "../../shared/SkillData";
 import type { BattleGlobalState, ClassName, SkillSlot, StatusEffect } from "../../shared/TypeDefs";
 import { XpRewardCards } from "../UI/XpRewardCards";
-import { UITheme } from "../UI/UITheme";
+import { QUIT_RETRY_INTERVAL_SECONDS, QUIT_RETRY_MAX_ATTEMPTS, UITheme } from "../UI/UITheme";
 import { BattleRemotes } from "./BattleRemotes";
 import type { CombatController } from "./CombatController";
 import type { VFXController } from "./VFXController";
@@ -106,6 +106,8 @@ export class BattleHUD {
 	private resultOverlay: Frame | undefined;
 	private resultScreenGui?: ScreenGui;
 	private quitRequested = false;
+	private quitRetryTimer?: thread;
+	private quitStatusLabel?: TextLabel;
 	private readonly battleDisconnectors: (() => void)[] = [];
 	private xpCards = new XpRewardCards();
     private hpTweens = new Map<Frame, Tween>();
@@ -299,6 +301,19 @@ export class BattleHUD {
 		resultGui.Parent = playerGui;
 		this.resultScreenGui = resultGui;
 		this.createResultOverlay(resultGui);
+		const quitStatus = new Instance("TextLabel");
+		quitStatus.Name = "QuitStatus";
+		quitStatus.AnchorPoint = UITheme.Layout.CenterAnchor;
+		quitStatus.Position = UITheme.Layout.CenterPosition;
+		quitStatus.Size = UITheme.Layout.QuitStatusSize;
+		quitStatus.BackgroundColor3 = UITheme.Colors.PanelBackground;
+		quitStatus.TextColor3 = UITheme.Colors.TextPrimary;
+		quitStatus.Font = UITheme.Fonts.Bold;
+		quitStatus.TextScaled = true;
+		quitStatus.Text = UITheme.Texts.QuitInProgress;
+		quitStatus.Visible = false;
+		quitStatus.Parent = resultGui;
+		this.quitStatusLabel = quitStatus;
 	}
 
 	private createStatusCard(
@@ -1080,7 +1095,7 @@ export class BattleHUD {
 		this.resetQuitConfirmState();
 		this.battleActive = true;
 		this.battleEnded = false;
-		this.quitRequested = false;
+		this.cancelQuitRetry();
 		this.battleVfxGeneration = this.combatController?.getBattleGeneration();
 		if (this.resultScreenGui !== undefined) this.resultScreenGui.Enabled = false;
 		for (const disconnect of this.battleDisconnectors) battleCleanupStep("previous HUD connection", disconnect);
@@ -1289,6 +1304,7 @@ export class BattleHUD {
 		battleCleanupStep("hide pause", () => { if (this.pauseOverlay !== undefined) this.pauseOverlay.Visible = false; });
 		battleCleanupStep("hide result overlay", () => { if (this.resultOverlay !== undefined) this.resultOverlay.Visible = false; });
 		battleCleanupStep("quit confirmation", () => this.resetQuitConfirmState());
+		battleCleanupStep("quit retry", () => this.cancelQuitRetry());
 		battleCleanupStep("HP tweens", () => this.clearHpTweens());
 		battleCleanupStep("XP cards", () => this.xpCards.clear());
 		for (const disconnect of this.battleDisconnectors) battleCleanupStep("HUD battle connection", disconnect);
@@ -1499,9 +1515,29 @@ export class BattleHUD {
 
 		this.resetQuitConfirmState();
 		this.quitRequested = true;
-		// Only the HUD closes optimistically. The stage stays until the server ends the session.
 		if (this.screenGui !== undefined) this.screenGui.Enabled = false;
+		if (this.quitStatusLabel !== undefined) this.quitStatusLabel.Visible = true;
+		if (this.resultScreenGui !== undefined) this.resultScreenGui.Enabled = true;
+		this.sendQuitRequest(1);
+	}
+
+	private sendQuitRequest(attempt: number): void {
+		if (!this.quitRequested || !this.battleActive) return;
+		if (attempt < QUIT_RETRY_MAX_ATTEMPTS) {
+			this.quitRetryTimer = task.delay(QUIT_RETRY_INTERVAL_SECONDS, () => {
+				this.quitRetryTimer = undefined;
+				this.sendQuitRequest(attempt + 1);
+			});
+		}
 		BattleRemotes.requestQuit.FireServer();
+	}
+
+	private cancelQuitRetry(): void {
+		this.quitRequested = false;
+		if (this.quitStatusLabel !== undefined) this.quitStatusLabel.Visible = false;
+		const timer = this.quitRetryTimer;
+		this.quitRetryTimer = undefined;
+		if (timer !== undefined) task.cancel(timer);
 	}
 
 	private handleResultCloseAndRestart(): void {

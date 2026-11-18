@@ -4,7 +4,8 @@ local HUD = require(ts.Controllers.BattleHUD).BattleHUD
 local Combat = require(ts.Controllers.CombatController).CombatController
 local XP = require(ts.UI.XpRewardCards).XpRewardCards
 local remotes = require(ts.Controllers.BattleRemotes).BattleRemotes
-local theme = require(ts.UI.UITheme).UITheme
+local uiTheme = require(ts.UI.UITheme)
+local theme = uiTheme.UITheme
 local config = require(ts.UI.CombatVisualConfig)
 local original = game.Players.LocalPlayer.PlayerGui:FindFirstChild(theme.ScreenGuiName)
 if original then original.Name = "BattleHUDOriginalQA" end
@@ -22,10 +23,10 @@ local function check(condition, message)
 	checks += 1
 	assert(condition, message)
 end
-local function start(mode, reverse)
+local function start(mode, reverse, fighterId)
 	local own, enemy = reverse and "B" or "A", reverse and "A" or "B"
 	local payload = { sides = { own, enemy }, mode = mode, canPause = mode == "PVE", fighters = {
-		{ sideId = own, targetId = "qa-own", fighterId = "dummy", className = "Fury", level = 1, hp = 100, hpMax = 100, active = true },
+		{ sideId = own, targetId = "qa-own", fighterId = fighterId or "dummy", className = "Fury", level = 1, hp = 100, hpMax = 100, active = true },
 		{ sideId = enemy, targetId = "qa-enemy", fighterId = "dummy", className = "Menace", level = 1, hp = 100, hpMax = 100, active = true },
 	} }
 	c:onBattleStarted(payload)
@@ -46,6 +47,67 @@ local function assertResultClosed()
 	check(not h.resultScreenGui.Enabled and h.xpCards.root == nil, "result/cards survived dismissal")
 	check(next(h.xpCards.tweens) == nil and next(h.xpCards.connections) == nil, "XP resources survived dismissal")
 end
+local function checkQuitRetry()
+	local interval = uiTheme.QUIT_RETRY_INTERVAL_SECONDS or 0.35
+	local attempts = 0
+	local statusVisible, stagePresent
+	remotes.requestQuit = { FireServer = function()
+		attempts += 1
+		if attempts == 3 then
+			statusVisible = h.resultScreenGui.Enabled and h.quitStatusLabel and h.quitStatusLabel.Visible
+				and h.quitStatusLabel.Text == theme.Texts.QuitInProgress
+			stagePresent = c.stageFolder ~= nil
+			h:onBattleEnded({ winnerSideId = "B", reason = "quit" })
+		end
+	end }
+	start("PVE")
+	h:handleQuitClicked(); h:handleQuitClicked()
+	local deadline = os.clock() + 5
+	repeat task.wait() until attempts >= 3 or os.clock() >= deadline
+	check(attempts == 3, "Quit was not retried after two dropped requests. Attempts: " .. attempts)
+	check(statusVisible and stagePresent, "waiting for Quit lost status or stage")
+	check(not h.quitStatusLabel.Visible, "Quit status survived BattleEnded")
+	assertEnded(); assertResultClosed()
+
+	remotes.requestQuit = { FireServer = function() attempts += 1 end }
+	start("PVP")
+	h:handleQuitClicked()
+	h:onBattleEnded({ reason = "error" })
+	h:handleQuitClicked()
+	check(attempts == 3, "BattleEnded between clicks still sent Quit")
+	assertEnded()
+
+	for _, mode in { "PVE", "PVP" } do
+		for _, phase in { "IDLE", "PREPARE", "ATTACK", "multi-hit" } do
+			start(mode, false, if phase == "multi-hit" then "jotaro" else nil)
+			h:onStateChanged({ state = if phase == "multi-hit" then "ATTACK" else phase })
+			if phase == "ATTACK" or phase == "multi-hit" then
+				c:onAttackStarted({ attackerId = "qa-own", targetId = "qa-enemy", slot = if phase == "multi-hit" then 2 else 1 })
+				check(c.activePendingHits >= (if phase == "multi-hit" then 2 else 1), "missing attack fixture: " .. phase)
+			end
+			local before = attempts
+			h:handleQuitClicked(); h:handleQuitClicked()
+			check(attempts == before + 1 and c.stageFolder ~= nil and h.quitStatusLabel.Visible, mode .. " " .. phase)
+			h:onBattleEnded({ winnerSideId = "B", reason = "quit" })
+			assertEnded()
+		end
+	end
+
+	start("PVE")
+	h:handleQuitClicked(); h:handleQuitClicked()
+	h:onBattleEnded({ reason = "quit" })
+	start("PVP")
+	local nextStage = c.stageFolder
+	local before = attempts
+	task.wait(interval + 0.1)
+	check(attempts == before and c.stageFolder == nextStage and h.battleActive and next(c.battleTweens) == nil,
+		"new battle inherited a retry, tween or stage")
+	h:handleQuitClicked(); h:handleQuitClicked()
+	h:destroy()
+	task.wait(interval + 0.1)
+	check(attempts == before + 1 and c.stageFolder == nil, "destroy left a Quit retry or a stage")
+end
+
 local ok, failure = pcall(function()
 	for _, case in {
 		{ "PVE victory", "PVE", true, "victory", true },
@@ -160,6 +222,7 @@ local ok, failure = pcall(function()
 	check(c.stageFolder ~= nil and h.screenGui.Enabled and h.battleActive, "old cleanup destroyed next battle")
 	h:onBattleEnded({ reason = "error" })
 	assertEnded()
+	checkQuitRetry()
 end)
 remotes.requestQuit = originalQuit
 theme.ShowResultOnLocalQuit = false

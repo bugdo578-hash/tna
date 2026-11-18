@@ -1,6 +1,9 @@
 // Constantes de rede, buckets de rate limit, validação e timeouts de sessão.
 export const BATTLE_REQUEST_BUCKET_CAPACITY = 10;
 export const BATTLE_REQUEST_REFILL_PER_SECOND = 10;
+// Provisório: Quit tem um bucket por jogador, separado das ações de combate.
+export const QUIT_REQUEST_BUCKET_CAPACITY = 2;
+export const QUIT_REQUEST_REFILL_PER_SECOND = 2;
 export const ALLOCATE_REQUEST_BUCKET_CAPACITY = 5;
 export const ALLOCATE_REQUEST_REFILL_PER_SECOND = 2;
 export const SHOP_REQUEST_BUCKET_CAPACITY = 3;

@@ -40,6 +40,7 @@ import {
 } from "./tests/shopTests";
 import {
 	validateBattleTeardownLifecycle,
+	validateQuitRequestRateLimit,
 	validateCreateSessionRequiresPlayersParent,
 	validateSessionErrorIsolation,
 } from "./tests/teardownTests";
@@ -50,10 +51,12 @@ export { validatePostBattleXp, validateTinyesEconomy } from "./tests/progression
 export { validatePvpBattles, validatePvpDailyXpAndMinimumFight } from "./tests/pvpTests";
 export { validatePurchaseAndAllocationResults, validateShop } from "./tests/shopTests";
 export { validateBattleTeardownLifecycle } from "./tests/teardownTests";
+export { validateQuitRequestRateLimit } from "./tests/teardownTests";
 
 export function runSimulation(): void {
 	validateMultiHitDeath();
 	validateBattleTeardownLifecycle();
+	validateQuitRequestRateLimit();
 	validateDayNightCycle();
 	validateNpcBattles();
 	validateNpcRematchCooldown();

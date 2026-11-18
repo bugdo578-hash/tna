@@ -4,6 +4,8 @@ import {
 	ALLOCATE_REQUEST_REFILL_PER_SECOND,
 	BATTLE_REQUEST_BUCKET_CAPACITY,
 	BATTLE_REQUEST_REFILL_PER_SECOND,
+	QUIT_REQUEST_BUCKET_CAPACITY,
+	QUIT_REQUEST_REFILL_PER_SECOND,
 	FLOAT_TOLERANCE,
 	MAX_CLIENT_FIGHTER_INDEX,
 	MAX_ITEM_UUID_LENGTH,
@@ -89,6 +91,7 @@ export class RemoteService implements BattleRemoteAdapter {
 	readonly atbSync: RemoteEvent;
 
 	private readonly requestBuckets = new Map<Player, RequestBucket>();
+	private readonly quitBuckets = new Map<Player, RequestBucket>();
 	private readonly allocateBuckets = new Map<Player, RequestBucket>();
 	private requestHandlersBound = false;
 	private allocateHandlerBound = false;
@@ -157,7 +160,7 @@ export class RemoteService implements BattleRemoteAdapter {
 		});
 
 		this.requestQuit.OnServerEvent.Connect((player, payload) => {
-			if (!this.consumeRequest(player)) return;
+			if (!this.consumeToken(this.quitBuckets, player, QUIT_REQUEST_BUCKET_CAPACITY, QUIT_REQUEST_REFILL_PER_SECOND)) return;
 			if (!this.isEmptyPayload(payload)) return;
 			onQuit(player);
 		});
@@ -225,6 +228,7 @@ export class RemoteService implements BattleRemoteAdapter {
 
 	public forgetPlayer(player: Player): void {
 		this.requestBuckets.delete(player);
+		this.quitBuckets.delete(player);
 		this.allocateBuckets.delete(player);
 		this.teamBuckets.delete(player);
 	}
