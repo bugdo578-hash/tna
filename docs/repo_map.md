@@ -41,7 +41,8 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `Dev/DummyFighters.ts`: cria times dummy/fixos dev (`createDummySide`, `createDevOpponentSide`) e re-exporta factory.
 ### Client (`src/client/`)
 - `Controllers/BattleCleanup.ts`: helper `battleCleanupStep` (`pcall`/`warn`) para etapas independentes de teardown.
-- `Controllers/BattleHUD.ts`: HUD de combate (ATB, HP, S1–S3/trava Lv5, Tag/Root, pause/quit), `BattleResult` e teardown.
+- `Controllers/BattleHUD.ts`: HUD de combate (ATB, HP, S1–S3/trava Lv5, Tag/Root, pause/quit); delega teardown a `BattleHudTeardown` e tela `BattleResult`/XP a `UI/HudBattleResult`.
+- `Controllers/BattleHudTeardown.ts`: rotina `runBattleHudTeardown` com `battleCleanupStep` isolado por etapa (HUD, resultado, Quit, HP tweens, XP cards, conexões, lutadores e `CombatController`/`VFXController`).
 - `Controllers/BattleNpcController.ts`: oculta prompts `BattleNpc` em batalha e exibe notificações de `NpcBattleNotice`.
 - `Controllers/BattleRemotes.ts`: resolve e expõe referências dos remotes de batalha via `WaitForChild`.
 - `Controllers/ChallengePromptController.ts`: oculta próprio prompt PVP e todos durante `NpcBattleActive` (`RequiresLineOfSight=false`).
@@ -58,6 +59,7 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `Controllers/ShopController.ts`: painel da loja (3 prateleiras, `requestId`/`PurchaseResult`, preview `/testshop`).
 - `Controllers/VFXController.ts`: runtime client do `Part_Icles` (`emit`, `preload`, `deload`, `clear`), orçamento por FPS/teto/qualidade, prioridade com teto duro para essenciais, culling só no mundo e varredura ativa sob demanda.
 - `UI/CombatVisualConfig.ts`: constantes visuais de palco, placeholders, billboards e cores de combate no client.
+- `UI/HudBattleResult.ts`: construção e apresentação da tela `BattleResult` (PVE/PVP, motivo/bloqueio, botões fechar) com delegação para `XpRewardCards`.
 - `UI/InventoryState.ts`: interfaces espelho do snapshot de inventário consumidas pelo `InventoryController`.
 - `UI/ShopPreview.ts`: fixture visual estática para `/testshop` somente no Studio.
 - `UI/TinyesDisplay.ts`: contador de saldo Tinyes no `PlayerGui` com animação `+N`.

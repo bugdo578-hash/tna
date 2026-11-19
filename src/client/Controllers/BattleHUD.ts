@@ -6,7 +6,6 @@ import { clamp } from "../../shared/MathUtils";
 import type {
 	AtbSyncPayload,
 	BattleEndedPayload,
-	BattleEndReason,
 	BattleFighterSnapshot,
 	BattleSessionMode,
 	BattleStartedPayload,
@@ -21,8 +20,10 @@ import type {
 } from "../../shared/Remotes";
 import { ANUBIS_SKILL_DATA, JOTARO_SKILL_DATA, type SkillDataSlots } from "../../shared/SkillData";
 import type { BattleGlobalState, ClassName, SkillSlot, StatusEffect } from "../../shared/TypeDefs";
+import { HudBattleResult } from "../UI/HudBattleResult";
 import { XpRewardCards } from "../UI/XpRewardCards";
 import { QUIT_RETRY_INTERVAL_SECONDS, QUIT_RETRY_MAX_ATTEMPTS, UITheme } from "../UI/UITheme";
+import { runBattleHudTeardown, type BattleHudTeardownHost } from "./BattleHudTeardown";
 import { BattleRemotes } from "./BattleRemotes";
 import type { CombatController } from "./CombatController";
 import type { VFXController } from "./VFXController";
@@ -115,12 +116,9 @@ export class BattleHUD {
         for (const [, tween] of this.hpTweens) battleCleanupStep("HP tween", () => tween.Cancel());
         this.hpTweens.clear();
     }
-	private resultCardStroke: UIStroke | undefined;
-	private resultTitleLabel: TextLabel | undefined;
-	private resultRewardLabel: TextLabel | undefined;
-	private resultReasonLabel: TextLabel | undefined;
-	private resultBlockedLabel: TextLabel | undefined;
 	private resultActionButton: TextButton | undefined;
+	private readonly teardownHost: BattleHudTeardownHost;
+	private readonly battleResult: HudBattleResult;
 
 	private readonly lifetime: RBXScriptConnection[] = [];
 	private sideIds: readonly [string, string] = ["", ""];
@@ -149,7 +147,54 @@ export class BattleHUD {
 	public constructor(
 		private readonly combatController?: CombatController,
 		private readonly vfxController?: VFXController,
-	) {}
+	) {
+		this.teardownHost = {
+			markBattleEnded: () => {
+				this.battleActive = false;
+				this.battleEnded = true;
+				this.isPaused = false;
+			},
+			getScreenGui: () => this.screenGui,
+			getResultScreenGui: () => this.resultScreenGui,
+			getPauseOverlay: () => this.pauseOverlay,
+			getResultOverlay: () => this.resultOverlay,
+			resetQuitConfirmState: () => this.resetQuitConfirmState(),
+			cancelQuitRetry: () => this.cancelQuitRetry(),
+			clearHpTweens: () => this.clearHpTweens(),
+			clearXpCards: () => this.xpCards.clear(),
+			battleDisconnectors: this.battleDisconnectors,
+			consumeBattleVfxGeneration: () => {
+				const generation = this.battleVfxGeneration;
+				this.battleVfxGeneration = undefined;
+				return generation;
+			},
+			clearHudFighters: () => {
+				this.fightersByTargetId.clear();
+				this.playerTeamOrder.clear();
+				this.opponentTeamOrder.clear();
+			},
+			getCombatController: () => this.combatController,
+			getVfxController: () => this.vfxController,
+		};
+		this.battleResult = new HudBattleResult({
+			getResultScreenGui: () => this.resultScreenGui,
+			getOwnSideId: () => this.ownSideId,
+			getBattleMode: () => this.battleMode,
+			isBattleActive: () => this.battleActive,
+			getXpCards: () => this.xpCards,
+			registerLifetimeConnection: (connection) => {
+				this.lifetime.push(connection);
+			},
+			teardownBattle: () => this.teardownBattle(),
+			onCloseClicked: () => this.closeResultOverlay(),
+			onActionClicked: () => this.handleResultCloseAndRestart(),
+			createTextLabel: (parent, name, position, size, text, font, color, xAlign) =>
+				this.createTextLabel(parent, name, position, size, text, font, color, xAlign),
+			applyCorner: (parent, radius) => this.applyCorner(parent, radius),
+			applyStroke: (parent, color, thickness) => this.applyStroke(parent, color, thickness),
+			applyTextConstraint: (parent, minSize, maxSize) => this.applyTextConstraint(parent, minSize, maxSize),
+		});
+	}
 
 	public start(): void {
 		if (this.started || this.destroyed) return;
@@ -951,131 +996,14 @@ export class BattleHUD {
 	}
 
 	private createResultOverlay(parent: ScreenGui): void {
-		const backdrop = new Instance("Frame");
-		backdrop.Name = "ResultOverlay";
-		backdrop.Position = UITheme.Layout.OriginPosition;
-		backdrop.Size = UITheme.Layout.FullSize;
-		backdrop.BackgroundColor3 = UITheme.Colors.OverlayBackdrop;
-		backdrop.BackgroundTransparency = UITheme.Transparency.ModalBackdrop;
-		backdrop.Visible = false;
-		backdrop.ZIndex = 30;
-		backdrop.Parent = parent;
-		this.resultOverlay = backdrop;
-
-		const card = new Instance("Frame");
-		card.Name = "ResultModalCard";
-		card.AnchorPoint = UITheme.Layout.CenterAnchor;
-		card.Position = UITheme.Layout.CenterPosition;
-		card.Size = UITheme.Xp.ModalSize;
-		card.BackgroundColor3 = UITheme.Colors.PanelBackground;
-		card.ZIndex = 31;
-		card.Parent = backdrop;
-		this.applyCorner(card, UITheme.CornerRadius.Modal);
-		this.resultCardStroke = this.applyStroke(card, UITheme.Colors.VictoryAccent, UITheme.StrokeThickness.Thick);
-
-
-		const titleLabel = this.createTextLabel(
-			card,
-			"ResultTitle",
-			UITheme.Xp.TitlePos,
-			UITheme.Xp.TitleSize,
-			UITheme.Texts.VictoryTitle,
-			UITheme.Fonts.Title,
-			UITheme.Colors.VictoryAccent,
-			Enum.TextXAlignment.Center,
-		);
-		titleLabel.ZIndex = 32;
-		this.resultTitleLabel = titleLabel;
-
-		const rewardLabel = this.createTextLabel(
-			card,
-			"RewardText",
-			UITheme.Xp.RewardPos,
-			UITheme.Xp.RewardSize,
-			UITheme.Texts.FormatReward(0),
-			UITheme.Fonts.Bold,
-			UITheme.Colors.RewardGold,
-			Enum.TextXAlignment.Center,
-		);
-		rewardLabel.ZIndex = 32;
-		this.resultRewardLabel = rewardLabel;
-
-		const pvpReasonLabel = this.createTextLabel(
-			card,
-			"PvpReasonText",
-			UITheme.Pvp.ResultReasonPos,
-			UITheme.Pvp.ResultReasonSize,
-			"",
-			UITheme.Fonts.Medium,
-			UITheme.Colors.TextSecondary,
-			Enum.TextXAlignment.Center,
-		);
-		pvpReasonLabel.TextWrapped = true;
-		pvpReasonLabel.Visible = false;
-		pvpReasonLabel.ZIndex = 32;
-		this.applyTextConstraint(pvpReasonLabel, UITheme.Pvp.MinTextSize, UITheme.Pvp.MaxTextSize);
-		this.resultReasonLabel = pvpReasonLabel;
-
-		const pvpBlockedLabel = this.createTextLabel(
-			card,
-			"RewardBlockedNotice",
-			UITheme.Pvp.ResultBlockedPos,
-			UITheme.Pvp.ResultBlockedSize,
-			"",
-			UITheme.Fonts.Bold,
-			UITheme.Colors.PauseActiveBg,
-			Enum.TextXAlignment.Center,
-		);
-		pvpBlockedLabel.BackgroundColor3 = UITheme.Colors.PanelSecondary;
-		pvpBlockedLabel.BackgroundTransparency = UITheme.Transparency.SecondaryPanel;
-		pvpBlockedLabel.TextWrapped = true;
-		pvpBlockedLabel.Visible = false;
-		pvpBlockedLabel.ZIndex = 32;
-		this.applyCorner(pvpBlockedLabel, UITheme.CornerRadius.Panel);
-		this.applyStroke(pvpBlockedLabel, UITheme.Colors.PauseActiveBg, UITheme.StrokeThickness.Thin);
-		this.applyTextConstraint(pvpBlockedLabel, UITheme.Pvp.MinTextSize, UITheme.Pvp.MaxTextSize);
-		const noticePadding = new Instance("UIPadding");
-		noticePadding.PaddingLeft = UITheme.Pvp.ResultBlockedPadding;
-		noticePadding.PaddingRight = UITheme.Pvp.ResultBlockedPadding;
-		noticePadding.Parent = pvpBlockedLabel;
-		this.resultBlockedLabel = pvpBlockedLabel;
-
-		const actionBtn = new Instance("TextButton");
-		actionBtn.Name = "CloseRestartButton";
-		actionBtn.Position = UITheme.Xp.ButtonPos;
-		actionBtn.Size = UITheme.Xp.ButtonSize;
-		actionBtn.BackgroundColor3 = UITheme.Colors.ActionButtonPrimary;
-		actionBtn.Font = UITheme.Fonts.Bold;
-		actionBtn.TextColor3 = UITheme.Colors.TextPrimary;
-		actionBtn.TextScaled = true;
-		actionBtn.Text = UITheme.Texts.ResultCloseButton;
-		actionBtn.ZIndex = 32;
-		actionBtn.Parent = card;
-		this.applyCorner(actionBtn, UITheme.CornerRadius.Button);
-		this.applyStroke(actionBtn, UITheme.Colors.PanelStroke, UITheme.StrokeThickness.Normal);
-		this.resultActionButton = actionBtn;
-
-        const close = actionBtn.Clone();
-        close.Name = "ExitResultButton";
-        close.Text = "X";
-        close.Position = UITheme.Xp.ClosePos;
-        close.Size = UITheme.Xp.CloseSize;
-        close.Parent = card;
-        this.lifetime.push(close.Activated.Connect(() => {
-            this.closeResultOverlay();
-        }));
-		this.lifetime.push(actionBtn.Activated.Connect(() => {
-			this.handleResultCloseAndRestart();
-		}));
+		const created = this.battleResult.createResultOverlay(parent);
+		this.resultOverlay = created.overlay;
+		this.resultActionButton = created.actionButton;
 	}
 
-    private hasResultGui(): boolean {
-        const gui = this.resultScreenGui;
-        const overlay = this.resultOverlay;
-        if (gui === undefined || gui.Parent === undefined || overlay === undefined || overlay.Parent !== gui) return false;
-        const modal = overlay.FindFirstChild("ResultModalCard");
-        return modal !== undefined && modal.IsA("Frame") && modal.Parent === overlay;
-    }
+	private hasResultGui(): boolean {
+		return this.battleResult.hasResultGui();
+	}
 	private onBattleStarted(payload: BattleStartedPayload): void {
 		battleCleanupStep("previous HP tweens", () => this.clearHpTweens());
 		battleCleanupStep("previous XP cards", () => this.xpCards.clear());
@@ -1296,31 +1224,7 @@ export class BattleHUD {
 
 	/** All authoritative ends and result dismissal converge here; every step can fail independently. */
 	private teardownBattle(clearCurrentVfx = false): void {
-		this.battleActive = false;
-		this.battleEnded = true;
-		this.isPaused = false;
-		battleCleanupStep("hide HUD", () => { if (this.screenGui !== undefined) this.screenGui.Enabled = false; });
-		battleCleanupStep("hide result", () => { if (this.resultScreenGui !== undefined) this.resultScreenGui.Enabled = false; });
-		battleCleanupStep("hide pause", () => { if (this.pauseOverlay !== undefined) this.pauseOverlay.Visible = false; });
-		battleCleanupStep("hide result overlay", () => { if (this.resultOverlay !== undefined) this.resultOverlay.Visible = false; });
-		battleCleanupStep("quit confirmation", () => this.resetQuitConfirmState());
-		battleCleanupStep("quit retry", () => this.cancelQuitRetry());
-		battleCleanupStep("HP tweens", () => this.clearHpTweens());
-		battleCleanupStep("XP cards", () => this.xpCards.clear());
-		for (const disconnect of this.battleDisconnectors) battleCleanupStep("HUD battle connection", disconnect);
-		this.battleDisconnectors.clear();
-		const expectedVfxGeneration = clearCurrentVfx ? undefined : this.battleVfxGeneration;
-		this.battleVfxGeneration = undefined;
-		battleCleanupStep("HUD fighters", () => {
-			this.fightersByTargetId.clear();
-			this.playerTeamOrder.clear();
-			this.opponentTeamOrder.clear();
-		});
-		if (this.combatController !== undefined) {
-			battleCleanupStep("combat resources", () => this.combatController?.cleanupStage(expectedVfxGeneration));
-		} else {
-			battleCleanupStep("vfx clear", () => this.vfxController?.clear());
-		}
+		runBattleHudTeardown(this.teardownHost, clearCurrentVfx);
 	}
 
 	private onBattleEnded(payload: BattleEndedPayload): void {
@@ -1341,106 +1245,11 @@ export class BattleHUD {
 	}
 
 	private showBattleResult(payload: BattleEndedPayload): void {
-		if (!this.hasResultGui()) return;
-		const hasWinner = payload.winnerSideId !== undefined;
-		const isVictory = this.ownSideId !== "" && hasWinner && payload.winnerSideId === this.ownSideId;
-		if (this.battleMode === "PVP") this.applyPvpResult(payload, hasWinner, isVictory);
-		else this.applyPveResult(payload, isVictory);
-		this.xpCards.show(this.resultOverlay, payload.xpRewards);
-		if (this.resultOverlay !== undefined) this.resultOverlay.Visible = true;
-		if (this.resultScreenGui !== undefined) this.resultScreenGui.Enabled = true;
-	}
-
-	private applyPveResult(payload: BattleEndedPayload, isVictory: boolean): void {
-		if (this.resultTitleLabel !== undefined) {
-			this.resultTitleLabel.Text = isVictory ? UITheme.Texts.VictoryTitle : UITheme.Texts.DefeatTitle;
-			this.resultTitleLabel.TextColor3 = isVictory
-				? UITheme.Colors.VictoryAccent
-				: UITheme.Colors.DefeatAccent;
-		}
-		if (this.resultCardStroke !== undefined) {
-			this.resultCardStroke.Color = isVictory
-				? UITheme.Colors.VictoryAccent
-				: UITheme.Colors.DefeatAccent;
-		}
-		if (this.resultRewardLabel !== undefined) {
-			this.resultRewardLabel.Visible = true;
-			this.resultRewardLabel.Text = UITheme.Texts.FormatReward(payload.tinyesReward ?? 0);
-		}
-		if (this.resultReasonLabel !== undefined) {
-			this.resultReasonLabel.Visible = false;
-			this.resultReasonLabel.Text = "";
-		}
-		if (this.resultBlockedLabel !== undefined) {
-			this.resultBlockedLabel.Visible = false;
-			this.resultBlockedLabel.Text = "";
-		}
-		if (this.resultActionButton !== undefined) {
-			this.resultActionButton.Text = UITheme.Texts.ResultCloseButton;
-		}
-	}
-
-	private applyPvpResult(payload: BattleEndedPayload, hasWinner: boolean, isVictory: boolean): void {
-		const accent = !hasWinner
-			? UITheme.Colors.TextPrimary
-			: isVictory
-				? UITheme.Colors.VictoryAccent
-				: UITheme.Colors.DefeatAccent;
-		const strokeColor = !hasWinner
-			? UITheme.Colors.PanelStroke
-			: isVictory
-				? UITheme.Colors.VictoryAccent
-				: UITheme.Colors.DefeatAccent;
-		if (this.resultTitleLabel !== undefined) {
-			this.resultTitleLabel.Text = !hasWinner
-				? UITheme.Pvp.EndedNoWinnerTitle
-				: isVictory
-					? UITheme.Texts.VictoryTitle
-					: UITheme.Texts.DefeatTitle;
-			this.resultTitleLabel.TextColor3 = accent;
-		}
-		if (this.resultCardStroke !== undefined) {
-			this.resultCardStroke.Color = strokeColor;
-		}
-		if (this.resultRewardLabel !== undefined) {
-			if (isVictory && payload.tinyesReward !== undefined) {
-				this.resultRewardLabel.Visible = true;
-				this.resultRewardLabel.Text = UITheme.Texts.FormatReward(payload.tinyesReward);
-			} else {
-				this.resultRewardLabel.Visible = false;
-				this.resultRewardLabel.Text = "";
-			}
-		}
-		if (this.resultBlockedLabel !== undefined) {
-			const blockedText = isVictory && payload.rewardBlockedReason !== undefined
-				? (UITheme.Pvp.RewardBlockedReasons[payload.rewardBlockedReason] ?? "")
-				: "";
-			this.resultBlockedLabel.Text = blockedText;
-			this.resultBlockedLabel.Visible = blockedText !== "";
-		}
-		if (this.resultReasonLabel !== undefined) {
-			const reasonText = this.resolvePvpEndReasonText(payload.reason, isVictory);
-			this.resultReasonLabel.Text = reasonText;
-			this.resultReasonLabel.Visible = reasonText !== "";
-		}
-		if (this.resultActionButton !== undefined) {
-			this.resultActionButton.Text = UITheme.Pvp.CloseResultButton;
-		}
-	}
-
-	private resolvePvpEndReasonText(reason: BattleEndReason | undefined, isVictory: boolean): string {
-		if (reason === "quit") {
-			return isVictory ? UITheme.Pvp.EndReasonTexts.quitWin : UITheme.Pvp.EndReasonTexts.quitLoss;
-		}
-		if (reason === "disconnect") return UITheme.Pvp.EndReasonTexts.disconnect;
-		if (reason === "timeout") return UITheme.Pvp.EndReasonTexts.timeout;
-		if (reason === "error") return UITheme.Pvp.EndReasonTexts.error;
-		return UITheme.Pvp.EndReasonTexts.victory;
+		this.battleResult.showBattleResult(payload);
 	}
 
 	private closeResultOverlay(): void {
-		if (this.battleActive) return;
-		this.teardownBattle();
+		this.battleResult.closeResultOverlay();
 	}
 
 	private handleSkillButtonClicked(slot: SkillSlot): void {
@@ -1534,8 +1343,7 @@ export class BattleHUD {
 	}
 
 	private handleResultCloseAndRestart(): void {
-		if (this.battleActive) return;
-		this.teardownBattle();
+		this.battleResult.handleResultCloseAndRestart();
 	}
 
 	private resetQuitConfirmState(): void {

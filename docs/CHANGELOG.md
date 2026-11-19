@@ -2,6 +2,12 @@
 
 Registro conciso de mudanças a partir de `2026-11-14` (ordem cronológica reversa). Histórico anterior a `2026-11-14` (base inicial T1–T5, T7.1, T7.2 e primeira correção de DataStore/autosave): [CHANGELOG_ARCHIVE.md](CHANGELOG_ARCHIVE.md). Estado operacional atual: [HANDOFF.md](HANDOFF.md).
 
+## 2026-11-19 — Refatoração Estágio 4a: `BattleHudTeardown` e `HudBattleResult`
+
+- Extraídas de `src/client/Controllers/BattleHUD.ts` (1886 → 1694 linhas) a rotina de teardown (`runBattleHudTeardown`, preservando cada `battleCleanupStep` isolado na ordem original) para `src/client/Controllers/BattleHudTeardown.ts` (61 linhas) e a tela `BattleResult`/XP (`createResultOverlay`, `hasResultGui`, `showBattleResult`, `applyPveResult`, `applyPvpResult`, `closeResultOverlay`, `handleResultCloseAndRestart`, mantendo delegação à instância `xpCards` de `BattleHUD`) para `src/client/UI/HudBattleResult.ts` (295 linhas).
+- Preservados todos os campos e delegadores na instância de `BattleHUD` lidos/substituídos pelos QAs Luau (`screenGui`, `resultScreenGui`, `resultOverlay`, `resultActionButton`, `battleActive`, `battleEnded`, `hpTweens`, `battleDisconnectors`, `xpCards`, `buildGui`, `teardownBattle`, `closeResultOverlay`, `handleResultCloseAndRestart`, `handleQuitClicked`). Quit/reenvio ("Saindo..."), cards de status/HP/ATB/skills/tag, `CombatController` e servidor não foram alterados.
+- Validação em Play no Studio após `npx.cmd rbxtsc` (0 erros), `git diff --check` e `tools/check-structure.ps1`: `BATTLE_TEARDOWN_CLIENT_PASSED` (804 checks), `ORA_RETURN_CLIENT_PASSED` (105 checks), `VFX_CONTROLLER_QA_PASSED` (179 checks) e `BattleSimulator.runSimulation()` (`SIMULATION_ALL_PASSED`, 31 marcadores via `LogService.MessageOut`, 0 erros; dummy `49,7% / 298,98275s`, Jotaro vs Anubis `68% / 67,5943s`).
+
 ## 2026-11-19 — Refatoração Estágio 3b.2b: `CombatAttackFinalizer`
 
 - Extraída de `src/client/Controllers/CombatController.ts` (891 → 827 linhas) a coordenação de finalização de ataque, mortes pendentes e trocas pendentes (`finalizeAttack`, `handleFighterDied`, `flushPendingDeaths`, `handleSwitchPerformed`, `pendingDeaths`, `pendingSwitches`, `clear`) para `src/client/Controllers/CombatAttackFinalizer.ts` (156 linhas), preservando `CombatHitQueue.ts` (95 linhas) exclusivamente na fila e consumo de hits.
