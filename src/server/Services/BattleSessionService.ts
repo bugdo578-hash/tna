@@ -1,6 +1,5 @@
-import { calcAverageLevel, calcRewardBracket } from "../../shared/RewardMath";
-import { PVP_MIN_QUIT_DAMAGE_FRACTION, PVP_MIN_RESOLVED_HITS, PVP_REWARD_FACTOR, REWARD_BRACKET_MIN_LEVEL } from "../../shared/Config";
-import type { BattleEndReason, RewardBlockedReason } from "../../shared/Remotes";
+import { calcAverageLevel } from "../../shared/RewardMath";
+import type { BattleEndReason } from "../../shared/Remotes";
 import { Players, RunService } from "@rbxts/services";
 import {
 	ATB_SYNC_INTERVAL_SECONDS,
@@ -10,7 +9,6 @@ import {
 	MIN_CLIENT_FIGHTER_INDEX,
 	PVE_PAUSE_MAX_SECONDS,
 	S3_UNLOCK_LEVEL,
-	TEAM_XP_SLOTS,
 } from "../../shared/Config";
 import type {
 	AttackStartedPayload,
@@ -26,13 +24,12 @@ import type {
 	StateChangedPayload,
 	SwitchPerformedPayload,
 } from "../../shared/Remotes";
-import type { FighterInventoryItem, FighterXpReward, SkillSlot } from "../../shared/TypeDefs";
-import { FIGHTER_DATA, type RealFighterId } from "../../shared/FighterData";
-import { calcXpForNextLevel } from "../../shared/ProgressionMath";
-import type { ProgressionService, TeamBattleXpEntry } from "./ProgressionService";
+import type { FighterXpReward, SkillSlot } from "../../shared/TypeDefs";
+import type { ProgressionService } from "./ProgressionService";
 import { BattleSide, type FighterIndex } from "../Components/BattleSide";
 import type { Fighter } from "../Components/Fighter";
 import { AIService } from "./AIService";
+import { BattleRewardService } from "./BattleRewardService";
 import { BattleService } from "./BattleService";
 import type { BattleRemoteAdapter } from "./RemoteService";
 import type { TinyesService } from "./TinyesService";
@@ -82,12 +79,15 @@ export class BattleSessionService {
 	private activeSessions: BattleSessionRecord[] = [];
 	private nextSessionId = 0;
 	private started = false;
+	private readonly rewardService: BattleRewardService;
 
 	public constructor(
 		private readonly remoteService: BattleRemoteAdapter,
 		private readonly tinyesService?: TinyesService,
 		private readonly progressionService?: ProgressionService,
-	) {}
+	) {
+		this.rewardService = new BattleRewardService(tinyesService, progressionService);
+	}
 
 	public start(): void {
 		if (this.started) return;
@@ -485,55 +485,10 @@ export class BattleSessionService {
 		for (const participant of session.participants) {
 			const player = participant.player;
 			if (player.Parent !== Players) continue;
-			let tinyesReward = 0;
-			let rewardBlockedReason: RewardBlockedReason | undefined;
-			let xpRewards: FighterXpReward[] | undefined;
-			const [rewardOk, rewardError] = pcall(() => {
-				if (
-					reason === "victory" && session.mode === "PVE" && session.participants.size() === 1 &&
-					participant.side === winnerSide && !session.rewardPaid
-				) {
-					// TODO: Rival aguarda regras do autor. Bronze não terá teto diário.
-					session.rewardPaid = true;
-					xpRewards = this.awardSessionXp(session, participant);
-					if (this.tinyesService !== undefined) {
-						// Preserva a economia Bronze do PVE atual, independente do tier da IA.
-						const range = calcRewardBracket(REWARD_BRACKET_MIN_LEVEL.Bronze);
-						const amount = math.clamp(range.min + math.floor(session.rewardRng() * (range.max - range.min + 1)), range.min, range.max);
-						if (this.tinyesService.addTinyes(player, amount, "PVE_Bronze_victory").ok) tinyesReward = amount;
-					}
-				}
-				if (session.mode === "PVP" && participant.side === winnerSide && !session.rewardPaid &&
-					(reason === "victory" || reason === "quit" || reason === "disconnect")) {
-					// TODO autor: eventual punicao para desistencia; nenhuma aplicada atualmente.
-					session.rewardPaid = true;
-					const loserIndex = session.sides[0] === participant.side ? 1 : 0;
-					let winnerRealDamage = 0;
-					for (const fighter of participant.side.fighters) {
-						if (fighter.itemUuid !== undefined) winnerRealDamage += session.battle.getDamageDealt(participant.side, fighter.itemUuid);
-					}
-					if (session.resolvedHits < PVP_MIN_RESOLVED_HITS ||
-						((reason === "quit" || reason === "disconnect") && winnerRealDamage < PVP_MIN_QUIT_DAMAGE_FRACTION * session.totalMaxHp[loserIndex])) rewardBlockedReason = "luta_curta";
-					else {
-						const opponent = session.participants.find(other => other.side !== participant.side);
-						const range = calcRewardBracket(session.averageLevels[session.sides[0] === participant.side ? 1 : 0]);
-						const amount = math.floor(math.clamp(range.min + math.floor(session.rewardRng() * (range.max - range.min + 1)), range.min, range.max) * PVP_REWARD_FACTOR);
-						if (opponent !== undefined && this.tinyesService !== undefined) {
-							const reward = this.tinyesService.awardPvpWin(player, opponent.player.UserId, amount);
-							tinyesReward = reward.amount;
-							rewardBlockedReason = reward.blockedReason;
-							// Limite do par continua comum; os saldos diários de Tinyes e XP são independentes.
-							if (reward.blockedReason !== "limite_par") {
-								const remainingXp = this.tinyesService.getRemainingPvpXp(player);
-								if (remainingXp === 0) rewardBlockedReason = "limite_diario_xp";
-								else xpRewards = this.awardSessionXp(session, participant, remainingXp);
-							}
-							pcall(() => this.tinyesService?.syncBalance(player));
-						}
-					}
-				}
-			});
-			if (!rewardOk) warn(`[BattleSessionService] erro de recompensa battle-${session.id}: ${tostring(rewardError)}`);
+			const { tinyesReward, rewardBlockedReason, xpRewards } = this.rewardService.settleParticipant(
+				session, participant, winnerSide, reason,
+				(rewardSession, rewardParticipant, maxTotalXp) => this.awardSessionXp(rewardSession, rewardParticipant, maxTotalXp),
+			);
 			const [sent, sendError] = pcall(() => this.remoteService.sendBattleEnded(player, {
 				winnerSideId: winnerSide === undefined ? undefined : this.getSideId(session, winnerSide),
 				tinyesReward: session.mode === "PVP" && participant.side !== winnerSide ? undefined : tinyesReward,
@@ -546,53 +501,7 @@ export class BattleSessionService {
 	}
 
 	private awardSessionXp(session: BattleSessionRecord, participant: SessionParticipant, maxTotalXp = math.huge): FighterXpReward[] | undefined {
-		const progression = this.progressionService;
-		if (progression === undefined) return undefined;
-		const enemy = session.sides[0] === participant.side ? session.sides[1] : session.sides[0];
-		let levelSum = 0;
-		for (const fighter of enemy.fighters) levelSum += fighter.level;
-		const avgEnemyLevel = session.mode === "PVP"
-			? session.averageLevels[session.sides[0] === participant.side ? 1 : 0]
-			: levelSum / enemy.fighters.size();
-		const team: [TeamBattleXpEntry?, TeamBattleXpEntry?, TeamBattleXpEntry?] = [];
-		const previous = participant.side.fighters.map((fighter, index) => {
-			const itemUuid = fighter.itemUuid;
-			if (itemUuid === undefined) return undefined;
-			team[index] = { itemUuid, damageDealt: session.battle.getDamageDealt(participant.side, itemUuid) };
-			return progression.getFighter(participant.player, itemUuid);
-		});
-		let updated: readonly (FighterInventoryItem | undefined)[] = [];
-		const [xpOk, xpError] = pcall(() => { updated = progression.awardPostBattleTeamXp(participant.player, avgEnemyLevel, true, team, maxTotalXp); });
-		// Mesmo se a notificação falhar após um commit de XP, contabiliza o que entrou no inventário.
-		const rewards: FighterXpReward[] = [];
-		let totalXpGained = 0;
-		for (const index of $range(0, TEAM_XP_SLOTS - 1)) {
-			const before = previous[index];
-			const item = xpOk ? updated[index] : before !== undefined ? progression.getFighter(participant.player, before.itemUuid) : undefined;
-			if (item === undefined || before === undefined) continue;
-			// Diferença acumulada da curva: inclui múltiplos níveis e somente XP útil no cap.
-			let xpGained = item.xp - before.xp;
-			for (let level = before.level; level < item.level; level++) xpGained += calcXpForNextLevel(level);
-			totalXpGained += xpGained;
-			const definition = FIGHTER_DATA[item.fighterId as RealFighterId];
-			rewards.push({
-				itemUuid: item.itemUuid,
-				fighterId: item.fighterId,
-				displayName: definition?.name ?? item.fighterId,
-				className: participant.side.fighters[index].className,
-				xpGained,
-				previousLevel: before.level,
-				previousXp: before.xp,
-				previousXpToNext: calcXpForNextLevel(before.level),
-				newLevel: item.level,
-				newXp: item.xp,
-				newXpToNext: calcXpForNextLevel(item.level),
-				leveledUp: item.level > before.level,
-			});
-		}
-		if (session.mode === "PVP") this.tinyesService?.recordPvpXp(participant.player, totalXpGained);
-		if (!xpOk) error(xpError);
-		return rewards;
+		return this.rewardService.awardSessionXp(session, participant, maxTotalXp);
 	}
 
 	private broadcastBattleStarted(session: BattleSessionRecord): void {
