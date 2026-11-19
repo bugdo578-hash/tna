@@ -41,7 +41,8 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `Dev/DummyFighters.ts`: cria times dummy/fixos dev (`createDummySide`, `createDevOpponentSide`) e re-exporta factory.
 ### Client (`src/client/`)
 - `Controllers/BattleCleanup.ts`: helper `battleCleanupStep` (`pcall`/`warn`) para etapas independentes de teardown.
-- `Controllers/BattleHUD.ts`: HUD de combate (ATB, HP, S1–S3/trava Lv5, Tag/Root, pause/quit); delega teardown a `BattleHudTeardown` e tela `BattleResult`/XP a `UI/HudBattleResult`.
+- `Controllers/BattleHUD.ts`: HUD de combate (coordena eventos, estado dos lutadores, fonte única de verdade de Pause e envio de `RequestSkill`/`RequestSwitch`/`RequestPause`; delega cards/HP/ATB a `UI/HudFighterStatus`, painel de Tag/Root a `UI/HudTagPanel`, painel de skills S1–S3 a `UI/HudSkillsPanel`, controles de sessão/Pause/banner a `UI/HudSessionControls`, teardown a `BattleHudTeardown`, tela `BattleResult`/XP a `UI/HudBattleResult` e fluxo de Quit/retry a `BattleHudQuitController`).
+- `Controllers/BattleHudQuitController.ts`: fluxo de saída da batalha (confirmação em dois cliques com timeout, label `"Saindo..."`, reenvio periódico de `RequestQuit` com guarda por token, reset por sessão e supressão de resultado no Quit local).
 - `Controllers/BattleHudTeardown.ts`: rotina `runBattleHudTeardown` com `battleCleanupStep` isolado por etapa (HUD, resultado, Quit, HP tweens, XP cards, conexões, lutadores e `CombatController`/`VFXController`).
 - `Controllers/BattleNpcController.ts`: oculta prompts `BattleNpc` em batalha e exibe notificações de `NpcBattleNotice`.
 - `Controllers/BattleRemotes.ts`: resolve e expõe referências dos remotes de batalha via `WaitForChild`.
@@ -60,6 +61,10 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `Controllers/VFXController.ts`: runtime client do `Part_Icles` (`emit`, `preload`, `deload`, `clear`), orçamento por FPS/teto/qualidade, prioridade com teto duro para essenciais, culling só no mundo e varredura ativa sob demanda.
 - `UI/CombatVisualConfig.ts`: constantes visuais de palco, placeholders, billboards e cores de combate no client.
 - `UI/HudBattleResult.ts`: construção e apresentação da tela `BattleResult` (PVE/PVP, motivo/bloqueio, botões fechar) com delegação para `XpRewardCards`.
+- `UI/HudFighterStatus.ts`: construção e atualização dos cards de lutadores ativos (HP, tweens compartilhados via `hpTweens`, badges de status, barra ATB interpolada e marcadores S1–S3) e `resolveHpColor`.
+- `UI/HudSessionControls.ts`: construção e atualização visual dos controles de sessão (`PauseButton`, `QuitButton`, `StateBanner`, `PauseOverlay`) e layout relativo Pause/Quit em PVE/PVP, encaminhando cliques ao coordenador.
+- `UI/HudSkillsPanel.ts`: construção e atualização visual do painel de habilidades (botões S1–S3, custos, trava de nível da S3 e disponibilidade por ATB/fase/Pause/KO) encaminhando cliques ao coordenador.
+- `UI/HudTagPanel.ts`: construção e atualização visual do painel de Tag (slots 1–3, mini-HP, `RootLockBanner`, estados ativo/pronto/aguarde/bloqueado/KO) encaminhando cliques ao coordenador.
 - `UI/InventoryState.ts`: interfaces espelho do snapshot de inventário consumidas pelo `InventoryController`.
 - `UI/ShopPreview.ts`: fixture visual estática para `/testshop` somente no Studio.
 - `UI/TinyesDisplay.ts`: contador de saldo Tinyes no `PlayerGui` com animação `+N`.

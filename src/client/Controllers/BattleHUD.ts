@@ -1,5 +1,5 @@
 import { battleCleanupStep } from "./BattleCleanup";
-import { Players, RunService, TweenService } from "@rbxts/services";
+import { Players, RunService } from "@rbxts/services";
 import { ATB_MAX, ATB_MIN, FLOAT_TOLERANCE } from "../../shared/Config";
 import { FIGHTER_DATA, type RealFighterId } from "../../shared/FighterData";
 import { clamp } from "../../shared/MathUtils";
@@ -19,74 +19,19 @@ import type {
 	SwitchPerformedPayload,
 } from "../../shared/Remotes";
 import { ANUBIS_SKILL_DATA, JOTARO_SKILL_DATA, type SkillDataSlots } from "../../shared/SkillData";
-import type { BattleGlobalState, ClassName, SkillSlot, StatusEffect } from "../../shared/TypeDefs";
+import type { BattleGlobalState, SkillSlot, StatusEffect } from "../../shared/TypeDefs";
 import { HudBattleResult } from "../UI/HudBattleResult";
+import { HudFighterStatus, type HudFighterState } from "../UI/HudFighterStatus";
+import { HudSessionControls } from "../UI/HudSessionControls";
+import { HudSkillsPanel } from "../UI/HudSkillsPanel";
+import { HudTagPanel } from "../UI/HudTagPanel";
 import { XpRewardCards } from "../UI/XpRewardCards";
-import { QUIT_RETRY_INTERVAL_SECONDS, QUIT_RETRY_MAX_ATTEMPTS, UITheme } from "../UI/UITheme";
+import { UITheme } from "../UI/UITheme";
+import { BattleHudQuitController } from "./BattleHudQuitController";
 import { runBattleHudTeardown, type BattleHudTeardownHost } from "./BattleHudTeardown";
 import { BattleRemotes } from "./BattleRemotes";
 import type { CombatController } from "./CombatController";
 import type { VFXController } from "./VFXController";
-
-interface HudFighterState {
-	readonly targetId: string;
-	readonly fighterId: string;
-	readonly sideId: string;
-	readonly sideIndex: 0 | 1;
-	readonly teamSlotIndex: ClientFighterIndex;
-	readonly displayName: string;
-	readonly iconText: string;
-	readonly className: ClassName;
-	readonly level: number;
-	readonly s3Unlocked: boolean;
-	readonly slotCosts: readonly [number, number, number];
-	readonly skillNames: readonly [string, string, string];
-	hp: number;
-	hpMax: number;
-	active: boolean;
-	dead: boolean;
-	readonly effects: Set<StatusEffect>;
-}
-
-interface StatusCardWidgets {
-	readonly root: Frame;
-	readonly iconBadge: Frame;
-	readonly iconLabel: TextLabel;
-	readonly nameLabel: TextLabel;
-	readonly metaLabel: TextLabel;
-	readonly hpFill: Frame;
-	readonly hpValueLabel: TextLabel;
-	readonly atbFill: Frame;
-	readonly atbValueLabel: TextLabel;
-	readonly statusBadges: Readonly<Record<StatusEffect, TextLabel>>;
-	readonly atbMarkers: readonly {
-		readonly root: Frame;
-		readonly line: Frame;
-		readonly label: TextLabel;
-	}[];
-}
-
-interface TagSlotWidgets {
-	readonly index: ClientFighterIndex;
-	readonly button: TextButton;
-	readonly stroke: UIStroke;
-	readonly badge: Frame;
-	readonly badgeLabel: TextLabel;
-	readonly nameLabel: TextLabel;
-	readonly hpFill: Frame;
-	readonly statusLabel: TextLabel;
-	readonly deadCrossLabel: TextLabel;
-}
-
-interface SkillButtonWidgets {
-	readonly slot: SkillSlot;
-	readonly button: TextButton;
-	readonly stroke: UIStroke;
-	readonly slotTag: TextLabel;
-	readonly costLabel: TextLabel;
-	readonly nameLabel: TextLabel;
-	readonly stateLabel: TextLabel;
-}
 
 export class BattleHUD {
 	private readonly fightersByTargetId = new Map<string, HudFighterState>();
@@ -95,30 +40,27 @@ export class BattleHUD {
 
 	private screenGui: ScreenGui | undefined;
 	private mainContainer: Frame | undefined;
-	private playerCard: StatusCardWidgets | undefined;
-	private opponentCard: StatusCardWidgets | undefined;
 	private pauseButton: TextButton | undefined;
 	private quitButton: TextButton | undefined;
 	private stateBannerLabel: TextLabel | undefined;
-	private rootLockBanner: TextLabel | undefined;
-	private readonly tagSlotWidgets: TagSlotWidgets[] = [];
-	private readonly skillButtonWidgets: SkillButtonWidgets[] = [];
 	private pauseOverlay: Frame | undefined;
 	private resultOverlay: Frame | undefined;
 	private resultScreenGui?: ScreenGui;
-	private quitRequested = false;
-	private quitRetryTimer?: thread;
 	private quitStatusLabel?: TextLabel;
 	private readonly battleDisconnectors: (() => void)[] = [];
 	private xpCards = new XpRewardCards();
-    private hpTweens = new Map<Frame, Tween>();
-    private clearHpTweens(): void {
-        for (const [, tween] of this.hpTweens) battleCleanupStep("HP tween", () => tween.Cancel());
-        this.hpTweens.clear();
-    }
+	private readonly fighterStatus: HudFighterStatus;
+	private readonly tagPanel: HudTagPanel;
+	private readonly skillsPanel: HudSkillsPanel;
+	private readonly sessionControls: HudSessionControls;
+	private hpTweens: Map<Frame, Tween>;
+	private clearHpTweens(): void {
+		this.fighterStatus.clearHpTweens();
+	}
 	private resultActionButton: TextButton | undefined;
 	private readonly teardownHost: BattleHudTeardownHost;
 	private readonly battleResult: HudBattleResult;
+	private readonly quitController: BattleHudQuitController;
 
 	private readonly lifetime: RBXScriptConnection[] = [];
 	private sideIds: readonly [string, string] = ["", ""];
@@ -129,17 +71,12 @@ export class BattleHUD {
 	private canPause = false;
 	private isPaused = false;
 	private lastPauseToggleClock = 0;
-	private quitConfirmPending = false;
-	private quitConfirmToken = 0;
-	private quitConfirmTimer?: thread;
 	private battleActive = false;
 	private battleEnded = false;
 	private battleVfxGeneration: number | undefined;
 
 	private playerTargetAtb = 0;
-	private playerDisplayAtb = 0;
 	private opponentTargetAtb = 0;
-	private opponentDisplayAtb = 0;
 
 	private started = false;
 	private destroyed = false;
@@ -194,6 +131,56 @@ export class BattleHUD {
 			applyStroke: (parent, color, thickness) => this.applyStroke(parent, color, thickness),
 			applyTextConstraint: (parent, minSize, maxSize) => this.applyTextConstraint(parent, minSize, maxSize),
 		});
+		this.quitController = new BattleHudQuitController({
+			isBattleActive: () => this.battleActive,
+			isBattleEnded: () => this.battleEnded,
+			getScreenGui: () => this.screenGui,
+			getResultScreenGui: () => this.resultScreenGui,
+			getQuitButton: () => this.quitButton,
+			getQuitStatusLabel: () => this.quitStatusLabel,
+		});
+		this.fighterStatus = new HudFighterStatus({
+			createTextLabel: (parent, name, position, size, text, font, color, xAlign) =>
+				this.createTextLabel(parent, name, position, size, text, font, color, xAlign),
+			applyCorner: (parent, radius) => this.applyCorner(parent, radius),
+			applyStroke: (parent, color, thickness) => this.applyStroke(parent, color, thickness),
+			applyAspectRatio: (parent, ratio) => this.applyAspectRatio(parent, ratio),
+		});
+		this.tagPanel = new HudTagPanel({
+			onSlotClicked: (index) => this.handleTagSlotClicked(index),
+			registerLifetimeConnection: (connection) => {
+				this.lifetime.push(connection);
+			},
+			createTextLabel: (parent, name, position, size, text, font, color, xAlign) =>
+				this.createTextLabel(parent, name, position, size, text, font, color, xAlign),
+			applyCorner: (parent, radius) => this.applyCorner(parent, radius),
+			applyStroke: (parent, color, thickness) => this.applyStroke(parent, color, thickness),
+			applyAspectRatio: (parent, ratio) => this.applyAspectRatio(parent, ratio),
+		});
+		this.skillsPanel = new HudSkillsPanel({
+			onSkillClicked: (slot) => this.handleSkillButtonClicked(slot),
+			registerLifetimeConnection: (connection) => {
+				this.lifetime.push(connection);
+			},
+			createTextLabel: (parent, name, position, size, text, font, color, xAlign) =>
+				this.createTextLabel(parent, name, position, size, text, font, color, xAlign),
+			applyCorner: (parent, radius) => this.applyCorner(parent, radius),
+			applyStroke: (parent, color, thickness) => this.applyStroke(parent, color, thickness),
+			applyAspectRatio: (parent, ratio) => this.applyAspectRatio(parent, ratio),
+		});
+		this.sessionControls = new HudSessionControls({
+			onPauseClicked: () => this.handlePauseClicked(),
+			onQuitClicked: () => this.handleQuitClicked(),
+			registerLifetimeConnection: (connection) => {
+				this.lifetime.push(connection);
+			},
+			createTextLabel: (parent, name, position, size, text, font, color, xAlign) =>
+				this.createTextLabel(parent, name, position, size, text, font, color, xAlign),
+			applyCorner: (parent, radius) => this.applyCorner(parent, radius),
+			applyStroke: (parent, color, thickness) => this.applyStroke(parent, color, thickness),
+			applyAspectRatio: (parent, ratio) => this.applyAspectRatio(parent, ratio),
+		});
+		this.hpTweens = this.fighterStatus.getHpTweens();
 	}
 
 	public start(): void {
@@ -317,25 +304,15 @@ export class BattleHUD {
 		main.Parent = screenGui;
 		this.mainContainer = main;
 
-		this.playerCard = this.createStatusCard(
-			main,
-			"PlayerStatusCard",
-			UITheme.Layout.TopLeftAnchor,
-			UITheme.Layout.PlayerCardPos,
-			true,
-		);
-		this.opponentCard = this.createStatusCard(
-			main,
-			"OpponentStatusCard",
-			UITheme.Layout.TopRightAnchor,
-			UITheme.Layout.OpponentCardPos,
-			false,
-		);
+		this.fighterStatus.buildCards(main);
 
-		this.createSessionControls(main);
-		this.createTagPanel(main);
-		this.createSkillsPanel(main);
-		this.createPauseOverlay(screenGui);
+		const controls = this.sessionControls.createControls(main);
+		this.pauseButton = controls.pauseButton;
+		this.quitButton = controls.quitButton;
+		this.stateBannerLabel = controls.stateBannerLabel;
+		this.tagPanel.createPanel(main);
+		this.skillsPanel.createPanel(main);
+		this.pauseOverlay = this.sessionControls.createPauseOverlay(screenGui);
 		const resultGui = new Instance("ScreenGui");
 		resultGui.Name = UITheme.ResultScreenGuiName;
 		resultGui.DisplayOrder = UITheme.Xp.ResultDisplayOrder;
@@ -346,653 +323,7 @@ export class BattleHUD {
 		resultGui.Parent = playerGui;
 		this.resultScreenGui = resultGui;
 		this.createResultOverlay(resultGui);
-		const quitStatus = new Instance("TextLabel");
-		quitStatus.Name = "QuitStatus";
-		quitStatus.AnchorPoint = UITheme.Layout.CenterAnchor;
-		quitStatus.Position = UITheme.Layout.CenterPosition;
-		quitStatus.Size = UITheme.Layout.QuitStatusSize;
-		quitStatus.BackgroundColor3 = UITheme.Colors.PanelBackground;
-		quitStatus.TextColor3 = UITheme.Colors.TextPrimary;
-		quitStatus.Font = UITheme.Fonts.Bold;
-		quitStatus.TextScaled = true;
-		quitStatus.Text = UITheme.Texts.QuitInProgress;
-		quitStatus.Visible = false;
-		quitStatus.Parent = resultGui;
-		this.quitStatusLabel = quitStatus;
-	}
-
-	private createStatusCard(
-		parent: GuiObject,
-		name: string,
-		anchorPoint: Vector2,
-		position: UDim2,
-		isPlayer: boolean,
-	): StatusCardWidgets {
-		const card = new Instance("Frame");
-		card.Name = name;
-		card.AnchorPoint = anchorPoint;
-		card.Position = position;
-		card.Size = UITheme.Layout.StatusCardSize;
-		card.BackgroundColor3 = UITheme.Colors.PanelBackground;
-		card.BackgroundTransparency = UITheme.Transparency.Panel;
-		card.Parent = parent;
-
-		this.applyCorner(card, UITheme.CornerRadius.Panel);
-		this.applyStroke(card, UITheme.Colors.PanelStroke, UITheme.StrokeThickness.Normal);
-		this.applyAspectRatio(card, UITheme.AspectRatios.StatusCard);
-
-		const header = new Instance("Frame");
-		header.Name = "Header";
-		header.Position = UITheme.Layout.CardHeaderPos;
-		header.Size = UITheme.Layout.CardHeaderSize;
-		header.BackgroundTransparency = UITheme.Transparency.Hidden;
-		header.Parent = card;
-
-		const iconBadge = new Instance("Frame");
-		iconBadge.Name = "IconBadge";
-		iconBadge.Position = UITheme.Layout.FighterIconPos;
-		iconBadge.Size = UITheme.Layout.FighterIconSize;
-		iconBadge.BackgroundColor3 = UITheme.Colors.PanelSecondary;
-		iconBadge.Parent = header;
-		this.applyCorner(iconBadge, UITheme.CornerRadius.Badge);
-		this.applyAspectRatio(iconBadge, UITheme.AspectRatios.IconBadge);
-
-		const iconLabel = this.createTextLabel(
-			iconBadge,
-			"IconLabel",
-			UITheme.Layout.OriginPosition,
-			UITheme.Layout.FullSize,
-			"?",
-			UITheme.Fonts.Title,
-			UITheme.Colors.TextPrimary,
-			Enum.TextXAlignment.Center,
-		);
-
-		const nameLabel = this.createTextLabel(
-			header,
-			"FighterName",
-			UITheme.Layout.FighterNamePos,
-			UITheme.Layout.FighterNameSize,
-			isPlayer ? UITheme.Texts.PlayerSideTag : UITheme.Texts.OpponentSideTag,
-			UITheme.Fonts.Title,
-			UITheme.Colors.TextPrimary,
-			Enum.TextXAlignment.Left,
-		);
-
-		const metaLabel = this.createTextLabel(
-			header,
-			"FighterMeta",
-			UITheme.Layout.FighterMetaPos,
-			UITheme.Layout.FighterMetaSize,
-			"",
-			UITheme.Fonts.Medium,
-			UITheme.Colors.TextSecondary,
-			Enum.TextXAlignment.Left,
-		);
-
-		const badgeRow = new Instance("Frame");
-		badgeRow.Name = "StatusBadges";
-		badgeRow.Position = UITheme.Layout.StatusBadgeRowPos;
-		badgeRow.Size = UITheme.Layout.StatusBadgeRowSize;
-		badgeRow.BackgroundTransparency = UITheme.Transparency.Hidden;
-		badgeRow.Parent = header;
-
-		const effectsOrder: readonly StatusEffect[] = ["Burn", "Bleed", "Root"];
-		const statusBadges = {} as Record<StatusEffect, TextLabel>;
-		for (const idx of $range(0, effectsOrder.size() - 1)) {
-			const effect = effectsOrder[idx];
-			const badge = this.createTextLabel(
-				badgeRow,
-				`Badge_${effect}`,
-				UDim2.fromScale(idx * 0.34, 0),
-				UITheme.Layout.StatusBadgeItemSize,
-				UITheme.Texts.StatusShortLabels[effect],
-				UITheme.Fonts.Bold,
-				UITheme.Colors.TextPrimary,
-				Enum.TextXAlignment.Center,
-			);
-			badge.BackgroundColor3 = UITheme.StatusColors[effect];
-			badge.BackgroundTransparency = UITheme.Transparency.Opaque;
-			badge.Visible = false;
-			this.applyCorner(badge, UITheme.CornerRadius.Badge);
-			statusBadges[effect] = badge;
-		}
-
-		// Barra de HP
-		const hpTrack = new Instance("Frame");
-		hpTrack.Name = "HpBarTrack";
-		hpTrack.Position = UITheme.Layout.HpBarPos;
-		hpTrack.Size = UITheme.Layout.HpBarSize;
-		hpTrack.BackgroundColor3 = UITheme.Colors.BarTrack;
-		hpTrack.BackgroundTransparency = UITheme.Transparency.BarTrack;
-		hpTrack.Parent = card;
-		this.applyCorner(hpTrack, UITheme.CornerRadius.Bar);
-		this.applyStroke(hpTrack, UITheme.Colors.PanelStroke, UITheme.StrokeThickness.Thin);
-
-		const hpFill = new Instance("Frame");
-		hpFill.Name = "HpFill";
-		hpFill.Position = UITheme.Layout.OriginPosition;
-		hpFill.Size = UITheme.Layout.FullSize;
-		hpFill.BackgroundColor3 = UITheme.Colors.HpFillHigh;
-		hpFill.BorderSizePixel = 0;
-		hpFill.Parent = hpTrack;
-		this.applyCorner(hpFill, UITheme.CornerRadius.Bar);
-
-		this.createTextLabel(
-			hpTrack,
-			"HpTitle",
-			UITheme.Layout.BarLabelPos,
-			UITheme.Layout.BarLabelSize,
-			UITheme.Texts.HpLabel,
-			UITheme.Fonts.Bold,
-			UITheme.Colors.TextPrimary,
-			Enum.TextXAlignment.Left,
-		);
-
-		const hpValueLabel = this.createTextLabel(
-			hpTrack,
-			"HpValue",
-			UITheme.Layout.BarValuePos,
-			UITheme.Layout.BarValueSize,
-			"0 / 0",
-			UITheme.Fonts.Bold,
-			UITheme.Colors.TextPrimary,
-			Enum.TextXAlignment.Right,
-		);
-
-		// Barra de ATB (0 a 10)
-		const atbTrack = new Instance("Frame");
-		atbTrack.Name = "AtbBarTrack";
-		atbTrack.Position = UITheme.Layout.AtbBarPos;
-		atbTrack.Size = UITheme.Layout.AtbBarSize;
-		atbTrack.BackgroundColor3 = UITheme.Colors.BarTrack;
-		atbTrack.BackgroundTransparency = UITheme.Transparency.BarTrack;
-		atbTrack.Parent = card;
-		this.applyCorner(atbTrack, UITheme.CornerRadius.Bar);
-		this.applyStroke(atbTrack, UITheme.Colors.PanelStroke, UITheme.StrokeThickness.Thin);
-
-		const atbFill = new Instance("Frame");
-		atbFill.Name = "AtbFill";
-		atbFill.Position = UITheme.Layout.OriginPosition;
-		atbFill.Size = UDim2.fromScale(0, 1);
-		atbFill.BackgroundColor3 = isPlayer ? UITheme.Colors.AtbFillPlayer : UITheme.Colors.AtbFillOpponent;
-		atbFill.BorderSizePixel = 0;
-		atbFill.Parent = atbTrack;
-		this.applyCorner(atbFill, UITheme.CornerRadius.Bar);
-
-		this.createTextLabel(
-			atbTrack,
-			"AtbTitle",
-			UITheme.Layout.BarLabelPos,
-			UITheme.Layout.BarLabelSize,
-			UITheme.Texts.AtbLabel,
-			UITheme.Fonts.Bold,
-			UITheme.Colors.TextPrimary,
-			Enum.TextXAlignment.Left,
-		);
-
-		const atbValueLabel = this.createTextLabel(
-			atbTrack,
-			"AtbValue",
-			UITheme.Layout.BarValuePos,
-			UITheme.Layout.BarValueSize,
-			UITheme.Texts.FormatAtb(0, ATB_MAX),
-			UITheme.Fonts.Bold,
-			UITheme.Colors.TextPrimary,
-			Enum.TextXAlignment.Right,
-		);
-
-		// Marcas visuais de custo de ATB (S1, S2, S3) na barra do player
-		const atbMarkers: {
-			readonly root: Frame;
-			readonly line: Frame;
-			readonly label: TextLabel;
-		}[] = [];
-
-		if (isPlayer) {
-			for (const slot of [1, 2, 3] as const) {
-				const defaultCost = UITheme.Numbers.DefaultSlotCosts[slot - 1];
-				const markerRoot = new Instance("Frame");
-				markerRoot.Name = `CostMarker_S${slot}`;
-				markerRoot.AnchorPoint = UITheme.Layout.AtbMarkerLineAnchor;
-				markerRoot.Position = UDim2.fromScale(clamp(defaultCost / ATB_MAX, 0.05, 0.95), 0.5);
-				markerRoot.Size = UITheme.Layout.AtbMarkerLineSize;
-				markerRoot.BackgroundTransparency = UITheme.Transparency.Hidden;
-				markerRoot.ZIndex = 4;
-				markerRoot.Parent = atbTrack;
-
-				const markerLine = new Instance("Frame");
-				markerLine.Name = "Line";
-				markerLine.Size = UITheme.Layout.FullSize;
-				markerLine.BackgroundColor3 = UITheme.Colors.AtbMarkerPending;
-				markerLine.BorderSizePixel = 0;
-				markerLine.ZIndex = 4;
-				markerLine.Parent = markerRoot;
-
-				const markerLabel = this.createTextLabel(
-					markerRoot,
-					"SlotLabel",
-					UITheme.Layout.AtbMarkerLabelPos,
-					UITheme.Layout.AtbMarkerLabelSize,
-					`S${slot}`,
-					UITheme.Fonts.Bold,
-					UITheme.Colors.AtbMarkerPending,
-					Enum.TextXAlignment.Center,
-				);
-				markerLabel.AnchorPoint = new Vector2(0.5, 0);
-				markerLabel.ZIndex = 5;
-
-				atbMarkers.push({ root: markerRoot, line: markerLine, label: markerLabel });
-			}
-		}
-
-		return {
-			root: card,
-			iconBadge,
-			iconLabel,
-			nameLabel,
-			metaLabel,
-			hpFill,
-			hpValueLabel,
-			atbFill,
-			atbValueLabel,
-			statusBadges,
-			atbMarkers,
-		};
-	}
-
-	private createSessionControls(parent: GuiObject): void {
-		const container = new Instance("Frame");
-		container.Name = "SessionControls";
-		container.AnchorPoint = UITheme.Layout.TopCenterAnchor;
-		container.Position = UITheme.Layout.SessionControlsPos;
-		container.Size = UITheme.Layout.SessionControlsSize;
-		container.BackgroundTransparency = UITheme.Transparency.Hidden;
-		container.Parent = parent;
-		this.applyAspectRatio(container, UITheme.AspectRatios.SessionControls);
-
-		const buttonsRow = new Instance("Frame");
-		buttonsRow.Name = "ButtonsRow";
-		buttonsRow.Position = UITheme.Layout.SessionButtonsRowPos;
-		buttonsRow.Size = UITheme.Layout.SessionButtonsRowSize;
-		buttonsRow.BackgroundTransparency = UITheme.Transparency.Hidden;
-		buttonsRow.Parent = container;
-
-		const pauseBtn = new Instance("TextButton");
-		pauseBtn.Name = "PauseButton";
-		pauseBtn.Position = UITheme.Layout.PauseButtonPos;
-		pauseBtn.Size = UITheme.Layout.PauseButtonSize;
-		pauseBtn.BackgroundColor3 = UITheme.Colors.PauseButtonBg;
-		pauseBtn.Font = UITheme.Fonts.Bold;
-		pauseBtn.TextColor3 = UITheme.Colors.TextPrimary;
-		pauseBtn.TextScaled = true;
-		pauseBtn.Text = UITheme.Texts.PauseButton;
-		pauseBtn.AutoButtonColor = true;
-		pauseBtn.Parent = buttonsRow;
-		this.applyCorner(pauseBtn, UITheme.CornerRadius.Button);
-		this.applyStroke(pauseBtn, UITheme.Colors.PanelStroke, UITheme.StrokeThickness.Thin);
-		this.pauseButton = pauseBtn;
-
-		this.lifetime.push(pauseBtn.Activated.Connect(() => {
-			this.handlePauseClicked();
-		}));
-
-		const quitBtn = new Instance("TextButton");
-		quitBtn.Name = "QuitButton";
-		quitBtn.Position = UITheme.Layout.QuitButtonWithPausePos;
-		quitBtn.Size = UITheme.Layout.QuitButtonWithPauseSize;
-		quitBtn.BackgroundColor3 = UITheme.Colors.QuitButtonBg;
-		quitBtn.Font = UITheme.Fonts.Bold;
-		quitBtn.TextColor3 = UITheme.Colors.TextPrimary;
-		quitBtn.TextScaled = true;
-		quitBtn.Text = UITheme.Texts.QuitButton;
-		quitBtn.AutoButtonColor = true;
-		quitBtn.Parent = buttonsRow;
-		this.applyCorner(quitBtn, UITheme.CornerRadius.Button);
-		this.applyStroke(quitBtn, UITheme.Colors.PanelStroke, UITheme.StrokeThickness.Thin);
-		this.quitButton = quitBtn;
-
-		this.lifetime.push(quitBtn.Activated.Connect(() => {
-			this.handleQuitClicked();
-		}));
-
-		const stateBanner = this.createTextLabel(
-			container,
-			"StateBanner",
-			UITheme.Layout.StateBannerPos,
-			UITheme.Layout.StateBannerSize,
-			`${UITheme.Texts.StatePrefix}IDLE`,
-			UITheme.Fonts.Bold,
-			UITheme.Colors.TextSecondary,
-			Enum.TextXAlignment.Center,
-		);
-		stateBanner.BackgroundColor3 = UITheme.Colors.PanelBackground;
-		stateBanner.BackgroundTransparency = UITheme.Transparency.SecondaryPanel;
-		this.applyCorner(stateBanner, UITheme.CornerRadius.Badge);
-		this.stateBannerLabel = stateBanner;
-	}
-
-	private createTagPanel(parent: GuiObject): void {
-		const panel = new Instance("Frame");
-		panel.Name = "TagPanel";
-		panel.AnchorPoint = UITheme.Layout.BottomLeftAnchor;
-		panel.Position = UITheme.Layout.TagPanelPos;
-		panel.Size = UITheme.Layout.TagPanelSize;
-		panel.BackgroundColor3 = UITheme.Colors.PanelBackground;
-		panel.BackgroundTransparency = UITheme.Transparency.Panel;
-		panel.Parent = parent;
-		this.applyCorner(panel, UITheme.CornerRadius.Panel);
-		this.applyStroke(panel, UITheme.Colors.PanelStroke, UITheme.StrokeThickness.Normal);
-		this.applyAspectRatio(panel, UITheme.AspectRatios.TagPanel);
-
-		this.createTextLabel(
-			panel,
-			"TagHeader",
-			UITheme.Layout.TagHeaderPos,
-			UITheme.Layout.TagHeaderSize,
-			UITheme.Texts.TagHeader,
-			UITheme.Fonts.Bold,
-			UITheme.Colors.TextSecondary,
-			Enum.TextXAlignment.Left,
-		);
-
-		const rootBanner = this.createTextLabel(
-			panel,
-			"RootLockBanner",
-			UITheme.Layout.RootLockBannerPos,
-			UITheme.Layout.RootLockBannerSize,
-			UITheme.Texts.RootLockedBanner,
-			UITheme.Fonts.Bold,
-			UITheme.Colors.TagRootLockText,
-			Enum.TextXAlignment.Center,
-		);
-		rootBanner.BackgroundColor3 = UITheme.Colors.TagRootLockBg;
-		rootBanner.BackgroundTransparency = UITheme.Transparency.Opaque;
-		rootBanner.Visible = false;
-		this.applyCorner(rootBanner, UITheme.CornerRadius.Badge);
-		this.rootLockBanner = rootBanner;
-
-		const slotsContainer = new Instance("Frame");
-		slotsContainer.Name = "SlotsContainer";
-		slotsContainer.Position = UITheme.Layout.TagSlotsContainerPos;
-		slotsContainer.Size = UITheme.Layout.TagSlotsContainerSize;
-		slotsContainer.BackgroundTransparency = UITheme.Transparency.Hidden;
-		slotsContainer.Parent = panel;
-
-		for (const slotIdx of [1, 2, 3] as const) {
-			const xPos = (slotIdx - 1) * (UITheme.Layout.TagSlotWidthScale + UITheme.Layout.TagSlotGapScale);
-			const btn = new Instance("TextButton");
-			btn.Name = `TagSlot_${slotIdx}`;
-			btn.Position = UDim2.fromScale(xPos, 0);
-			btn.Size = UDim2.fromScale(UITheme.Layout.TagSlotWidthScale, 1);
-			btn.BackgroundColor3 = UITheme.Colors.TagReadyBg;
-			btn.Text = "";
-			btn.AutoButtonColor = false;
-			btn.Parent = slotsContainer;
-			this.applyCorner(btn, UITheme.CornerRadius.Button);
-			const stroke = this.applyStroke(btn, UITheme.Colors.TagReadyStroke, UITheme.StrokeThickness.Normal);
-
-			const badge = new Instance("Frame");
-			badge.Name = "SlotBadge";
-			badge.Position = UITheme.Layout.TagSlotBadgePos;
-			badge.Size = UITheme.Layout.TagSlotBadgeSize;
-			badge.BackgroundColor3 = UITheme.Colors.PanelSecondary;
-			badge.Parent = btn;
-			this.applyCorner(badge, UITheme.CornerRadius.Badge);
-			this.applyAspectRatio(badge, UITheme.AspectRatios.IconBadge);
-
-			const badgeLabel = this.createTextLabel(
-				badge,
-				"IndexLabel",
-				UITheme.Layout.OriginPosition,
-				UITheme.Layout.FullSize,
-				`${slotIdx}`,
-				UITheme.Fonts.Bold,
-				UITheme.Colors.TextPrimary,
-				Enum.TextXAlignment.Center,
-			);
-
-			const nameLabel = this.createTextLabel(
-				btn,
-				"FighterName",
-				UITheme.Layout.TagSlotNamePos,
-				UITheme.Layout.TagSlotNameSize,
-				`#${slotIdx}`,
-				UITheme.Fonts.Bold,
-				UITheme.Colors.TextPrimary,
-				Enum.TextXAlignment.Left,
-			);
-
-			const hpTrack = new Instance("Frame");
-			hpTrack.Name = "MiniHpTrack";
-			hpTrack.Position = UITheme.Layout.TagSlotHpBarPos;
-			hpTrack.Size = UITheme.Layout.TagSlotHpBarSize;
-			hpTrack.BackgroundColor3 = UITheme.Colors.BarTrack;
-			hpTrack.BorderSizePixel = 0;
-			hpTrack.Parent = btn;
-			this.applyCorner(hpTrack, UITheme.CornerRadius.Bar);
-
-			const hpFill = new Instance("Frame");
-			hpFill.Name = "MiniHpFill";
-			hpFill.Position = UITheme.Layout.OriginPosition;
-			hpFill.Size = UITheme.Layout.FullSize;
-			hpFill.BackgroundColor3 = UITheme.Colors.HpFillHigh;
-			hpFill.BorderSizePixel = 0;
-			hpFill.Parent = hpTrack;
-			this.applyCorner(hpFill, UITheme.CornerRadius.Bar);
-
-			const statusLabel = this.createTextLabel(
-				btn,
-				"StatusText",
-				UITheme.Layout.TagSlotStatusPos,
-				UITheme.Layout.TagSlotStatusSize,
-				UITheme.Texts.TagReadyStatus,
-				UITheme.Fonts.Bold,
-				UITheme.Colors.TextSecondary,
-				Enum.TextXAlignment.Center,
-			);
-
-			const deadCrossLabel = this.createTextLabel(
-				btn,
-				"DeadCross",
-				UITheme.Layout.TagDeadCrossPos,
-				UITheme.Layout.TagDeadCrossSize,
-				UITheme.Texts.TagDeadCross,
-				UITheme.Fonts.Title,
-				UITheme.Colors.TagDeadCross,
-				Enum.TextXAlignment.Center,
-			);
-			deadCrossLabel.AnchorPoint = UITheme.Layout.CenterAnchor;
-			deadCrossLabel.Visible = false;
-			deadCrossLabel.ZIndex = 6;
-
-			this.lifetime.push(btn.Activated.Connect(() => {
-				this.handleTagSlotClicked(slotIdx);
-			}));
-
-			this.tagSlotWidgets.push({
-				index: slotIdx,
-				button: btn,
-				stroke,
-				badge,
-				badgeLabel,
-				nameLabel,
-				hpFill,
-				statusLabel,
-				deadCrossLabel,
-			});
-		}
-	}
-
-	private createSkillsPanel(parent: GuiObject): void {
-		const panel = new Instance("Frame");
-		panel.Name = "SkillsPanel";
-		panel.AnchorPoint = UITheme.Layout.BottomRightAnchor;
-		panel.Position = UITheme.Layout.SkillsPanelPos;
-		panel.Size = UITheme.Layout.SkillsPanelSize;
-		panel.BackgroundColor3 = UITheme.Colors.PanelBackground;
-		panel.BackgroundTransparency = UITheme.Transparency.Panel;
-		panel.Parent = parent;
-		this.applyCorner(panel, UITheme.CornerRadius.Panel);
-		this.applyStroke(panel, UITheme.Colors.PanelStroke, UITheme.StrokeThickness.Normal);
-		this.applyAspectRatio(panel, UITheme.AspectRatios.SkillsPanel);
-
-		this.createTextLabel(
-			panel,
-			"SkillsHeader",
-			UITheme.Layout.SkillsHeaderPos,
-			UITheme.Layout.SkillsHeaderSize,
-			UITheme.Texts.SkillsHeader,
-			UITheme.Fonts.Bold,
-			UITheme.Colors.TextSecondary,
-			Enum.TextXAlignment.Left,
-		);
-
-		const buttonsContainer = new Instance("Frame");
-		buttonsContainer.Name = "ButtonsContainer";
-		buttonsContainer.Position = UITheme.Layout.SkillButtonsContainerPos;
-		buttonsContainer.Size = UITheme.Layout.SkillButtonsContainerSize;
-		buttonsContainer.BackgroundTransparency = UITheme.Transparency.Hidden;
-		buttonsContainer.Parent = panel;
-
-		for (const slot of [1, 2, 3] as const) {
-			const xPos = (slot - 1) * (UITheme.Layout.SkillButtonWidthScale + UITheme.Layout.SkillButtonGapScale);
-			const btn = new Instance("TextButton");
-			btn.Name = `SkillButton_S${slot}`;
-			btn.Position = UDim2.fromScale(xPos, 0);
-			btn.Size = UDim2.fromScale(UITheme.Layout.SkillButtonWidthScale, 1);
-			btn.BackgroundColor3 = UITheme.Colors.SkillDisabledBg;
-			btn.Text = "";
-			btn.AutoButtonColor = false;
-			btn.Parent = buttonsContainer;
-			this.applyCorner(btn, UITheme.CornerRadius.Button);
-			const stroke = this.applyStroke(btn, UITheme.Colors.SkillDisabledStroke, UITheme.StrokeThickness.Thick);
-
-			const slotTag = this.createTextLabel(
-				btn,
-				"SlotTag",
-				UITheme.Layout.SkillSlotTagPos,
-				UITheme.Layout.SkillSlotTagSize,
-				`S${slot}`,
-				UITheme.Fonts.Title,
-				UITheme.Colors.TextPrimary,
-				Enum.TextXAlignment.Left,
-			);
-
-			const costLabel = this.createTextLabel(
-				btn,
-				"CostLabel",
-				UITheme.Layout.SkillCostTagPos,
-				UITheme.Layout.SkillCostTagSize,
-				UITheme.Texts.FormatCost(UITheme.Numbers.DefaultSlotCosts[slot - 1]),
-				UITheme.Fonts.Bold,
-				UITheme.Colors.AtbMarkerReached,
-				Enum.TextXAlignment.Right,
-			);
-
-			const nameLabel = this.createTextLabel(
-				btn,
-				"SkillName",
-				UITheme.Layout.SkillNamePos,
-				UITheme.Layout.SkillNameSize,
-				`Skill ${slot}`,
-				UITheme.Fonts.Bold,
-				UITheme.Colors.TextPrimary,
-				Enum.TextXAlignment.Center,
-			);
-
-			const stateLabel = this.createTextLabel(
-				btn,
-				"SkillState",
-				UITheme.Layout.SkillStatePos,
-				UITheme.Layout.SkillStateSize,
-				UITheme.Texts.SkillNoAtbState,
-				UITheme.Fonts.Medium,
-				UITheme.Colors.TextSecondary,
-				Enum.TextXAlignment.Center,
-			);
-
-			this.lifetime.push(btn.Activated.Connect(() => {
-				this.handleSkillButtonClicked(slot);
-			}));
-
-			this.skillButtonWidgets.push({
-				slot,
-				button: btn,
-				stroke,
-				slotTag,
-				costLabel,
-				nameLabel,
-				stateLabel,
-			});
-		}
-	}
-
-	private createPauseOverlay(parent: ScreenGui): void {
-		const backdrop = new Instance("Frame");
-		backdrop.Name = "PauseOverlay";
-		backdrop.Position = UITheme.Layout.OriginPosition;
-		backdrop.Size = UITheme.Layout.FullSize;
-		backdrop.BackgroundColor3 = UITheme.Colors.OverlayBackdrop;
-		backdrop.BackgroundTransparency = UITheme.Transparency.ModalBackdrop;
-		backdrop.Visible = false;
-		backdrop.ZIndex = 20;
-		backdrop.Parent = parent;
-		this.pauseOverlay = backdrop;
-
-		const card = new Instance("Frame");
-		card.Name = "PauseModalCard";
-		card.AnchorPoint = UITheme.Layout.CenterAnchor;
-		card.Position = UITheme.Layout.CenterPosition;
-		card.Size = UITheme.Layout.ModalCardSize;
-		card.BackgroundColor3 = UITheme.Colors.PanelBackground;
-		card.ZIndex = 21;
-		card.Parent = backdrop;
-		this.applyCorner(card, UITheme.CornerRadius.Modal);
-		this.applyStroke(card, UITheme.Colors.PauseActiveBg, UITheme.StrokeThickness.Thick);
-		this.applyAspectRatio(card, UITheme.AspectRatios.ModalCard);
-
-		const title = this.createTextLabel(
-			card,
-			"PausedTitle",
-			UITheme.Layout.ModalTitlePos,
-			UITheme.Layout.ModalTitleSize,
-			UITheme.Texts.PausedOverlayTitle,
-			UITheme.Fonts.Title,
-			UITheme.Colors.PauseActiveBg,
-			Enum.TextXAlignment.Center,
-		);
-		title.ZIndex = 22;
-
-		const subtitle = this.createTextLabel(
-			card,
-			"PausedSubtitle",
-			UITheme.Layout.ModalSubtitlePos,
-			UITheme.Layout.ModalSubtitleSize,
-			UITheme.Texts.PausedOverlaySubtitle,
-			UITheme.Fonts.Medium,
-			UITheme.Colors.TextSecondary,
-			Enum.TextXAlignment.Center,
-		);
-		subtitle.ZIndex = 22;
-
-		const resumeBtn = new Instance("TextButton");
-		resumeBtn.Name = "ResumeButton";
-		resumeBtn.Position = UITheme.Layout.ModalPrimaryButtonPos;
-		resumeBtn.Size = UITheme.Layout.ModalPrimaryButtonSize;
-		resumeBtn.BackgroundColor3 = UITheme.Colors.ActionButtonPrimary;
-		resumeBtn.Font = UITheme.Fonts.Bold;
-		resumeBtn.TextColor3 = UITheme.Colors.TextPrimary;
-		resumeBtn.TextScaled = true;
-		resumeBtn.Text = UITheme.Texts.PausedOverlayResumeButton;
-		resumeBtn.ZIndex = 22;
-		resumeBtn.Parent = card;
-		this.applyCorner(resumeBtn, UITheme.CornerRadius.Button);
-		this.applyStroke(resumeBtn, UITheme.Colors.PanelStroke, UITheme.StrokeThickness.Normal);
-
-		this.lifetime.push(resumeBtn.Activated.Connect(() => {
-			this.handlePauseClicked();
-		}));
+		this.quitStatusLabel = this.quitController.createQuitStatusLabel(resultGui);
 	}
 
 	private createResultOverlay(parent: ScreenGui): void {
@@ -1020,12 +351,10 @@ export class BattleHUD {
 		this.canPause = payload.canPause === true || payload.mode === "PVE";
 		this.isPaused = false;
 		this.lastPauseToggleClock = 0;
-		this.resetQuitConfirmState();
 		this.battleActive = true;
 		this.battleEnded = false;
-		this.cancelQuitRetry();
+		this.quitController.resetForNewBattle();
 		this.battleVfxGeneration = this.combatController?.getBattleGeneration();
-		if (this.resultScreenGui !== undefined) this.resultScreenGui.Enabled = false;
 		for (const disconnect of this.battleDisconnectors) battleCleanupStep("previous HUD connection", disconnect);
 		this.battleDisconnectors.clear();
 		if (this.combatController !== undefined) {
@@ -1038,9 +367,8 @@ export class BattleHUD {
 		this.battleDisconnectors.push(() => heartbeat.Disconnect());
 
 		this.playerTargetAtb = 0;
-		this.playerDisplayAtb = 0;
 		this.opponentTargetAtb = 0;
-		this.opponentDisplayAtb = 0;
+		this.fighterStatus.resetAtbDisplay();
 
 		let playerSlotCounter = 0;
 		let opponentSlotCounter = 0;
@@ -1206,10 +534,10 @@ export class BattleHUD {
 		// Regra do jogo: morte zera ATB do lado e troca automaticamente para nextActive
 		if (payload.sideId === this.ownSideId) {
 			this.playerTargetAtb = 0;
-			this.playerDisplayAtb = 0;
+			this.fighterStatus.resetSideAtbDisplay(true);
 		} else if (payload.sideId === this.opponentSideId) {
 			this.opponentTargetAtb = 0;
-			this.opponentDisplayAtb = 0;
+			this.fighterStatus.resetSideAtbDisplay(false);
 		}
 
 		if (payload.nextActive !== undefined) {
@@ -1232,9 +560,7 @@ export class BattleHUD {
 			battleCleanupStep("combat resources", () => this.combatController?.cleanupStage());
 			return;
 		}
-		const suppressResult = (!UITheme.ShowResultOnLocalQuit && (this.quitRequested ||
-			(payload.reason === "quit" && payload.winnerSideId !== this.ownSideId))) ||
-			(payload.winnerSideId === undefined && (payload.xpRewards === undefined || payload.xpRewards.size() === 0));
+		const suppressResult = this.quitController.shouldSuppressResult(payload, this.ownSideId);
 		this.teardownBattle(true);
 		if (suppressResult) return;
 		const [ok, failure] = pcall(() => this.showBattleResult(payload));
@@ -1293,53 +619,11 @@ export class BattleHUD {
 	}
 
 	private handleQuitClicked(): void {
-		if (!this.battleActive || this.battleEnded || this.quitRequested) return;
-
-		if (!this.quitConfirmPending) {
-			this.quitConfirmPending = true;
-			this.quitConfirmToken += 1;
-			const token = this.quitConfirmToken;
-			if (this.quitButton !== undefined) {
-				this.quitButton.Text = UITheme.Texts.QuitConfirmButton;
-				this.quitButton.BackgroundColor3 = UITheme.Colors.QuitConfirmBg;
-			}
-			if (this.quitConfirmTimer !== undefined) {
-				task.cancel(this.quitConfirmTimer);
-			}
-			this.quitConfirmTimer = task.delay(UITheme.Numbers.QuitConfirmTimeoutSeconds, () => {
-				this.quitConfirmTimer = undefined;
-				if (this.quitConfirmToken === token && this.quitConfirmPending && this.quitButton !== undefined && this.quitButton.Parent !== undefined) {
-					this.resetQuitConfirmState();
-				}
-			});
-			return;
-		}
-
-		this.resetQuitConfirmState();
-		this.quitRequested = true;
-		if (this.screenGui !== undefined) this.screenGui.Enabled = false;
-		if (this.quitStatusLabel !== undefined) this.quitStatusLabel.Visible = true;
-		if (this.resultScreenGui !== undefined) this.resultScreenGui.Enabled = true;
-		this.sendQuitRequest(1);
-	}
-
-	private sendQuitRequest(attempt: number): void {
-		if (!this.quitRequested || !this.battleActive) return;
-		if (attempt < QUIT_RETRY_MAX_ATTEMPTS) {
-			this.quitRetryTimer = task.delay(QUIT_RETRY_INTERVAL_SECONDS, () => {
-				this.quitRetryTimer = undefined;
-				this.sendQuitRequest(attempt + 1);
-			});
-		}
-		BattleRemotes.requestQuit.FireServer();
+		this.quitController.handleQuitClicked();
 	}
 
 	private cancelQuitRetry(): void {
-		this.quitRequested = false;
-		if (this.quitStatusLabel !== undefined) this.quitStatusLabel.Visible = false;
-		const timer = this.quitRetryTimer;
-		this.quitRetryTimer = undefined;
-		if (timer !== undefined) task.cancel(timer);
+		this.quitController.cancelQuitRetry();
 	}
 
 	private handleResultCloseAndRestart(): void {
@@ -1347,16 +631,7 @@ export class BattleHUD {
 	}
 
 	private resetQuitConfirmState(): void {
-		this.quitConfirmPending = false;
-		this.quitConfirmToken += 1;
-		if (this.quitConfirmTimer !== undefined) {
-			task.cancel(this.quitConfirmTimer);
-			this.quitConfirmTimer = undefined;
-		}
-		if (this.quitButton !== undefined) {
-			this.quitButton.Text = UITheme.Texts.QuitButton;
-			this.quitButton.BackgroundColor3 = UITheme.Colors.QuitButtonBg;
-		}
+		this.quitController.resetQuitConfirmState();
 	}
 
 	private clearPauseIfServerProgressed(): void {
@@ -1368,29 +643,19 @@ export class BattleHUD {
 	}
 
 	private refreshSessionControlsLayout(): void {
-		if (this.pauseButton === undefined || this.quitButton === undefined) return;
-		if (this.canPause) {
-			this.pauseButton.Visible = true;
-			this.quitButton.Position = UITheme.Layout.QuitButtonWithPausePos;
-			this.quitButton.Size = UITheme.Layout.QuitButtonWithPauseSize;
-		} else {
-			this.pauseButton.Visible = false;
-			this.quitButton.Position = UITheme.Layout.QuitButtonSoloPos;
-			this.quitButton.Size = UITheme.Layout.QuitButtonSoloSize;
-		}
-		this.refreshPauseVisuals();
+		this.sessionControls.refreshLayout({
+			canPause: this.canPause,
+			isPaused: this.isPaused,
+			battleEnded: this.battleEnded,
+		});
 	}
 
 	private refreshPauseVisuals(): void {
-		if (this.pauseOverlay !== undefined) {
-			this.pauseOverlay.Visible = this.canPause && this.isPaused && !this.battleEnded;
-		}
-		if (this.pauseButton !== undefined) {
-			this.pauseButton.Text = this.isPaused ? UITheme.Texts.ResumeButton : UITheme.Texts.PauseButton;
-			this.pauseButton.BackgroundColor3 = this.isPaused
-				? UITheme.Colors.PauseActiveBg
-				: UITheme.Colors.PauseButtonBg;
-		}
+		this.sessionControls.refreshPauseVisuals({
+			canPause: this.canPause,
+			isPaused: this.isPaused,
+			battleEnded: this.battleEnded,
+		});
 	}
 
 	private refreshAllVisuals(): void {
@@ -1402,212 +667,43 @@ export class BattleHUD {
 	}
 
 	private refreshStateBanner(): void {
-		if (this.stateBannerLabel === undefined) return;
-		this.stateBannerLabel.Text = `${UITheme.Texts.StatePrefix}${this.battleState}`;
+		this.sessionControls.refreshStateBanner(this.battleState);
 	}
 
 	private refreshActiveStatusCards(): void {
-		const activePlayer = this.getActiveFighterForSide(0);
-		const activeOpponent = this.getActiveFighterForSide(1);
-		if (this.playerCard !== undefined && activePlayer !== undefined) {
-			this.populateStatusCard(this.playerCard, activePlayer, true);
-		}
-		if (this.opponentCard !== undefined && activeOpponent !== undefined) {
-			this.populateStatusCard(this.opponentCard, activeOpponent, false);
-		}
-	}
-
-	private populateStatusCard(card: StatusCardWidgets, fighter: HudFighterState, isPlayer: boolean): void {
-		card.iconBadge.BackgroundColor3 = UITheme.ClassColors[fighter.className];
-		card.iconLabel.Text = fighter.iconText;
-		card.nameLabel.Text = fighter.displayName;
-		const sideTag = isPlayer ? UITheme.Texts.PlayerSideTag : UITheme.Texts.OpponentSideTag;
-		card.metaLabel.Text = `${sideTag} • ${fighter.className} ${UITheme.Texts.LevelPrefix}${fighter.level}`;
-
-		const hpRatio = fighter.hpMax > 0 ? clamp(fighter.hp / fighter.hpMax, 0, 1) : 0;
-		const hpColor = this.resolveHpColor(hpRatio);
-		card.hpFill.BackgroundColor3 = hpColor;
-		this.hpTweens.get(card.hpFill)?.Cancel();
-        const hpTween = TweenService.Create(
-			card.hpFill,
-			new TweenInfo(UITheme.Numbers.HpTweenSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-			{ Size: UDim2.fromScale(hpRatio, 1) },
+		this.fighterStatus.refreshActiveStatusCards(
+			this.getActiveFighterForSide(0),
+			this.getActiveFighterForSide(1),
 		);
-        this.hpTweens.set(card.hpFill, hpTween);
-        hpTween.Play();
-		card.hpValueLabel.Text = UITheme.Texts.FormatHp(fighter.hp, fighter.hpMax);
-
-		for (const effect of ["Burn", "Bleed", "Root"] as const) {
-			card.statusBadges[effect].Visible = fighter.effects.has(effect);
-		}
-
-		if (isPlayer) {
-			for (const slot of [1, 2, 3] as const) {
-				const marker = card.atbMarkers[slot - 1];
-				const cost = fighter.slotCosts[slot - 1];
-				const ratio = clamp(cost / ATB_MAX, 0.04, 0.96);
-				marker.root.Position = UDim2.fromScale(ratio, 0.5);
-				marker.label.Text = `S${slot}`;
-			}
-		}
 	}
 
 	private refreshPlayerAtbMarkersAndSkills(): void {
-		const activePlayer = this.getActiveFighterForSide(0);
-		if (this.playerCard !== undefined && activePlayer !== undefined) {
-			for (const slot of [1, 2, 3] as const) {
-				const marker = this.playerCard.atbMarkers[slot - 1];
-				const cost = activePlayer.slotCosts[slot - 1];
-				const reached = this.playerTargetAtb + FLOAT_TOLERANCE >= cost;
-				const locked = slot === 3 && !activePlayer.s3Unlocked;
-				const color = locked ? UITheme.Colors.TextMuted : reached ? UITheme.Colors.AtbMarkerReached : UITheme.Colors.AtbMarkerPending;
-				const transparency = locked ? UITheme.Transparency.LockedSkillMarker : UITheme.Transparency.Opaque;
-				marker.line.BackgroundTransparency = transparency;
-				marker.label.TextTransparency = transparency;
-				marker.line.BackgroundColor3 = color;
-				marker.label.TextColor3 = color;
-			}
-		}
+		this.fighterStatus.refreshPlayerAtbMarkers(this.getActiveFighterForSide(0), this.playerTargetAtb);
 		this.refreshSkillButtons();
 	}
 
 	private refreshSkillButtons(): void {
-		const activePlayer = this.getActiveFighterForSide(0);
-		for (const widget of this.skillButtonWidgets) {
-			const slotIndex = widget.slot - 1;
-			const skillName = activePlayer?.skillNames[slotIndex] ?? `Skill ${widget.slot}`;
-			const cost = activePlayer?.slotCosts[slotIndex] ?? UITheme.Numbers.DefaultSlotCosts[slotIndex];
-
-			widget.nameLabel.Text = skillName;
-			widget.costLabel.Text = UITheme.Texts.FormatCost(cost);
-
-			const isIdle = this.battleState === "IDLE" && !this.isPaused && this.battleActive && !this.battleEnded;
-			const hasAtb = this.playerTargetAtb + FLOAT_TOLERANCE >= cost;
-			const locked = widget.slot === 3 && activePlayer?.s3Unlocked !== true;
-			const isEnabled = !locked && isIdle && hasAtb && activePlayer !== undefined && !activePlayer.dead;
-
-			widget.button.Active = isEnabled;
-			widget.costLabel.TextColor3 = locked ? UITheme.Colors.TextMuted : UITheme.Colors.AtbMarkerReached;
-			widget.slotTag.TextColor3 = locked ? UITheme.Colors.TextMuted : UITheme.Colors.TextPrimary;
-			if (isEnabled) {
-				widget.button.BackgroundColor3 = UITheme.Colors.SkillSlotAccents[widget.slot];
-				widget.button.BackgroundTransparency = UITheme.Transparency.Opaque;
-				widget.stroke.Color = UITheme.Colors.TextPrimary;
-				widget.nameLabel.TextColor3 = UITheme.Colors.TextPrimary;
-				widget.stateLabel.Text = UITheme.Texts.SkillReadyState;
-				widget.stateLabel.TextColor3 = UITheme.Colors.TextPrimary;
-			} else {
-				widget.button.BackgroundColor3 = UITheme.Colors.SkillDisabledBg;
-				widget.button.BackgroundTransparency = UITheme.Transparency.DisabledButton;
-				widget.stroke.Color = UITheme.Colors.SkillDisabledStroke;
-				widget.nameLabel.TextColor3 = UITheme.Colors.TextSecondary;
-				widget.stateLabel.Text = locked ? UITheme.Texts.SkillLockedState : !hasAtb ? UITheme.Texts.SkillNoAtbState : UITheme.Texts.SkillBusyState;
-				widget.stateLabel.TextColor3 = UITheme.Colors.TextMuted;
-			}
-		}
+		this.skillsPanel.refresh({
+			activePlayer: this.getActiveFighterForSide(0),
+			playerAtb: this.playerTargetAtb,
+			canUseSkillsInCurrentPhase:
+				this.battleState === "IDLE" && !this.isPaused && this.battleActive && !this.battleEnded,
+		});
 	}
 
 	private refreshTagSlots(): void {
-		const activePlayer = this.getActiveFighterForSide(0);
-		const isActiveRooted = activePlayer !== undefined && activePlayer.effects.has("Root");
-
-		if (this.rootLockBanner !== undefined) {
-			this.rootLockBanner.Visible = isActiveRooted;
-		}
-
-		for (const widget of this.tagSlotWidgets) {
-			const targetId = this.playerTeamOrder[widget.index - 1];
-			const fighter = targetId !== undefined ? this.fightersByTargetId.get(targetId) : undefined;
-			if (fighter === undefined) {
-				widget.button.Visible = false;
-				continue;
-			}
-			widget.button.Visible = true;
-			widget.nameLabel.Text = fighter.displayName;
-			widget.badge.BackgroundColor3 = fighter.dead
-				? UITheme.Colors.TagDeadBg
-				: UITheme.ClassColors[fighter.className];
-
-			const hpRatio = fighter.hpMax > 0 ? clamp(fighter.hp / fighter.hpMax, 0, 1) : 0;
-			widget.hpFill.Size = UDim2.fromScale(hpRatio, 1);
-			widget.hpFill.BackgroundColor3 = this.resolveHpColor(hpRatio);
-
-			if (fighter.dead) {
-				widget.button.Active = false;
-				widget.button.BackgroundColor3 = UITheme.Colors.TagDeadBg;
-				widget.button.BackgroundTransparency = UITheme.Transparency.DeadSlot;
-				widget.stroke.Color = UITheme.Colors.TagDeadStroke;
-				widget.nameLabel.TextColor3 = UITheme.Colors.TextMuted;
-				widget.statusLabel.Text = UITheme.Texts.TagDeadStatus;
-				widget.statusLabel.TextColor3 = UITheme.Colors.TagDeadCross;
-				widget.deadCrossLabel.Visible = true;
-				continue;
-			}
-
-			widget.deadCrossLabel.Visible = false;
-
-			if (fighter.active) {
-				widget.button.Active = false;
-				widget.button.BackgroundColor3 = UITheme.Colors.TagActiveBg;
-				widget.button.BackgroundTransparency = UITheme.Transparency.Opaque;
-				widget.stroke.Color = UITheme.Colors.TagActiveStroke;
-				widget.nameLabel.TextColor3 = UITheme.Colors.TextPrimary;
-				widget.statusLabel.Text = UITheme.Texts.TagActiveStatus;
-				widget.statusLabel.TextColor3 = UITheme.Colors.TagActiveStroke;
-				continue;
-			}
-
-			const canSwitchNow =
-				this.battleActive &&
-				!this.battleEnded &&
-				!this.isPaused &&
-				this.battleState === "IDLE" &&
-				!isActiveRooted;
-
-			widget.button.Active = canSwitchNow;
-			widget.button.BackgroundColor3 = isActiveRooted
-				? UITheme.Colors.TagRootLockBg
-				: UITheme.Colors.TagReadyBg;
-			widget.button.BackgroundTransparency = canSwitchNow
-				? UITheme.Transparency.Opaque
-				: UITheme.Transparency.DisabledButton;
-			widget.stroke.Color = canSwitchNow
-				? UITheme.Colors.TagReadyStroke
-				: UITheme.Colors.SkillDisabledStroke;
-			widget.nameLabel.TextColor3 = canSwitchNow
-				? UITheme.Colors.TextPrimary
-				: UITheme.Colors.TextSecondary;
-
-			if (isActiveRooted) {
-				widget.statusLabel.Text = UITheme.Texts.TagLockedStatus;
-				widget.statusLabel.TextColor3 = UITheme.Colors.TagRootLockText;
-			} else if (canSwitchNow) {
-				widget.statusLabel.Text = UITheme.Texts.TagReadyStatus;
-				widget.statusLabel.TextColor3 = UITheme.Colors.HpFillHigh;
-			} else {
-				widget.statusLabel.Text = UITheme.Texts.TagWaitStatus;
-				widget.statusLabel.TextColor3 = UITheme.Colors.TextMuted;
-			}
-		}
+		this.tagPanel.refresh({
+			activePlayer: this.getActiveFighterForSide(0),
+			playerTeamOrder: this.playerTeamOrder,
+			fightersByTargetId: this.fightersByTargetId,
+			canSwitchInCurrentPhase:
+				this.battleActive && !this.battleEnded && !this.isPaused && this.battleState === "IDLE",
+		});
 	}
 
 	private stepAtbInterpolation(dt: number): void {
 		if (!this.battleActive) return;
-		const alpha = clamp(dt * UITheme.Numbers.AtbSmoothingSpeed, 0, 1);
-		this.playerDisplayAtb += (this.playerTargetAtb - this.playerDisplayAtb) * alpha;
-		this.opponentDisplayAtb += (this.opponentTargetAtb - this.opponentDisplayAtb) * alpha;
-
-		if (this.playerCard !== undefined) {
-			const ratio = clamp(this.playerDisplayAtb / ATB_MAX, 0, 1);
-			this.playerCard.atbFill.Size = UDim2.fromScale(ratio, 1);
-			this.playerCard.atbValueLabel.Text = UITheme.Texts.FormatAtb(this.playerTargetAtb, ATB_MAX);
-		}
-
-		if (this.opponentCard !== undefined) {
-			const ratio = clamp(this.opponentDisplayAtb / ATB_MAX, 0, 1);
-			this.opponentCard.atbFill.Size = UDim2.fromScale(ratio, 1);
-			this.opponentCard.atbValueLabel.Text = UITheme.Texts.FormatAtb(this.opponentTargetAtb, ATB_MAX);
-		}
+		this.fighterStatus.stepAtbInterpolation(dt, this.playerTargetAtb, this.opponentTargetAtb);
 	}
 
 	private getActiveFighterForSide(sideIndex: 0 | 1): HudFighterState | undefined {
@@ -1625,12 +721,6 @@ export class BattleHUD {
 			}
 		}
 		return undefined;
-	}
-
-	private resolveHpColor(hpRatio: number): Color3 {
-		if (hpRatio > UITheme.Numbers.HpHighThreshold) return UITheme.Colors.HpFillHigh;
-		if (hpRatio > UITheme.Numbers.HpMidThreshold) return UITheme.Colors.HpFillMid;
-		return UITheme.Colors.HpFillLow;
 	}
 
 	private createTextLabel(
