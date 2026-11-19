@@ -2,6 +2,35 @@
 
 Registro conciso de mudanças a partir de `2026-11-14` (ordem cronológica reversa). Histórico anterior a `2026-11-14` (base inicial T1–T5, T7.1, T7.2 e primeira correção de DataStore/autosave): [CHANGELOG_ARCHIVE.md](CHANGELOG_ARCHIVE.md). Estado operacional atual: [HANDOFF.md](HANDOFF.md).
 
+## 2026-11-19 — Refatoração Estágio 3b.2b: `CombatAttackFinalizer`
+
+- Extraída de `src/client/Controllers/CombatController.ts` (891 → 827 linhas) a coordenação de finalização de ataque, mortes pendentes e trocas pendentes (`finalizeAttack`, `handleFighterDied`, `flushPendingDeaths`, `handleSwitchPerformed`, `pendingDeaths`, `pendingSwitches`, `clear`) para `src/client/Controllers/CombatAttackFinalizer.ts` (156 linhas), preservando `CombatHitQueue.ts` (95 linhas) exclusivamente na fila e consumo de hits.
+- Mantida exatamente a ordem existente no encerramento do último hit (`restoreStandBase` → `tweenModelTo` para `homeCFrame` → `flushPendingDeaths` → aplicação de `pendingSwitches` → `pendingSwitches.clear`), o KO imediato em `onFighterDied`, a fonte única de verdade via coleções espelhadas (`pendingSwitches`, `pendingDeaths`) e os delegadores na instância de `CombatController` (`onFighterDied`, `flushPendingDeaths`, `onSwitchPerformed`, `waitForAndConsumeHitIndex`). `CombatHitQueue`, `CombatStandMotion`, `CombatDamagePool`, `CombatVfxBridge`, `BattleHUD` e servidor não foram alterados.
+- Validação em Play no Studio após `npx.cmd rbxtsc` (0 erros), `git diff --check` e `tools/check-structure.ps1`: `ORA_RETURN_CLIENT_PASSED` (105 checks), `BATTLE_TEARDOWN_CLIENT_PASSED` (804 checks), `VFX_CONTROLLER_QA_PASSED` (179 checks) e `BattleSimulator.runSimulation()` (`SIMULATION_ALL_PASSED`, 31 marcadores via `LogService.MessageOut`, 0 erros; dummy `49,7% / 298,98275s`, Jotaro vs Anubis `68% / 67,5943s`).
+
+## 2026-11-19 — Refatoração Estágio 3b.2a: `CombatHitQueue`
+
+- Extraído de `src/client/Controllers/CombatController.ts` (902 → 891 linhas) o gerenciamento da fila de resultados de hits (`hitResultsByIndex`, `consumedHitIndices`, `activePendingHits`, `recordHitResult`, `beginAttack`, `clear`, `isHitConsumed`, `hasPendingHits`, `waitForAndConsumeHitIndex`) para `src/client/Controllers/CombatHitQueue.ts` (95 linhas).
+- Mantida fonte única de verdade em `CombatHitQueue` com referências compartilhadas (`hitResultsByIndex`, `consumedHitIndices`), sincronização de `activePendingHits` via callback do host e delegação em `waitForAndConsumeHitIndex` para compatibilidade com os QAs Luau. `presentHitResult`, `flushPendingDeaths`, lógica de KO/trocas, `CombatStandMotion`, `CombatDamagePool`, `CombatVfxBridge`, `BattleHUD` e servidor não foram alterados.
+- Validação em Play no Studio após `npx.cmd rbxtsc` (0 erros), `git diff --check` e `tools/check-structure.ps1`: `ORA_RETURN_CLIENT_PASSED` (105 checks), `BATTLE_TEARDOWN_CLIENT_PASSED` (804 checks) e `VFX_CONTROLLER_QA_PASSED` (179 checks).
+
+## 2026-11-18 — Refatoração Estágio 3b.1: `CombatStandMotion`
+
+- Extraídas de `src/client/Controllers/CombatController.ts` (1015 → 902 linhas) a movimentação do Stand e as animações placeholder (`standAttackC1`, `positionStandForAttack`, `pulseStandStrike`, `restoreStandBase`, `runPlaceholderAttackSequence`, `playHitReaction`, `playDodgeReaction`, `tweenModelTo`) para `src/client/Controllers/CombatStandMotion.ts` (201 linhas).
+- Preservados os delegadores na instância de `CombatController` (`positionStandForAttack`, `pulseStandStrike`, `restoreStandBase`, `runPlaceholderAttackSequence`, `playHitReaction`, `playDodgeReaction`, `tweenModelTo`), o contrato `standMotion` (`joint`, `baseC1`, `generation`, `tween`) em `FighterVisualEntry` e o registro de tweens/tasks em `CombatController` para cancelamento no teardown e retorno sem drift do Star Platinum. `CombatHitQueue`, `CombatDamagePool`, `CombatVfxBridge`, `BattleHUD` e servidor não foram alterados.
+- Validação em Play no Studio após `npx.cmd rbxtsc` (0 erros), `git diff --check` e `tools/check-structure.ps1`: `VFX_CONTROLLER_QA_PASSED` (179 checks), `BATTLE_TEARDOWN_CLIENT_PASSED` (804 checks) e `ORA_RETURN_CLIENT_PASSED` (105 checks).
+
+## 2026-11-18 — Refatoração Estágio 3a: `CombatDamagePool` e `CombatVfxBridge`
+
+- Extraídas de `src/client/Controllers/CombatController.ts` (1307 → 1015 linhas) a criação/pool de `BillboardGui` e popups de dano/crítico/esquiva/DoT para `src/client/Controllers/CombatDamagePool.ts` (156 linhas) e a integração com `VFXController`, preload/deload por geração, emissão de VFX de hit/KO e gerenciamento de cópias temporárias/carriers para `src/client/Controllers/CombatVfxBridge.ts` (334 linhas).
+- Preservados todos os campos e delegadores na instância de `CombatController` utilizados pelos testes Luau e por `BattleHUD` (`initBillboardPool`, `showFloatingText`, `getBattleGeneration`, `deloadBattleVfx`, `billboardPool`, `poolContainer`, `preloadedVfxEntries`, `battleVfxWorkingCopies`, `vfxCarrierParts`, `getGlobalVfxRoot`, `vfxController`), além de `cleanupStage()`/teardown e geração de batalha. `CombatStandMotion`, `CombatHitQueue`, `BattleHUD` e servidor não foram alterados.
+- Validação em Play no Studio após `npx.cmd rbxtsc` (0 erros) e `git diff --check` / `tools/check-structure.ps1`: `SIMULATION_ALL_PASSED` (31 marcadores `*_PASSED`/`1000 lutas`, 0 erros; dummy `49,7% / 298,98275s`, Jotaro vs Anubis `68% / 67,5943s`), `VFX_CONTROLLER_QA_PASSED` (179 checks), `BATTLE_TEARDOWN_CLIENT_PASSED` (804 checks) e `ORA_RETURN_CLIENT_PASSED` (105 checks).
+
+## 2026-11-18 — Refatoração Estágio 1: `BattleRewardService`
+
+- Extraída de `BattleSessionService.ts` (695 → 604 linhas) a lógica de recompensas PVE/PVP (decisão, Tinyes, XP, limites diários, motivos de bloqueio) para `src/server/Services/BattleRewardService.ts`. `session.rewardPaid`, o isolamento por participante (`pcall` + `warn`) e o `Signal.fire`/teardown ficaram inalterados; `BattleSessionService.awardSessionXp` continua na instância (delegando ao novo módulo) por causa do monkey-patch em `teardownTests.ts`. Sem mudança de gameplay, economia, XP, PVP ou contratos públicos.
+- Validação: `npx.cmd rbxtsc` (0 erros), `git diff --check` limpo, `tools/check-structure.ps1` e `BattleSimulator.runSimulation()` em Play no Studio (completou sem erro; dummy/Jotaro `68%` / `67,5943s` inalterados).
+
 ## 2026-11-18 — Confirmação, reenvio e teardown de Quit
 
 - `RequestQuit` usa um bucket próprio por jogador com capacidade provisória de 2 e reposição de 2/s. Após a confirmação, o HUD mostra “Saindo...” e envia até 8 pedidos, espaçados por 0,35 s. O servidor encerra a sessão e o HUD cancela o reenvio no teardown.

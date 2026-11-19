@@ -11,8 +11,9 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `Services/AIService.ts`: IA Bronze PVE (reação, erro 30%, S3 bloqueado < Lv5, trocas por HP/tempo; só envia intenções).
 - `Services/ATBService.ts`: avança barra ATB (`0–10`) em `IDLE` quando ativo está vivo e `NORMAL`.
 - `Services/BattleMovement.ts`: congela/restaura `WalkSpeed`/`JumpPower`/`JumpHeight`/`UseJumpPower` e `NpcBattleActive` (NPC/PVP).
+- `Services/BattleRewardService.ts`: decisão e cálculo de recompensas ao fim da sessão (PVE Bronze/PVP, Tinyes, XP, tetos diários, `RewardBlockedReason`), com `pcall`/`warn` por participante; `settleParticipant` e `awardSessionXp` (`session.rewardPaid` continua sendo marcado como guarda anti-pagamento duplicado).
 - `Services/BattleService.ts`: núcleo puro (`IDLE/PREPARE/ATTACK/RETURN`), hits, DoT/Root, troca adiada em KO (re-exporta `Signal` de `shared/Signal`).
-- `Services/BattleSessionService.ts`: sessões isoladas por jogador, `Heartbeat`, pause/quit/timeouts e recompensas PVE/PVP.
+- `Services/BattleSessionService.ts`: sessões isoladas por jogador, `Heartbeat`, pause/quit/timeouts; delega recompensas PVE/PVP a `BattleRewardService` (mantém `awardSessionXp` na instância, usado por testes de teardown).
 - `Services/BattleTeamFactory.ts`: monta `BattleSide` a partir do inventário (`createPlayerInventorySide`) ou real (`makeRealFighter`).
 - `Services/DamageService.ts`: rola Dodge/Crit por hit e aplica dano base, counter e `CRIT_MULTIPLIER`.
 - `Services/DayNightService.ts`: publica âncora solar e atributos replicáveis do ciclo dia/noite no `Workspace`.
@@ -45,7 +46,12 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `Controllers/BattleRemotes.ts`: resolve e expõe referências dos remotes de batalha via `WaitForChild`.
 - `Controllers/ChallengePromptController.ts`: oculta próprio prompt PVP e todos durante `NpcBattleActive` (`RequiresLineOfSight=false`).
 - `Controllers/CharacterAnimationController.ts`: controla animação de caminhada via `Animate` nativo ou fallback `Movement`.
-- `Controllers/CombatController.ts`: palco `Workspace/ClientBattleStage`, rigs, `AnimationTrack`/markers, tweens placeholder, popups e VFX.
+- `Controllers/CombatAttackFinalizer.ts`: coordena finalização do último hit (retorno visual de Stand/corpo), processamento de mortes pendentes (`pendingDeaths`, `flushPendingDeaths`) e fila/aplicação de trocas pendentes (`pendingSwitches`, `handleSwitchPerformed`), com limpeza entre batalhas/teardown.
+- `Controllers/CombatController.ts`: palco `Workspace/ClientBattleStage`, rigs, `AnimationTrack`/markers e apresentação de hits; delega pool de popups a `CombatDamagePool`, fila de resultados de hits a `CombatHitQueue`, finalização/KO/trocas a `CombatAttackFinalizer`, movimentação do Stand/placeholders a `CombatStandMotion` e preload/deload/emissão de VFX a `CombatVfxBridge`.
+- `Controllers/CombatDamagePool.ts`: pool de `BillboardGui` (`CombatBillboardPool`), popups flutuantes de dano, crítico, esquiva e tick de DoT, com limpeza no teardown.
+- `Controllers/CombatHitQueue.ts`: fila de resultados de hits recebidos do servidor (`hitResultsByIndex`, `consumedHitIndices`, `activePendingHits`), espera com cancelamento/timeout, consumo único e limpeza entre ataques/batalhas.
+- `Controllers/CombatStandMotion.ts`: posicionamento e pulsos do `StandJoint` (`standAttackC1`, `positionStandForAttack`, `pulseStandStrike`, `restoreStandBase` por geração sem drift) e tweens placeholder de sequência de ataque, reação de hit/esquiva e movimento de modelo (`tweenModelTo`).
+- `Controllers/CombatVfxBridge.ts`: ponte entre `CombatController` e `VFXController` (preload/deload por geração, VFX de skill/hit/crit/KO, cópias temporárias e carriers).
 - `Controllers/DayNightController.ts`: lê perfis no `MaterialService` e interpola `Lighting`/efeitos/`Sky` no `Heartbeat`.
 - `Controllers/InventoryController.ts`: painel de inventário, seleção de `activeTeam` e alocação sem mutação otimista.
 - `Controllers/PvpController.ts`: popup de convite PVP (`Aceitar`/`Recusar`) e banner de status do desafio.
