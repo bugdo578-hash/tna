@@ -68,6 +68,14 @@ interface FighterVisualEntry {
 	readonly effectEmitters: Map<StatusEffect, ParticleEmitter>;
 }
 
+interface ActiveAttackState {
+	readonly token: number;
+	readonly attacker: FighterVisualEntry;
+	readonly target: FighterVisualEntry;
+	readonly timeline: SkillData;
+	readonly slot: SkillSlot;
+}
+
 export class CombatController {
 	private readonly fightersByTargetId = new Map<string, FighterVisualEntry>();
 	private readonly hitQueue: CombatHitQueue;
@@ -95,6 +103,7 @@ export class CombatController {
 	private sideIds: readonly [string, string] = ["", ""];
 	private currentAttackToken = 0;
 	private activePendingHits = 0;
+	private activeAttack: ActiveAttackState | undefined;
 	private followUpCancelledForCurrentAttack = false;
 	private battleEnded = false;
 	private battleVfxGeneration = 0;
@@ -133,6 +142,7 @@ export class CombatController {
 			isBattleEnded: () => this.battleEnded,
 			isFollowUpCancelled: () => this.followUpCancelledForCurrentAttack,
 			hasPendingHits: () => this.hitQueue.hasPendingHits(),
+			hasUnconsumedHitForTarget: (targetId) => this.hitQueue.hasUnconsumedHitForTarget(targetId),
 			getFighter: (targetId) => this.fightersByTargetId.get(targetId),
 			restoreStandBase: (entry, duration) => this.restoreStandBase(entry, duration),
 			tweenModelTo: (model, targetCFrame, duration) => this.tweenModelTo(model, targetCFrame, duration),
@@ -250,6 +260,7 @@ export class CombatController {
 		this.battleEnded = false;
 		this.sideIds = payload.sides;
 		this.currentAttackToken += 1;
+		this.activeAttack = undefined;
 		this.followUpCancelledForCurrentAttack = false;
 		this.hitQueue.clear();
 		this.attackFinalizer.clear();
@@ -476,11 +487,47 @@ export class CombatController {
 		this.hitQueue.recordHitResult(payload);
 	}
 
+	private finalizeActiveAttackBeforeNext(): void {
+		const previousAttack = this.activeAttack;
+		this.activeAttack = undefined;
+		const hadPendingHits = this.hitQueue.hasPendingHits();
+
+		if (previousAttack !== undefined || hadPendingHits) {
+			this.currentAttackToken += 1;
+		}
+		if (hadPendingHits) {
+			this.hitQueue.drainUnconsumedResults((results) => {
+				for (const result of results) {
+					const fallbackTarget = previousAttack?.target ?? this.fightersByTargetId.get(result.targetId);
+					if (fallbackTarget !== undefined) {
+						this.presentHitResult(
+							result,
+							fallbackTarget,
+							previousAttack?.attacker,
+							previousAttack?.timeline,
+							previousAttack?.slot,
+						);
+					}
+					if (result.followUpCancelled) {
+						this.followUpCancelledForCurrentAttack = true;
+					}
+				}
+				this.attackFinalizer.flushReadyPendingDeaths();
+			});
+		}
+		if (previousAttack !== undefined) {
+			this.attackFinalizer.finalizeAttack(previousAttack.attacker, previousAttack.timeline);
+		}
+		this.attackFinalizer.forceCompletePendingForNextAttack();
+	}
+
 	private onAttackStarted(payload: AttackStartedPayload): void {
 		if (this.battleEnded) return;
 		const attacker = this.fightersByTargetId.get(payload.attackerId);
 		const target = this.fightersByTargetId.get(payload.targetId);
 		if (attacker === undefined || target === undefined) return;
+
+		this.finalizeActiveAttackBeforeNext();
 
 		this.currentAttackToken += 1;
 		const attackToken = this.currentAttackToken;
@@ -488,6 +535,7 @@ export class CombatController {
 
 		const timeline = this.resolveSkillTimeline(attacker.fighterId, payload.slot);
 		const totalHits = timeline.hits.size();
+		this.activeAttack = { token: attackToken, attacker, target, timeline, slot: payload.slot };
 		this.hitQueue.beginAttack(totalHits);
 		this.positionStandForAttack(attacker, math.max(timeline.hits[0]?.time ?? 0.1, 0.05) * 0.8);
 
@@ -558,8 +606,10 @@ export class CombatController {
 			this.battleConnections.add(track.GetMarkerReachedSignal(markerName).Connect(() => {
 				if (this.currentAttackToken !== attackToken || this.battleEnded) return;
 				if (this.hitQueue.isHitConsumed(index) || this.followUpCancelledForCurrentAttack) return;
-				this.pulseStandStrike(attacker, PLACEHOLDER_STAND_STRIKE_STUDS +
-					(attacker.fighterId.lower() === "jotaro" && slot === 2 ? PLACEHOLDER_ORA_EXTRA_ADVANCE_STUDS : 0));
+				if (!target.dead) {
+					this.pulseStandStrike(attacker, PLACEHOLDER_STAND_STRIKE_STUDS +
+						(attacker.fighterId.lower() === "jotaro" && slot === 2 ? PLACEHOLDER_ORA_EXTRA_ADVANCE_STUDS : 0));
+				}
 				this.spawnBattle(() => {
 					this.waitForAndConsumeHitIndex(index, attacker, target, timeline, attackToken, slot);
 				});
@@ -621,9 +671,13 @@ export class CombatController {
 						this.followUpCancelledForCurrentAttack = true;
 					}
 				}
+				this.attackFinalizer.flushReadyPendingDeaths();
 			},
 		);
 		if (isLastHit) {
+			if (this.activeAttack?.token === attackToken) {
+				this.activeAttack = undefined;
+			}
 			this.attackFinalizer.finalizeAttack(attacker, timeline);
 		}
 	}
@@ -655,7 +709,9 @@ export class CombatController {
 		if (attacker !== undefined && timeline !== undefined && slot !== undefined) {
 			this.emitHitVfx(attacker, target, timeline, slot, result.crit);
 		}
-		if (!target.dead) this.playHitReaction(target, result.crit);
+		if (!target.dead && !this.attackFinalizer.hasPendingDeath(target.targetId)) {
+			this.playHitReaction(target, result.crit);
+		}
 	}
 
 	private playHitReaction(target: FighterVisualEntry, isCrit: boolean): void {
@@ -776,6 +832,7 @@ export class CombatController {
 		this.battleVfxGeneration = generation;
 		this.battleEnded = true;
 		this.currentAttackToken += 1;
+		this.activeAttack = undefined;
 		this.hitQueue.clear();
 		for (const connection of this.battleConnections) battleCleanupStep("combat connection", () => connection.Disconnect());
 		this.battleConnections.clear();

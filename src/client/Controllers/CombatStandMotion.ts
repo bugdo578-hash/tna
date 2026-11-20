@@ -74,16 +74,18 @@ export class CombatStandMotion {
 				if (!this.host.isAttackCurrent(attackToken)) return;
 				if (this.host.isFollowUpCancelled() && index > 1) return;
 
-				// Pequeno avanço/soco a cada hit do slot (inclusive multi-hit como Barragem_estelar)
-				const punchOffset = strikeBaseCFrame.LookVector.mul(index % 2 === 1 ? 0.55 : 0.35);
-				const punchCFrame = strikeBaseCFrame.add(punchOffset);
-				this.tweenModelTo(attacker.model, punchCFrame, PLACEHOLDER_STRIKE_TWEEN_SECONDS);
+				if (!target.dead) {
+					// Pequeno avanço/soco a cada hit do slot (inclusive multi-hit como Barragem_estelar)
+					const punchOffset = strikeBaseCFrame.LookVector.mul(index % 2 === 1 ? 0.55 : 0.35);
+					const punchCFrame = strikeBaseCFrame.add(punchOffset);
+					this.tweenModelTo(attacker.model, punchCFrame, PLACEHOLDER_STRIKE_TWEEN_SECONDS);
 
-				// Se tiver Stand (ex.: Star Platinum), projeta o Stand levemente à frente no golpe
-				const extraAdvance = attacker.fighterId.lower() === "jotaro" && slot === 2
-					? PLACEHOLDER_ORA_EXTRA_ADVANCE_STUDS
-					: 0;
-				this.pulseStandStrike(attacker, PLACEHOLDER_STAND_STRIKE_STUDS + extraAdvance);
+					// Se tiver Stand (ex.: Star Platinum), projeta o Stand levemente à frente no golpe
+					const extraAdvance = attacker.fighterId.lower() === "jotaro" && slot === 2
+						? PLACEHOLDER_ORA_EXTRA_ADVANCE_STUDS
+						: 0;
+					this.pulseStandStrike(attacker, PLACEHOLDER_STAND_STRIKE_STUDS + extraAdvance);
+				}
 
 				consumeHit(index);
 			});

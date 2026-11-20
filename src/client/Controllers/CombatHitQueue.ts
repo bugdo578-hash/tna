@@ -33,6 +33,44 @@ export class CombatHitQueue {
 		return this.consumedHitIndices.has(hitIndex);
 	}
 
+	/** Verdadeiro quando existe HitResolved já recebido para `targetId` ainda não consumido neste ataque. */
+	public hasUnconsumedHitForTarget(targetId: string): boolean {
+		for (const [hitIndex, bucket] of this.hitResultsByIndex) {
+			if (this.consumedHitIndices.has(hitIndex)) continue;
+			for (const result of bucket) {
+				if (result.targetId === targetId) return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Consome imediatamente apenas os HitResolved já recebidos do servidor que ainda não foram consumidos,
+	 * em ordem crescente de `hitIndex`, sem inventar impactos para índices ausentes.
+	 */
+	public drainUnconsumedResults(consumeResults: (results: readonly HitResolvedPayload[]) => void): void {
+		if (this.attackFinalized) return;
+		const pendingIndices: number[] = [];
+		for (const [hitIndex] of this.hitResultsByIndex) {
+			if (!this.consumedHitIndices.has(hitIndex)) {
+				pendingIndices.push(hitIndex);
+			}
+		}
+		pendingIndices.sort((a, b) => a < b);
+
+		for (const hitIndex of pendingIndices) {
+			if (this.attackFinalized || this.host.isBattleEnded() || this.host.isFollowUpCancelled()) break;
+			this.consumedHitIndices.add(hitIndex);
+			const results = this.hitResultsByIndex.get(hitIndex);
+			if (results !== undefined && results.size() > 0) {
+				consumeResults(results);
+			}
+		}
+
+		this.attackFinalized = true;
+		this.setActivePendingHits(0);
+	}
+
 	public recordHitResult(payload: HitResolvedPayload): void {
 		if (this.host.isBattleEnded()) return;
 		let bucket = this.hitResultsByIndex.get(payload.hitIndex);
