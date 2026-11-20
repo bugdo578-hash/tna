@@ -16,6 +16,10 @@ import {
 } from "./tests/coreTests";
 import { validateNpcBattles, validateNpcRematchCooldown } from "./tests/npcTests";
 import {
+	validateJsonRoundTripPersistence,
+	validateLoadExhaustionKick,
+} from "./tests/dataStoreIntegrityTests";
+import {
 	validateCorruptionBackupAndInventory,
 	validateLeavingDuringLoad,
 	validateLoadGuardsAndInvalidLock,
@@ -54,6 +58,7 @@ export { validatePurchaseAndAllocationResults, validateShop } from "./tests/shop
 export { validateBattleTeardownLifecycle } from "./tests/teardownTests";
 export { validateQuitRequestRateLimit } from "./tests/teardownTests";
 export { validateSlowAutosaveLogoutRetry } from "./tests/persistenceTests";
+export { validateJsonRoundTripPersistence, validateLoadExhaustionKick } from "./tests/dataStoreIntegrityTests";
 
 export function runSimulation(): void {
 	validateMultiHitDeath();
@@ -75,6 +80,8 @@ export function runSimulation(): void {
 	validateTinyesEconomy();
 	validateSetRetryShutdownBudget();
 	validateSlowAutosaveLogoutRetry();
+	validateLoadExhaustionKick();
+	validateJsonRoundTripPersistence();
 	validateLoadGuardsAndInvalidLock();
 	validateLeavingDuringLoad();
 	validateCorruptionBackupAndInventory();

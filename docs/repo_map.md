@@ -36,6 +36,7 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `Dev/tests/npcTests.ts`: testes de batalhas contra NPCs do mundo, validação de proximidade/prompts e cooldown de reencontro pós-vitória.
 - `Dev/tests/shopTests.ts`: testes da loja rotativa, preços determinísticos, sincronização de estado e resultados de compra e alocação.
 - `Dev/tests/persistenceTests.ts`: testes de persistência no DataStore, locks de sessão, tokens, backups de corrupção, saída durante load e orçamento de shutdown.
+- `Dev/tests/dataStoreIntegrityTests.ts`: testes de integridade do DataStore (esgotamento de confirmação no load com kick único e round-trip JSON de floats/economia).
 - `Dev/tests/teardownTests.ts`: testes de ciclo de vida de teardown de sessão de batalha, exigência de `Players.Parent` e isolamento de erros entre sessões.
 - `Dev/DummyBattleSession.ts`: cria sessões dev (`createDummyBattleSession`, `createJotaroVsAnubisBattleSession`).
 - `Dev/DummyFighters.ts`: cria times dummy/fixos dev (`createDummySide`, `createDevOpponentSide`) e re-exporta factory.

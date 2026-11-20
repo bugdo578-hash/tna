@@ -772,6 +772,12 @@ export class PlayerDataService {
 		}
 
 		this.cleanupFailedLoadSession(player, true);
+		if (!this.isSessionLoaded(player)) {
+			this.warnFn(
+				`[PlayerDataService] Carregamento de ${key} falhou definitivamente após ${maxLockChecks} tentativa(s) sem confirmação. Expulsando jogador.`,
+			);
+			this.kickPlayer(player, SESSION_LOCK_KICK_MESSAGE);
+		}
 		return {
 			ok: false,
 			status: "LOCKED",

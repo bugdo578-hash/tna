@@ -2,6 +2,12 @@
 
 Registro conciso de mudanças a partir de `2026-11-14` (ordem cronológica reversa). Histórico anterior a `2026-11-14` (base inicial T1–T5, T7.1, T7.2 e primeira correção de DataStore/autosave): [CHANGELOG_ARCHIVE.md](CHANGELOG_ARCHIVE.md). Estado operacional atual: [HANDOFF.md](HANDOFF.md).
 
+## 2026-11-20 — Lote J2: Integridade do DataStore (C-01)
+
+- **C-01A (`src/server/Services/PlayerDataService.ts`):** no esgotamento definitivo das tentativas de confirmação de `loadPlayerInternal()` (após `cleanupFailedLoadSession(player, true)`), agora verifica `!this.isSessionLoaded(player)`, registra diagnóstico via `warnFn` e expulsa o jogador uma única vez com `kickPlayer(player, SESSION_LOCK_KICK_MESSAGE)`, preservando retries normais, sessões carregadas corretamente, session locks e demais caminhos de erro.
+- **C-01B (`src/server/Services/PlayerDataValidation.ts` — hipótese não reproduzida):** reproduzido round-trip real com `HttpService.JSONEncode()`/`JSONDecode()` em `UpdateAsync`/`SetAsync` cobrindo load inicial, floats reais de habilidades (`calcSkillSlotRoll` com frações/irracionais e mantissa 53 bits via `Random`, além de sonda de 203.803 floats/ULPs no Studio com 0 divergências), operação de economia (`ShopService` + Tinyes + PvP), save e reload. Nenhuma divergência de float ocorreu; `equalStoredValue()` foi mantida intacta.
+- **Regressões e validação:** adicionados `validateLoadExhaustionKick` (`LOAD_EXHAUSTION_KICK_PASSED`, falhou antes e passou depois da correção) e `validateJsonRoundTripPersistence` (`JSON_ROUND_TRIP_PERSISTENCE_PASSED`) em `src/server/Dev/tests/dataStoreIntegrityTests.ts`, registrados em `BattleSimulator.ts`. Validados com `npx.cmd rbxtsc` (0 erros), `git diff --check`, `tools/check-structure.ps1` e `BattleSimulator.runSimulation()` em Play no Studio (`SIMULATION_ALL_PASSED`, 33 marcadores `_PASSED`, 0 erros; dummy `49,7% / 298,98275s`, Jotaro vs Anubis `68% / 67,5943s`).
+
 ## 2026-11-20 — Lote J1: Retry de logout e anti-farm PvP (C-03 e C-02)
 
 - **C-03 (`src/server/Services/PlayerDataService.ts`):** em `enqueueBackgroundRetrySave()`, substituído o `break` quando `activeSession.saving === true` por espera controlada com backoff progressivo (`retryDelay` até `logoutRetryMaxBackoffSeconds`), limites contra loop infinito (`maxSavingWaitCycles` e `lockExpirationSeconds`), checagem de identidade da sessão, `BindToClose` (`!this.started || this.shuttingDown`) e propriedade do lock, evitando `UpdateAsync` concorrentes e concluindo o save final com `releaseLock = true` após autosave lento.
