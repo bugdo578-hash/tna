@@ -16,6 +16,8 @@ export class CombatHitQueue {
 	public readonly consumedHitIndices = new Set<number>();
 
 	private activePendingHits = 0;
+	private expectedTotalHits = 0;
+	private attackFinalized = false;
 
 	public constructor(private readonly host: CombatHitQueueHost) {}
 
@@ -42,20 +44,25 @@ export class CombatHitQueue {
 	}
 
 	public beginAttack(totalHits: number): void {
+		const normalizedTotal = math.max(totalHits, 0);
 		this.hitResultsByIndex.clear();
 		this.consumedHitIndices.clear();
-		this.setActivePendingHits(math.max(totalHits, 0));
+		this.expectedTotalHits = normalizedTotal;
+		this.attackFinalized = false;
+		this.setActivePendingHits(normalizedTotal);
 	}
 
 	public clear(): void {
 		this.hitResultsByIndex.clear();
 		this.consumedHitIndices.clear();
+		this.expectedTotalHits = 0;
+		this.attackFinalized = false;
 		this.setActivePendingHits(0);
 	}
 
 	/**
 	 * Aguarda e consome `hitIndex` no máximo uma vez dentro do ataque atual.
-	 * Retorna verdadeiro quando o hit consumido encerra a sequência (último hit ou follow-up cancelado).
+	 * Retorna verdadeiro quando o hit consumido encerra a sequência (todos os hits esperados consumidos ou follow-up cancelado).
 	 */
 	public waitForAndConsumeHitIndex(
 		hitIndex: number,
@@ -64,15 +71,17 @@ export class CombatHitQueue {
 		isTargetDead: () => boolean,
 		consumeResults: (results: readonly HitResolvedPayload[]) => void,
 	): boolean {
-		if (this.consumedHitIndices.has(hitIndex)) return false;
+		if (this.attackFinalized || this.consumedHitIndices.has(hitIndex) || !this.host.isAttackCurrent(attackToken)) {
+			return false;
+		}
 
 		const deadline = os.clock() + HIT_RESULT_WAIT_SECONDS;
 		while (this.hitResultsByIndex.get(hitIndex) === undefined && !isTargetDead() && os.clock() < deadline) {
-			if (!this.host.isAttackCurrent(attackToken)) return false;
+			if (this.attackFinalized || !this.host.isAttackCurrent(attackToken)) return false;
 			task.wait(HIT_WAIT_POLL_INTERVAL_SECONDS);
 		}
 
-		if (this.consumedHitIndices.has(hitIndex) || !this.host.isAttackCurrent(attackToken)) {
+		if (this.attackFinalized || this.consumedHitIndices.has(hitIndex) || !this.host.isAttackCurrent(attackToken)) {
 			return false;
 		}
 		this.consumedHitIndices.add(hitIndex);
@@ -80,10 +89,18 @@ export class CombatHitQueue {
 		const results = this.hitResultsByIndex.get(hitIndex) ?? [];
 		consumeResults(results);
 
-		this.setActivePendingHits(math.max(this.activePendingHits - 1, 0));
-		const isLastHit = hitIndex >= totalHits || this.host.isFollowUpCancelled();
+		if (this.attackFinalized || !this.host.isAttackCurrent(attackToken)) {
+			return false;
+		}
+
+		const expectedHits = math.max(totalHits, this.expectedTotalHits, 0);
+		const remainingHits = math.max(expectedHits - this.consumedHitIndices.size(), 0);
+		const isLastHit = remainingHits === 0 || this.host.isFollowUpCancelled();
 		if (isLastHit) {
+			this.attackFinalized = true;
 			this.setActivePendingHits(0);
+		} else {
+			this.setActivePendingHits(remainingHits);
 		}
 		return isLastHit;
 	}

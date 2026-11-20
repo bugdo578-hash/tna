@@ -769,7 +769,9 @@ export class CombatController {
 
 	/** Called only by the client teardown, or before replacing a stage on BattleStarted. */
 	public cleanupStage(expectedVfxGeneration?: number): number {
-		const ownsVfx = this.vfxBridge.ownsGeneration(expectedVfxGeneration);
+		if (!this.vfxBridge.ownsGeneration(expectedVfxGeneration)) {
+			return this.vfxBridge.getBattleGeneration();
+		}
 		const generation = this.vfxBridge.advanceGeneration();
 		this.battleVfxGeneration = generation;
 		this.battleEnded = true;
@@ -796,10 +798,8 @@ export class CombatController {
 		this.fightersByTargetId.clear();
 		this.attackFinalizer.clear();
 		this.vfxBridge.clearWorkingCopies();
-		if (ownsVfx) {
-			this.vfxBridge.clearActiveVfx();
-			battleCleanupStep("vfx deload", () => this.deloadBattleVfx(generation));
-		}
+		this.vfxBridge.clearActiveVfx();
+		battleCleanupStep("vfx deload", () => this.deloadBattleVfx(generation));
 		return generation;
 	}
 
