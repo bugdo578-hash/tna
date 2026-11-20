@@ -10,6 +10,7 @@ import type { AllocationReason, ChallengeStatus, NpcBattleNoticeReason, Purchase
 export const QUIT_RETRY_INTERVAL_SECONDS = 0.35;
 export const QUIT_RETRY_MAX_ATTEMPTS = 8;
 export const QUIT_FINAL_TIMEOUT_SECONDS = 0.75;
+export const GAME_FONT = Font.fromId(12187375716);
 
 export const UITheme = {
 	ResultScreenGuiName: "BattleResult",

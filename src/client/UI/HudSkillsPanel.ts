@@ -1,7 +1,7 @@
 import { FLOAT_TOLERANCE } from "../../shared/Config";
 import type { SkillSlot } from "../../shared/TypeDefs";
 import type { HudFighterState } from "./HudFighterStatus";
-import { UITheme } from "./UITheme";
+import { GAME_FONT, UITheme } from "./UITheme";
 
 export interface SkillButtonWidgets {
 	readonly slot: SkillSlot;
@@ -86,6 +86,7 @@ export class HudSkillsPanel {
 			btn.Position = UDim2.fromScale(xPos, 0);
 			btn.Size = UDim2.fromScale(UITheme.Layout.SkillButtonWidthScale, 1);
 			btn.BackgroundColor3 = UITheme.Colors.SkillDisabledBg;
+			btn.FontFace = GAME_FONT;
 			btn.Text = "";
 			btn.AutoButtonColor = false;
 			btn.Parent = buttonsContainer;

@@ -2,6 +2,12 @@
 
 Registro conciso de mudanças a partir de `2026-11-14` (ordem cronológica reversa). Histórico anterior a `2026-11-14` (base inicial T1–T5, T7.1, T7.2 e primeira correção de DataStore/autosave): [CHANGELOG_ARCHIVE.md](CHANGELOG_ARCHIVE.md). Estado operacional atual: [HANDOFF.md](HANDOFF.md).
 
+## 2026-11-20 — Padronização global da fonte Finger Paint (`12187375716`)
+
+- **Fonte centralizada (`src/client/UI/UITheme.ts`):** adicionada `export const GAME_FONT = Font.fromId(12187375716)` como fonte única de verdade (sem repetir o Asset ID nos demais módulos).
+- **100% da interface e textos flutuantes de combate:** aplicado `FontFace = GAME_FONT` em todos os `TextLabel`/`TextButton` criados pelo jogo (`BattleHUD.ts`, `BattleHudQuitController.ts`, `CombatDamagePool.ts` incluindo reutilização do pool em `showFloatingText`, `InventoryController.ts`, `ShopController.ts`, `PvpController.ts`, `HudBattleResult.ts`, `HudSessionControls.ts`, `HudSkillsPanel.ts`, `HudTagPanel.ts`, `TinyesDisplay.ts`, `XpRewardCards.ts`), preservando cores, tamanhos, posições, `TextScaled`, `UITextSizeConstraint`, animações, lógica de combate, Remotes e servidor.
+- **Validação:** `npx.cmd rbxtsc` (0 erros), `git diff --check`, `tools/check-structure.ps1`, carregamento real da fonte no Studio (`TextService:GetTextBoundsAsync` OK), sonda client em `PlayerGui` + `Workspace.CombatBillboardPool` (0 divergências em todos os GUIs do jogo: `BattleHUD` 63/63, `BattleResult` 8/8, `CombatBillboardPool` 16/16 inclusive popups reutilizados, `Inventory` 48/48 aberto, `Shop` 26/26 aberto, `TinyesDisplay` 1/1; excluídos apenas `ProximityPrompts` internos do Roblox) e inspeção visual via capturas de tela (Lobby, Inventário, Loja, BattleHUD, Pause e Resultado).
+
 ## 2026-11-19 — Lote I: Correção de Quit e Pause no HUD (B-01, B-03 e B-04)
 
 - **B-01 (`src/client/Controllers/BattleHudQuitController.ts`, `src/client/UI/UITheme.ts`):** adicionado timeout final de recuperação (`QUIT_FINAL_TIMEOUT_SECONDS = 0.75`) após esgotar as 8 tentativas de `RequestQuit` (`QUIT_RETRY_MAX_ATTEMPTS = 8`, intervalo `0,35s` preservados), protegido por `quitRetryToken`, `battleGeneration` e estado ativo da batalha. Ao expirar sem `BattleEnded`, cancela retries, limpa `quitRequested` e confirmação, oculta `"Saindo..."` e `BattleResult`, restaura `BattleHUD.Enabled = true` e permite nova confirmação de Quit em dois cliques sem encerrar a batalha localmente nem falsificar `BattleEnded`.

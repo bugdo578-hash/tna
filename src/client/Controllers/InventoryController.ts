@@ -2,7 +2,7 @@ import { Players, ReplicatedStorage, TweenService, UserInputService } from "@rbx
 import { REMOTES_FOLDER_NAME, REMOTE_NAMES, type RequestAllocatePayload } from "../../shared/Remotes";
 import type { AllocatableStat } from "../../shared/TypeDefs";
 import type { InventoryFighter, InventoryState } from "../UI/InventoryState";
-import { UITheme } from "../UI/UITheme";
+import { GAME_FONT, UITheme } from "../UI/UITheme";
 
 const T = UITheme.Inventory;
 const C = UITheme.Colors;
@@ -223,7 +223,7 @@ export class InventoryController {
 
 	private styleText(text: TextLabel | TextButton, value: string, pos: UDim2, size: UDim2): void {
 		text.Position = pos; text.Size = size; text.Text = value;
-		text.Font = UITheme.Fonts.Bold; text.TextColor3 = C.TextPrimary;
+		text.FontFace = GAME_FONT; text.TextColor3 = C.TextPrimary;
 		text.TextScaled = true; text.TextWrapped = true; text.BorderSizePixel = 0;
 		text.BackgroundTransparency = UITheme.Transparency.Hidden;
 		const constraint = new Instance("UITextSizeConstraint");

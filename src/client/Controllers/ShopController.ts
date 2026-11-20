@@ -2,7 +2,7 @@ import { HttpService, Players, ReplicatedStorage, RunService, UserInputService }
 import { S3_UNLOCK_LEVEL } from "../../shared/Config";
 import { REMOTE_NAMES, REMOTES_FOLDER_NAME, type PurchaseReason, type PurchaseResultPayload, type RequestPurchasePayload, type ShopStatePayload, type TinyesChangedPayload } from "../../shared/Remotes";
 import { SHOP_PREVIEW, SHOP_PREVIEW_BALANCE } from "../UI/ShopPreview";
-import { UITheme } from "../UI/UITheme";
+import { GAME_FONT, UITheme } from "../UI/UITheme";
 
 const T = UITheme.Shop;
 const C = UITheme.Colors;
@@ -288,7 +288,7 @@ export class ShopController {
 
 	private styleText(text: TextLabel | TextButton, value: string, pos: UDim2, size: UDim2): void {
 		text.Position = pos; text.Size = size; text.Text = value;
-		text.Font = UITheme.Fonts.Bold; text.TextColor3 = C.TextPrimary;
+		text.FontFace = GAME_FONT; text.TextColor3 = C.TextPrimary;
 		text.TextScaled = true; text.TextWrapped = true; text.BorderSizePixel = 0;
 		text.BackgroundTransparency = UITheme.Transparency.Hidden;
 		const constraint = new Instance("UITextSizeConstraint");

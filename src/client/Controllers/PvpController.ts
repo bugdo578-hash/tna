@@ -7,7 +7,7 @@ import {
 	type ChallengeStatusPayload,
 	type RequestChallengeResponsePayload,
 } from "../../shared/Remotes";
-import { UITheme } from "../UI/UITheme";
+import { GAME_FONT, UITheme } from "../UI/UITheme";
 
 const T = UITheme.Pvp;
 const C = UITheme.Colors;
@@ -375,6 +375,7 @@ export class PvpController {
 		label.BackgroundTransparency = UITheme.Transparency.Hidden;
 		label.BorderSizePixel = 0;
 		label.Font = font;
+		label.FontFace = GAME_FONT;
 		label.TextColor3 = color;
 		label.TextScaled = true;
 		label.TextWrapped = true;
@@ -406,7 +407,7 @@ export class PvpController {
 		button.BackgroundColor3 = bgColor;
 		button.BackgroundTransparency = UITheme.Transparency.Opaque;
 		button.BorderSizePixel = 0;
-		button.Font = UITheme.Fonts.Bold;
+		button.FontFace = GAME_FONT;
 		button.TextColor3 = C.TextPrimary;
 		button.TextScaled = true;
 		button.TextWrapped = true;

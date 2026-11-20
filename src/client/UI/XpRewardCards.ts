@@ -2,7 +2,7 @@ import { battleCleanupStep } from "../Controllers/BattleCleanup";
 import { TweenService } from "@rbxts/services";
 import { S3_UNLOCK_LEVEL } from "../../shared/Config";
 import type { FighterXpReward } from "../../shared/TypeDefs";
-import { UITheme } from "./UITheme";
+import { GAME_FONT, UITheme } from "./UITheme";
 
 // Optional server extension: one total XP cost for each completed level, in order.
 type RewardWithSteps = FighterXpReward & { readonly steps?: readonly { readonly level: number; readonly xpToNext: number }[] };
@@ -136,7 +136,7 @@ export class XpRewardCards {
     private corner(object: GuiObject, radius: UDim): void { const corner = new Instance("UICorner"); corner.CornerRadius = radius; corner.Parent = object; }
     private label(parent: Frame, name: string, position: UDim2, size: UDim2, text: string, font: Enum.Font): TextLabel {
         const label = new Instance("TextLabel"); label.Name = name; label.Position = position; label.Size = size;
-        label.BackgroundTransparency = UITheme.Transparency.Hidden; label.Text = text; label.Font = font;
+        label.BackgroundTransparency = UITheme.Transparency.Hidden; label.Text = text; label.Font = font; label.FontFace = GAME_FONT;
         label.TextScaled = true; label.TextWrapped = true; label.TextColor3 = UITheme.Colors.TextPrimary; label.ZIndex = parent.ZIndex; label.Parent = parent; return label;
     }
     public static devRewards(): FighterXpReward[] {

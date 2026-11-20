@@ -1,7 +1,7 @@
 import { clamp } from "../../shared/MathUtils";
 import type { ClientFighterIndex } from "../../shared/Remotes";
 import { resolveHpColor, type HudFighterState } from "./HudFighterStatus";
-import { UITheme } from "./UITheme";
+import { GAME_FONT, UITheme } from "./UITheme";
 
 export interface TagSlotWidgets {
 	readonly index: ClientFighterIndex;
@@ -106,6 +106,7 @@ export class HudTagPanel {
 			btn.Position = UDim2.fromScale(xPos, 0);
 			btn.Size = UDim2.fromScale(UITheme.Layout.TagSlotWidthScale, 1);
 			btn.BackgroundColor3 = UITheme.Colors.TagReadyBg;
+			btn.FontFace = GAME_FONT;
 			btn.Text = "";
 			btn.AutoButtonColor = false;
 			btn.Parent = slotsContainer;

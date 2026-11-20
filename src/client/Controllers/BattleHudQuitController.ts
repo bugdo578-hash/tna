@@ -1,5 +1,6 @@
 import type { BattleEndedPayload } from "../../shared/Remotes";
 import {
+	GAME_FONT,
 	QUIT_FINAL_TIMEOUT_SECONDS,
 	QUIT_RETRY_INTERVAL_SECONDS,
 	QUIT_RETRY_MAX_ATTEMPTS,
@@ -39,7 +40,7 @@ export class BattleHudQuitController {
 		quitStatus.Size = UITheme.Layout.QuitStatusSize;
 		quitStatus.BackgroundColor3 = UITheme.Colors.PanelBackground;
 		quitStatus.TextColor3 = UITheme.Colors.TextPrimary;
-		quitStatus.Font = UITheme.Fonts.Bold;
+		quitStatus.FontFace = GAME_FONT;
 		quitStatus.TextScaled = true;
 		quitStatus.Text = UITheme.Texts.QuitInProgress;
 		quitStatus.Visible = false;

@@ -3,7 +3,7 @@ import type {
 	BattleEndReason,
 	BattleSessionMode,
 } from "../../shared/Remotes";
-import { UITheme } from "./UITheme";
+import { GAME_FONT, UITheme } from "./UITheme";
 import type { XpRewardCards } from "./XpRewardCards";
 
 export interface CreatedResultOverlay {
@@ -69,6 +69,7 @@ export class HudBattleResult {
 		inputBlocker.Position = UITheme.Layout.OriginPosition;
 		inputBlocker.Size = UITheme.Layout.FullSize;
 		inputBlocker.BackgroundTransparency = UITheme.Transparency.Hidden;
+		inputBlocker.FontFace = GAME_FONT;
 		inputBlocker.Text = "";
 		inputBlocker.AutoButtonColor = false;
 		inputBlocker.Active = true;
@@ -158,7 +159,7 @@ export class HudBattleResult {
 		actionBtn.Position = UITheme.Xp.ButtonPos;
 		actionBtn.Size = UITheme.Xp.ButtonSize;
 		actionBtn.BackgroundColor3 = UITheme.Colors.ActionButtonPrimary;
-		actionBtn.Font = UITheme.Fonts.Bold;
+		actionBtn.FontFace = GAME_FONT;
 		actionBtn.TextColor3 = UITheme.Colors.TextPrimary;
 		actionBtn.TextScaled = true;
 		actionBtn.Text = UITheme.Texts.ResultCloseButton;

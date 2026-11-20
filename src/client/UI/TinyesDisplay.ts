@@ -1,6 +1,6 @@
 import { Players, ReplicatedStorage, TweenService } from "@rbxts/services";
 import { REMOTE_NAMES, REMOTES_FOLDER_NAME, type TinyesChangedPayload } from "../../shared/Remotes";
-import { UITheme } from "./UITheme";
+import { GAME_FONT, UITheme } from "./UITheme";
 
 // Apresentação apenas: o saldo sempre vem do servidor.
 const gui = new Instance("ScreenGui");
@@ -14,7 +14,7 @@ label.Size = UITheme.Tinyes.Size;
 label.BackgroundColor3 = UITheme.Colors.PanelBackground;
 label.BackgroundTransparency = UITheme.Transparency.Panel;
 label.TextColor3 = UITheme.Colors.RewardGold;
-label.Font = UITheme.Fonts.Bold;
+label.FontFace = GAME_FONT;
 label.TextScaled = true;
 label.Text = "Tinyes: —";
 const constraint = new Instance("UITextSizeConstraint");
@@ -36,7 +36,7 @@ remote.OnClientEvent.Connect((payload: TinyesChangedPayload) => {
 	gain.Position = UITheme.Tinyes.GainStart;
 	gain.BackgroundTransparency = UITheme.Transparency.Hidden;
 	gain.TextColor3 = UITheme.Colors.RewardGold;
-	gain.Font = UITheme.Fonts.Bold;
+	gain.FontFace = GAME_FONT;
 	gain.TextScaled = true;
 	gain.Text = `+${payload.balance - previous}`;
 	constraint.Clone().Parent = gain;

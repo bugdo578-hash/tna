@@ -10,6 +10,7 @@ import {
 	DAMAGE_POPUP_DURATION_SECONDS,
 	DAMAGE_POPUP_RISE_STUDS,
 } from "../UI/CombatVisualConfig";
+import { GAME_FONT } from "../UI/UITheme";
 import { battleCleanupStep } from "./BattleCleanup";
 
 export interface BillboardPoolItem {
@@ -51,7 +52,7 @@ export class CombatDamagePool {
 			label.Name = "Text";
 			label.Size = UDim2.fromScale(1, 1);
 			label.BackgroundTransparency = 1;
-			label.Font = Enum.Font.GothamBlack;
+			label.FontFace = GAME_FONT;
 			label.TextScaled = true;
 			label.TextStrokeTransparency = 0.15;
 			label.TextColor3 = COMBAT_FEEDBACK_COLORS.normalHit;
@@ -90,6 +91,7 @@ export class CombatDamagePool {
 		billboard.StudsOffset = new Vector3(0, 1.2, 0);
 		billboard.Enabled = true;
 
+		label.FontFace = GAME_FONT;
 		label.Text = text;
 		label.TextColor3 = color;
 		label.TextTransparency = 0;

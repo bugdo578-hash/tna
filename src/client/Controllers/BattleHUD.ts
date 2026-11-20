@@ -26,7 +26,7 @@ import { HudSessionControls } from "../UI/HudSessionControls";
 import { HudSkillsPanel } from "../UI/HudSkillsPanel";
 import { HudTagPanel } from "../UI/HudTagPanel";
 import { XpRewardCards } from "../UI/XpRewardCards";
-import { UITheme } from "../UI/UITheme";
+import { GAME_FONT, UITheme } from "../UI/UITheme";
 import { BattleHudQuitController } from "./BattleHudQuitController";
 import { runBattleHudTeardown, type BattleHudTeardownHost } from "./BattleHudTeardown";
 import { BattleRemotes } from "./BattleRemotes";
@@ -741,6 +741,7 @@ export class BattleHUD {
 		label.Size = size;
 		label.BackgroundTransparency = UITheme.Transparency.Hidden;
 		label.Font = font;
+		label.FontFace = GAME_FONT;
 		label.TextColor3 = color;
 		label.TextScaled = true;
 		label.TextXAlignment = xAlign;

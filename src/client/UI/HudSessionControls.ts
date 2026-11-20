@@ -1,5 +1,5 @@
 import type { BattleGlobalState } from "../../shared/TypeDefs";
-import { UITheme } from "./UITheme";
+import { GAME_FONT, UITheme } from "./UITheme";
 
 export interface CreatedSessionControls {
 	readonly pauseButton: TextButton;
@@ -66,7 +66,7 @@ export class HudSessionControls {
 		pauseBtn.Position = UITheme.Layout.PauseButtonPos;
 		pauseBtn.Size = UITheme.Layout.PauseButtonSize;
 		pauseBtn.BackgroundColor3 = UITheme.Colors.PauseButtonBg;
-		pauseBtn.Font = UITheme.Fonts.Bold;
+		pauseBtn.FontFace = GAME_FONT;
 		pauseBtn.TextColor3 = UITheme.Colors.TextPrimary;
 		pauseBtn.TextScaled = true;
 		pauseBtn.Text = UITheme.Texts.PauseButton;
@@ -87,7 +87,7 @@ export class HudSessionControls {
 		quitBtn.Position = UITheme.Layout.QuitButtonWithPausePos;
 		quitBtn.Size = UITheme.Layout.QuitButtonWithPauseSize;
 		quitBtn.BackgroundColor3 = UITheme.Colors.QuitButtonBg;
-		quitBtn.Font = UITheme.Fonts.Bold;
+		quitBtn.FontFace = GAME_FONT;
 		quitBtn.TextColor3 = UITheme.Colors.TextPrimary;
 		quitBtn.TextScaled = true;
 		quitBtn.Text = UITheme.Texts.QuitButton;
@@ -143,6 +143,7 @@ export class HudSessionControls {
 		inputBlocker.Position = UITheme.Layout.OriginPosition;
 		inputBlocker.Size = UITheme.Layout.FullSize;
 		inputBlocker.BackgroundTransparency = UITheme.Transparency.Hidden;
+		inputBlocker.FontFace = GAME_FONT;
 		inputBlocker.Text = "";
 		inputBlocker.AutoButtonColor = false;
 		inputBlocker.Active = true;
@@ -191,7 +192,7 @@ export class HudSessionControls {
 		resumeBtn.Position = UITheme.Layout.ModalPrimaryButtonPos;
 		resumeBtn.Size = UITheme.Layout.ModalPrimaryButtonSize;
 		resumeBtn.BackgroundColor3 = UITheme.Colors.ActionButtonPrimary;
-		resumeBtn.Font = UITheme.Fonts.Bold;
+		resumeBtn.FontFace = GAME_FONT;
 		resumeBtn.TextColor3 = UITheme.Colors.TextPrimary;
 		resumeBtn.TextScaled = true;
 		resumeBtn.Text = UITheme.Texts.PausedOverlayResumeButton;
