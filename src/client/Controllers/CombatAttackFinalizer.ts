@@ -26,13 +26,19 @@ export interface AttackFinalizerFighter {
 
 export interface CombatAttackFinalizerHost<TFighter extends AttackFinalizerFighter> {
 	readonly isBattleEnded: () => boolean;
+	readonly isCurrentBattle?: (generation: number) => boolean;
+	readonly getBattleGeneration?: () => number;
 	readonly isFollowUpCancelled: () => boolean;
 	readonly hasPendingHits: () => boolean;
 	readonly hasUnconsumedHitForTarget?: (targetId: string) => boolean;
 	readonly getFighter: (targetId: string) => TFighter | undefined;
 	readonly restoreStandBase: (entry: TFighter, duration?: number) => void;
-	readonly tweenModelTo: (model: Model, targetCFrame: CFrame, duration: number) => void;
-	readonly delayBattle: (seconds: number, callback: () => void) => void;
+	readonly tweenModelTo: (model: Model, targetCFrame: CFrame, duration: number) => Tween | undefined;
+	readonly delayBattle: (seconds: number, callback: () => void) => thread;
+	readonly cancelBattleTask?: (taskThread: thread) => void;
+	readonly trackBattleConnection?: (connection: RBXScriptConnection) => void;
+	readonly untrackBattleConnection?: (connection: RBXScriptConnection) => void;
+	readonly onKoAndSwitchesIdle?: () => void;
 	readonly computeActiveSlotCFrame: (sideIndex: 0 | 1) => CFrame;
 	readonly computeBenchSlotCFrame: (sideIndex: 0 | 1, benchSlot: number) => CFrame;
 	readonly applyActiveVisualState: (entry: TFighter) => void;
@@ -49,6 +55,8 @@ export class CombatAttackFinalizer<TFighter extends AttackFinalizerFighter> {
 	public readonly pendingSwitches: SwitchPerformedPayload[] = [];
 	public readonly pendingDeaths = new Map<string, PendingDeathRecord>();
 	private readonly activeKoTargets = new Set<string>();
+	private readonly activeKoTweens = new Map<string, Tween>();
+	private readonly appliedDeathSwitches = new Set<string>();
 	private finalizerGeneration = 0;
 
 	public constructor(private readonly host: CombatAttackFinalizerHost<TFighter>) {}
@@ -58,6 +66,8 @@ export class CombatAttackFinalizer<TFighter extends AttackFinalizerFighter> {
 		this.pendingSwitches.clear();
 		this.pendingDeaths.clear();
 		this.activeKoTargets.clear();
+		this.activeKoTweens.clear();
+		this.appliedDeathSwitches.clear();
 	}
 
 	public hasPendingDeath(targetId: string): boolean {
@@ -89,16 +99,12 @@ export class CombatAttackFinalizer<TFighter extends AttackFinalizerFighter> {
 	}
 
 	/**
-	 * Garante que mortes/trocas pendentes de um ataque anterior sejam concluídas antes de iniciar
-	 * um novo AttackStarted sobreposto, evitando retenção de trocas ou estado stale no novo ataque.
+	 * Garante que mortes pendentes de um ataque anterior sejam iniciadas e que trocas pendentes
+	 * sejam aplicadas apenas quando não houver animação de KO ativa.
 	 */
 	public forceCompletePendingForNextAttack(): void {
 		if (this.host.isBattleEnded()) return;
 		this.flushPendingDeaths();
-		if (this.activeKoTargets.size() > 0) {
-			this.activeKoTargets.clear();
-			this.finalizerGeneration += 1;
-		}
 		this.flushPendingSwitchesIfReady();
 	}
 
@@ -156,39 +162,107 @@ export class CombatAttackFinalizer<TFighter extends AttackFinalizerFighter> {
 			const koCFrame = deadFighter.homeCFrame
 				.add(new Vector3(0, -0.6, 0))
 				.mul(CFrame.Angles(math.rad(-80), 0, 0));
-			this.host.tweenModelTo(deadFighter.model, koCFrame, PLACEHOLDER_KO_TWEEN_SECONDS);
+			const koTween = this.host.tweenModelTo(deadFighter.model, koCFrame, PLACEHOLDER_KO_TWEEN_SECONDS);
 			const generation = this.finalizerGeneration;
+			const battleGeneration = this.host.getBattleGeneration?.();
 			this.activeKoTargets.add(deadTargetId);
-			this.host.delayBattle(PLACEHOLDER_KO_TWEEN_SECONDS, () => {
-				if (this.host.isBattleEnded() || this.finalizerGeneration !== generation) return;
-				this.activeKoTargets.delete(deadTargetId);
-				if (deadFighter.model.Parent !== undefined && record.payload.nextActive !== undefined) {
-					deadFighter.homeCFrame = this.host.computeBenchSlotCFrame(
-						deadFighter.sideIndex,
-						deadFighter.benchIndex,
-					);
-					deadFighter.model.PivotTo(deadFighter.homeCFrame);
-					this.host.applyActiveVisualState(deadFighter);
+			if (koTween !== undefined) {
+				this.activeKoTweens.set(deadTargetId, koTween);
+			}
+
+			let koSettled = false;
+			let completedConnection: RBXScriptConnection | undefined;
+			let fallbackTask: thread | undefined;
+
+			const completeKo = (): void => {
+				if (koSettled) return;
+				koSettled = true;
+				if (completedConnection !== undefined) {
+					const conn = completedConnection;
+					completedConnection = undefined;
+					conn.Disconnect();
+					this.host.untrackBattleConnection?.(conn);
 				}
+				if (fallbackTask !== undefined) {
+					const pending = fallbackTask;
+					fallbackTask = undefined;
+					this.host.cancelBattleTask?.(pending);
+				}
+
+				const isStaleBattle =
+					battleGeneration !== undefined && !(this.host.isCurrentBattle?.(battleGeneration) ?? true);
+				if (this.host.isBattleEnded() || this.finalizerGeneration !== generation || isStaleBattle) {
+					return;
+				}
+
+				if (koTween !== undefined && koTween.PlaybackState === Enum.PlaybackState.Playing) {
+					koTween.Cancel();
+				}
+				if (this.activeKoTweens.get(deadTargetId) === koTween) {
+					this.activeKoTweens.delete(deadTargetId);
+				}
+				this.activeKoTargets.delete(deadTargetId);
 				this.flushPendingSwitchesIfReady();
-			});
+				if (!this.hasActiveKoAnimations()) {
+					this.host.onKoAndSwitchesIdle?.();
+				}
+			};
+
+			if (koTween !== undefined) {
+				completedConnection = koTween.Completed.Connect(() => {
+					completeKo();
+				});
+				this.host.trackBattleConnection?.(completedConnection);
+				// Fallback defensivo após a duração nominal caso Completed não seja emitido.
+				fallbackTask = this.host.delayBattle(PLACEHOLDER_KO_TWEEN_SECONDS + 0.15, () => {
+					fallbackTask = undefined;
+					completeKo();
+				});
+			} else {
+				fallbackTask = this.host.delayBattle(PLACEHOLDER_KO_TWEEN_SECONDS, () => {
+					fallbackTask = undefined;
+					completeKo();
+				});
+			}
 		}
 
-		// Se houve troca automática por morte (nextActive), traz o substituto para o centro
+		// Troca automática por morte (nextActive) aguarda fim da sequência e da queda de KO, deduplicada com SwitchPerformed.
 		if (record.payload.nextActive !== undefined) {
 			const nextFighter = this.host.getFighter(record.payload.nextActive);
 			if (nextFighter !== undefined && !nextFighter.dead) {
-				nextFighter.active = true;
-				nextFighter.homeCFrame = this.host.computeActiveSlotCFrame(nextFighter.sideIndex);
-				this.host.applyActiveVisualState(nextFighter);
-				this.host.tweenModelTo(nextFighter.model, nextFighter.homeCFrame, PLACEHOLDER_SWITCH_TWEEN_SECONDS);
+				this.handleSwitchPerformed({
+					sideId: record.payload.sideId,
+					previousFighterId: deadTargetId,
+					activeFighterId: record.payload.nextActive,
+				});
 			}
 		}
 		this.host.notifyDeathVisualFlushed(record.payload);
 	}
 
+	private switchKey(payload: SwitchPerformedPayload): string {
+		return `${payload.sideId}|${payload.previousFighterId}|${payload.activeFighterId}`;
+	}
+
+	private hasPendingSwitch(payload: SwitchPerformedPayload): boolean {
+		for (const pending of this.pendingSwitches) {
+			if (
+				pending.sideId === payload.sideId &&
+				pending.previousFighterId === payload.previousFighterId &&
+				pending.activeFighterId === payload.activeFighterId
+			) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	public handleSwitchPerformed(payload: SwitchPerformedPayload): void {
 		if (this.host.isBattleEnded()) return;
+		const key = this.switchKey(payload);
+		if (this.appliedDeathSwitches.has(key) || this.hasPendingSwitch(payload)) {
+			return;
+		}
 		if (!this.canApplySwitches()) {
 			this.pendingSwitches.push(payload);
 			return;
@@ -206,17 +280,38 @@ export class CombatAttackFinalizer<TFighter extends AttackFinalizerFighter> {
 	}
 
 	private applySwitchPerformed(payload: SwitchPerformedPayload): void {
+		const key = this.switchKey(payload);
+		if (this.appliedDeathSwitches.has(key)) {
+			return;
+		}
+
 		const previous = this.host.getFighter(payload.previousFighterId);
 		const nextActive = this.host.getFighter(payload.activeFighterId);
 
 		if (previous !== undefined) {
+			const activeKoTween = this.activeKoTweens.get(previous.targetId);
+			if (activeKoTween !== undefined) {
+				if (activeKoTween.PlaybackState === Enum.PlaybackState.Playing) {
+					activeKoTween.Cancel();
+				}
+				this.activeKoTweens.delete(previous.targetId);
+			}
+			if (previous.dead) {
+				this.appliedDeathSwitches.add(key);
+			}
 			previous.active = false;
 			previous.homeCFrame = this.host.computeBenchSlotCFrame(previous.sideIndex, previous.benchIndex);
 			this.host.applyActiveVisualState(previous);
-			this.host.tweenModelTo(previous.model, previous.homeCFrame, PLACEHOLDER_SWITCH_TWEEN_SECONDS);
+			if (previous.dead) {
+				if (previous.model.Parent !== undefined) {
+					previous.model.PivotTo(previous.homeCFrame);
+				}
+			} else {
+				this.host.tweenModelTo(previous.model, previous.homeCFrame, PLACEHOLDER_SWITCH_TWEEN_SECONDS);
+			}
 		}
 
-		if (nextActive !== undefined) {
+		if (nextActive !== undefined && !nextActive.dead) {
 			nextActive.active = true;
 			nextActive.homeCFrame = this.host.computeActiveSlotCFrame(nextActive.sideIndex);
 			this.host.applyActiveVisualState(nextActive);

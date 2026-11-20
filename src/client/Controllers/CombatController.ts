@@ -104,6 +104,7 @@ export class CombatController {
 	private currentAttackToken = 0;
 	private activePendingHits = 0;
 	private activeAttack: ActiveAttackState | undefined;
+	private deferredAttack: ActiveAttackState | undefined;
 	private followUpCancelledForCurrentAttack = false;
 	private battleEnded = false;
 	private battleVfxGeneration = 0;
@@ -140,13 +141,19 @@ export class CombatController {
 		});
 		this.attackFinalizer = new CombatAttackFinalizer<FighterVisualEntry>({
 			isBattleEnded: () => this.battleEnded,
+			isCurrentBattle: (generation) => this.isCurrentBattle(generation),
+			getBattleGeneration: () => this.getBattleGeneration(),
 			isFollowUpCancelled: () => this.followUpCancelledForCurrentAttack,
-			hasPendingHits: () => this.hitQueue.hasPendingHits(),
+			hasPendingHits: () => this.deferredAttack === undefined && this.hitQueue.hasPendingHits(),
 			hasUnconsumedHitForTarget: (targetId) => this.hitQueue.hasUnconsumedHitForTarget(targetId),
 			getFighter: (targetId) => this.fightersByTargetId.get(targetId),
 			restoreStandBase: (entry, duration) => this.restoreStandBase(entry, duration),
 			tweenModelTo: (model, targetCFrame, duration) => this.tweenModelTo(model, targetCFrame, duration),
 			delayBattle: (seconds, callback) => this.delayBattle(seconds, callback),
+			cancelBattleTask: (taskThread) => this.cancelBattleTask(taskThread),
+			trackBattleConnection: (connection) => this.trackBattleConnection(connection),
+			untrackBattleConnection: (connection) => this.untrackBattleConnection(connection),
+			onKoAndSwitchesIdle: () => this.launchDeferredAttackIfReady(),
 			computeActiveSlotCFrame: (sideIndex) => this.computeActiveSlotCFrame(sideIndex),
 			computeBenchSlotCFrame: (sideIndex, benchSlot) => this.computeBenchSlotCFrame(sideIndex, benchSlot),
 			applyActiveVisualState: (entry) => this.applyActiveVisualState(entry),
@@ -261,6 +268,7 @@ export class CombatController {
 		this.sideIds = payload.sides;
 		this.currentAttackToken += 1;
 		this.activeAttack = undefined;
+		this.deferredAttack = undefined;
 		this.followUpCancelledForCurrentAttack = false;
 		this.hitQueue.clear();
 		this.attackFinalizer.clear();
@@ -490,6 +498,7 @@ export class CombatController {
 	private finalizeActiveAttackBeforeNext(): void {
 		const previousAttack = this.activeAttack;
 		this.activeAttack = undefined;
+		this.deferredAttack = undefined;
 		const hadPendingHits = this.hitQueue.hasPendingHits();
 
 		if (previousAttack !== undefined || hadPendingHits) {
@@ -535,15 +544,39 @@ export class CombatController {
 
 		const timeline = this.resolveSkillTimeline(attacker.fighterId, payload.slot);
 		const totalHits = timeline.hits.size();
-		this.activeAttack = { token: attackToken, attacker, target, timeline, slot: payload.slot };
+		const attackState: ActiveAttackState = { token: attackToken, attacker, target, timeline, slot: payload.slot };
+		this.activeAttack = attackState;
 		this.hitQueue.beginAttack(totalHits);
+
+		if (this.attackFinalizer.hasActiveKoAnimations()) {
+			this.deferredAttack = attackState;
+			return;
+		}
+
+		this.startAttackPresentation(attackState);
+	}
+
+	private launchDeferredAttackIfReady(): void {
+		const pending = this.deferredAttack;
+		if (pending === undefined) return;
+		if (this.battleEnded || this.attackFinalizer.hasActiveKoAnimations()) return;
+		if (this.currentAttackToken !== pending.token || this.activeAttack !== pending) {
+			this.deferredAttack = undefined;
+			return;
+		}
+		this.deferredAttack = undefined;
+		this.startAttackPresentation(pending);
+	}
+
+	private startAttackPresentation(attackState: ActiveAttackState): void {
+		const { attacker, target, timeline, token, slot } = attackState;
 		this.positionStandForAttack(attacker, math.max(timeline.hits[0]?.time ?? 0.1, 0.05) * 0.8);
 
-		const track = this.tryPlaySlotAnimation(attacker, payload.slot, timeline);
+		const track = this.tryPlaySlotAnimation(attacker, slot, timeline);
 		if (track !== undefined) {
-			this.bindAnimationMarkers(track, attacker, target, timeline, attackToken, payload.slot);
+			this.bindAnimationMarkers(track, attacker, target, timeline, token, slot);
 		} else {
-			this.runPlaceholderAttackSequence(attacker, target, timeline, attackToken, payload.slot);
+			this.runPlaceholderAttackSequence(attacker, target, timeline, token, slot);
 		}
 	}
 
@@ -790,8 +823,8 @@ export class CombatController {
 		this.attackFinalizer.handleSwitchPerformed(payload);
 	}
 
-	private tweenModelTo(model: Model, targetCFrame: CFrame, duration: number): void {
-		this.standMotion.tweenModelTo(model, targetCFrame, duration);
+	private tweenModelTo(model: Model, targetCFrame: CFrame, duration: number): Tween | undefined {
+		return this.standMotion.tweenModelTo(model, targetCFrame, duration);
 	}
 
 	private createBattleTween<T extends Instance>(object: T, info: TweenInfo, goal: Partial<ExtractMembers<T, Tweenable>>): Tween {
@@ -806,12 +839,27 @@ export class CombatController {
 		return tween;
 	}
 
-	private delayBattle(seconds: number, callback: () => void): void {
+	private trackBattleConnection(connection: RBXScriptConnection): void {
+		this.battleConnections.add(connection);
+	}
+
+	private untrackBattleConnection(connection: RBXScriptConnection): void {
+		this.battleConnections.delete(connection);
+	}
+
+	private delayBattle(seconds: number, callback: () => void): thread {
 		const pending = task.delay(seconds, () => {
-			callback();
 			this.battleTasks.delete(pending);
+			callback();
 		});
 		this.battleTasks.add(pending);
+		return pending;
+	}
+
+	private cancelBattleTask(pending: thread): void {
+		if (!this.battleTasks.has(pending)) return;
+		this.battleTasks.delete(pending);
+		pcall(() => task.cancel(pending));
 	}
 
 	private spawnBattle(callback: () => void): void {
@@ -833,6 +881,7 @@ export class CombatController {
 		this.battleEnded = true;
 		this.currentAttackToken += 1;
 		this.activeAttack = undefined;
+		this.deferredAttack = undefined;
 		this.hitQueue.clear();
 		for (const connection of this.battleConnections) battleCleanupStep("combat connection", () => connection.Disconnect());
 		this.battleConnections.clear();

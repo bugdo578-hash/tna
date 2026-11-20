@@ -186,12 +186,12 @@ export class CombatStandMotion {
 		});
 	}
 
-	public tweenModelTo(model: Model, targetCFrame: CFrame, duration: number): void {
+	public tweenModelTo(model: Model, targetCFrame: CFrame, duration: number): Tween | undefined {
 		const root = model.PrimaryPart;
-		if (root === undefined || !model.Parent) return;
+		if (root === undefined || !model.Parent) return undefined;
 		if (duration <= 0.01) {
 			model.PivotTo(targetCFrame);
-			return;
+			return undefined;
 		}
 		const tween = this.host.createBattleTween(
 			root,
@@ -199,5 +199,6 @@ export class CombatStandMotion {
 			{ CFrame: targetCFrame },
 		);
 		tween.Play();
+		return tween;
 	}
 }
