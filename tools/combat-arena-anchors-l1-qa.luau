@@ -3,6 +3,7 @@
 local ts = game.Players.LocalPlayer.PlayerScripts.TS
 local Combat = require(ts.Controllers.CombatController).CombatController
 local CombatArenaAnchors = require(ts.Controllers.CombatArenaAnchors)
+local CombatFighterGrounding = require(ts.Controllers.CombatFighterGrounding)
 local config = require(ts.UI.CombatVisualConfig)
 local SkillData = require(game.ReplicatedStorage.TS.SkillData)
 
@@ -30,6 +31,11 @@ local function assertCFrameClose(actual, expected, posTol, rotDotMin, label)
 			upDot
 		)
 	)
+end
+
+local function assertAlignedToAnchor(actual, anchorPart, fighter, label)
+	local expected = CombatFighterGrounding.alignFighterCFrameToAnchor(anchorPart, fighter.groundContactOffset)
+	assertCFrameClose(actual, expected, TOL, ROT_DOT_MIN, label)
 end
 
 local TOL = config.COMBAT_POSITION_TOLERANCE_STUDS
@@ -166,39 +172,39 @@ local ok, failure = pcall(function()
 		local b2 = c.fightersByTargetId["b2"]
 		local b3 = c.fightersByTargetId["b3"]
 
-		assertCFrameClose(a1.homeCFrame, anchorParts.activeA.CFrame, TOL, ROT_DOT_MIN, "S1: a1 homeCFrame == Current_Fighter_A")
-		assertCFrameClose(a1.rootPart.CFrame, anchorParts.activeA.CFrame, TOL, ROT_DOT_MIN, "S1: a1 rootPart == Current_Fighter_A")
-		assertCFrameClose(a2.homeCFrame, anchorParts.waitA1.CFrame, TOL, ROT_DOT_MIN, "S1: a2 homeCFrame == Waiting_Fighter_A")
-		assertCFrameClose(a2.rootPart.CFrame, anchorParts.waitA1.CFrame, TOL, ROT_DOT_MIN, "S1: a2 rootPart == Waiting_Fighter_A")
-		assertCFrameClose(a3.homeCFrame, anchorParts.waitA2.CFrame, TOL, ROT_DOT_MIN, "S1: a3 homeCFrame == Waiting_Fighter_A_2")
-		assertCFrameClose(a3.rootPart.CFrame, anchorParts.waitA2.CFrame, TOL, ROT_DOT_MIN, "S1: a3 rootPart == Waiting_Fighter_A_2")
+		assertAlignedToAnchor(a1.homeCFrame, anchorParts.activeA, a1, "S1: a1 homeCFrame == Current_Fighter_A")
+		assertAlignedToAnchor(a1.rootPart.CFrame, anchorParts.activeA, a1, "S1: a1 rootPart == Current_Fighter_A")
+		assertAlignedToAnchor(a2.homeCFrame, anchorParts.waitA1, a2, "S1: a2 homeCFrame == Waiting_Fighter_A")
+		assertAlignedToAnchor(a2.rootPart.CFrame, anchorParts.waitA1, a2, "S1: a2 rootPart == Waiting_Fighter_A")
+		assertAlignedToAnchor(a3.homeCFrame, anchorParts.waitA2, a3, "S1: a3 homeCFrame == Waiting_Fighter_A_2")
+		assertAlignedToAnchor(a3.rootPart.CFrame, anchorParts.waitA2, a3, "S1: a3 rootPart == Waiting_Fighter_A_2")
 
-		assertCFrameClose(b1.homeCFrame, anchorParts.activeB.CFrame, TOL, ROT_DOT_MIN, "S1: b1 homeCFrame == Current_Fighter_B")
-		assertCFrameClose(b1.rootPart.CFrame, anchorParts.activeB.CFrame, TOL, ROT_DOT_MIN, "S1: b1 rootPart == Current_Fighter_B")
-		assertCFrameClose(b2.homeCFrame, anchorParts.waitB1.CFrame, TOL, ROT_DOT_MIN, "S1: b2 homeCFrame == Waiting_Fighter_B")
-		assertCFrameClose(b2.rootPart.CFrame, anchorParts.waitB1.CFrame, TOL, ROT_DOT_MIN, "S1: b2 rootPart == Waiting_Fighter_B")
-		assertCFrameClose(b3.homeCFrame, anchorParts.waitB2.CFrame, TOL, ROT_DOT_MIN, "S1: b3 homeCFrame == Waiting_Fighter_B_2")
-		assertCFrameClose(b3.rootPart.CFrame, anchorParts.waitB2.CFrame, TOL, ROT_DOT_MIN, "S1: b3 rootPart == Waiting_Fighter_B_2")
+		assertAlignedToAnchor(b1.homeCFrame, anchorParts.activeB, b1, "S1: b1 homeCFrame == Current_Fighter_B")
+		assertAlignedToAnchor(b1.rootPart.CFrame, anchorParts.activeB, b1, "S1: b1 rootPart == Current_Fighter_B")
+		assertAlignedToAnchor(b2.homeCFrame, anchorParts.waitB1, b2, "S1: b2 homeCFrame == Waiting_Fighter_B")
+		assertAlignedToAnchor(b2.rootPart.CFrame, anchorParts.waitB1, b2, "S1: b2 rootPart == Waiting_Fighter_B")
+		assertAlignedToAnchor(b3.homeCFrame, anchorParts.waitB2, b3, "S1: b3 homeCFrame == Waiting_Fighter_B_2")
+		assertAlignedToAnchor(b3.rootPart.CFrame, anchorParts.waitB2, b3, "S1: b3 rootPart == Waiting_Fighter_B_2")
 
 		-- Troca voluntária com reserva 2 (a1 <-> a3): a1 deve ocupar Waiting_Fighter_A_2, a2 permanece em Waiting_Fighter_A
 		c:onSwitchPerformed({ sideId = "A", previousFighterId = "a1", activeFighterId = "a3" })
 		task.wait(config.PLACEHOLDER_SWITCH_TWEEN_SECONDS + 0.08)
 		check(resolveCalls == 1, "S1: voluntary switch must reuse cached anchors without re-resolving")
-		assertCFrameClose(a3.rootPart.CFrame, anchorParts.activeA.CFrame, TOL, ROT_DOT_MIN, "S1: a3 active after voluntary switch")
-		assertCFrameClose(a1.rootPart.CFrame, anchorParts.waitA2.CFrame, TOL, ROT_DOT_MIN, "S1: a1 moved to vacated Waiting_Fighter_A_2")
-		assertCFrameClose(a2.rootPart.CFrame, anchorParts.waitA1.CFrame, TOL, ROT_DOT_MIN, "S1: a2 untouched at Waiting_Fighter_A")
+		assertAlignedToAnchor(a3.rootPart.CFrame, anchorParts.activeA, a3, "S1: a3 active after voluntary switch")
+		assertAlignedToAnchor(a1.rootPart.CFrame, anchorParts.waitA2, a1, "S1: a1 moved to vacated Waiting_Fighter_A_2")
+		assertAlignedToAnchor(a2.rootPart.CFrame, anchorParts.waitA1, a2, "S1: a2 untouched at Waiting_Fighter_A")
 
 		-- Troca voluntária com reserva 1 (a3 <-> a2): a3 deve ocupar Waiting_Fighter_A, a1 permanece em Waiting_Fighter_A_2
 		c:onSwitchPerformed({ sideId = "A", previousFighterId = "a3", activeFighterId = "a2" })
 		task.wait(config.PLACEHOLDER_SWITCH_TWEEN_SECONDS + 0.08)
-		assertCFrameClose(a2.rootPart.CFrame, anchorParts.activeA.CFrame, TOL, ROT_DOT_MIN, "S1: a2 active after second voluntary switch")
-		assertCFrameClose(a3.rootPart.CFrame, anchorParts.waitA1.CFrame, TOL, ROT_DOT_MIN, "S1: a3 moved to vacated Waiting_Fighter_A")
-		assertCFrameClose(a1.rootPart.CFrame, anchorParts.waitA2.CFrame, TOL, ROT_DOT_MIN, "S1: a1 untouched at Waiting_Fighter_A_2")
+		assertAlignedToAnchor(a2.rootPart.CFrame, anchorParts.activeA, a2, "S1: a2 active after second voluntary switch")
+		assertAlignedToAnchor(a3.rootPart.CFrame, anchorParts.waitA1, a3, "S1: a3 moved to vacated Waiting_Fighter_A")
+		assertAlignedToAnchor(a1.rootPart.CFrame, anchorParts.waitA2, a1, "S1: a1 untouched at Waiting_Fighter_A_2")
 
 		-- Volta a1 (Jotaro com Stand) para ativo para validar ataque ORA ORA + retorno do atacante/Stand
 		c:onSwitchPerformed({ sideId = "A", previousFighterId = "a2", activeFighterId = "a1" })
 		task.wait(config.PLACEHOLDER_SWITCH_TWEEN_SECONDS + 0.08)
-		assertCFrameClose(a1.rootPart.CFrame, anchorParts.activeA.CFrame, TOL, ROT_DOT_MIN, "S1: a1 active before ORA ORA")
+		assertAlignedToAnchor(a1.rootPart.CFrame, anchorParts.activeA, a1, "S1: a1 active before ORA ORA")
 
 		check(a1.standMotion ~= nil and a1.standMotion.joint.Part1 ~= nil, "S1: Jotaro requires real StandJoint")
 		local standBaseC1 = a1.standMotion.baseC1
@@ -218,7 +224,7 @@ local ok, failure = pcall(function()
 			end)
 		end
 		task.wait(oraTimeline.hits[#oraTimeline.hits].time + oraTimeline.returnTime + config.HIT_RESULT_WAIT_SECONDS)
-		assertCFrameClose(a1.rootPart.CFrame, anchorParts.activeA.CFrame, TOL, ROT_DOT_MIN, "S1: attacker returned to Current_Fighter_A")
+		assertAlignedToAnchor(a1.rootPart.CFrame, anchorParts.activeA, a1, "S1: attacker returned to Current_Fighter_A")
 		assertCFrameClose(a1.standMotion.joint.C1, standBaseC1, TOL, ROT_DOT_MIN, "S1: Stand joint C1 returned to base")
 		assertCFrameClose(a1.standMotion.joint.Part1.CFrame, standWorldBase, TOL, ROT_DOT_MIN, "S1: Stand world CFrame returned to base")
 
@@ -229,10 +235,10 @@ local ok, failure = pcall(function()
 		c:onFighterDied({ sideId = "B", fighterId = "b1", nextActive = "b2" })
 		task.wait(s1Timeline.hits[1].time + s1Timeline.returnTime + config.PLACEHOLDER_KO_TWEEN_SECONDS + config.PLACEHOLDER_SWITCH_TWEEN_SECONDS + 0.2)
 		check(b1.dead and not b1.active and b2.active and not b2.dead, "S1: b1 dead and b2 promoted after KO")
-		assertCFrameClose(b1.rootPart.CFrame, anchorParts.waitB1.CFrame, TOL, ROT_DOT_MIN, "S1: dead b1 moved to Waiting_Fighter_B")
-		assertCFrameClose(b2.rootPart.CFrame, anchorParts.activeB.CFrame, TOL, ROT_DOT_MIN, "S1: substitute b2 moved to Current_Fighter_B")
-		assertCFrameClose(b3.rootPart.CFrame, anchorParts.waitB2.CFrame, TOL, ROT_DOT_MIN, "S1: b3 untouched at Waiting_Fighter_B_2")
-		assertCFrameClose(a1.rootPart.CFrame, anchorParts.activeA.CFrame, TOL, ROT_DOT_MIN, "S1: a1 returned after KO attack")
+		assertAlignedToAnchor(b1.rootPart.CFrame, anchorParts.waitB1, b1, "S1: dead b1 moved to Waiting_Fighter_B")
+		assertAlignedToAnchor(b2.rootPart.CFrame, anchorParts.activeB, b2, "S1: substitute b2 moved to Current_Fighter_B")
+		assertAlignedToAnchor(b3.rootPart.CFrame, anchorParts.waitB2, b3, "S1: b3 untouched at Waiting_Fighter_B_2")
+		assertAlignedToAnchor(a1.rootPart.CFrame, anchorParts.activeA, a1, "S1: a1 returned after KO attack")
 		check(resolveCalls == 1, "S1: entire battle resolved arena anchors exactly once")
 
 		c.arenaAnchors.resolveForBattle = origResolve
@@ -265,12 +271,12 @@ local ok, failure = pcall(function()
 		local b2 = c.fightersByTargetId["b2"]
 		local b3 = c.fightersByTargetId["b3"]
 
-		assertCFrameClose(a1.rootPart.CFrame, anchorParts.activeA.CFrame, TOL, ROT_DOT_MIN, "S2: transformed a1 == Current_Fighter_A")
-		assertCFrameClose(a2.rootPart.CFrame, anchorParts.waitA1.CFrame, TOL, ROT_DOT_MIN, "S2: transformed a2 == Waiting_Fighter_A")
-		assertCFrameClose(a3.rootPart.CFrame, anchorParts.waitA2.CFrame, TOL, ROT_DOT_MIN, "S2: transformed a3 == Waiting_Fighter_A_2")
-		assertCFrameClose(b1.rootPart.CFrame, anchorParts.activeB.CFrame, TOL, ROT_DOT_MIN, "S2: transformed b1 == Current_Fighter_B")
-		assertCFrameClose(b2.rootPart.CFrame, anchorParts.waitB1.CFrame, TOL, ROT_DOT_MIN, "S2: transformed b2 == Waiting_Fighter_B")
-		assertCFrameClose(b3.rootPart.CFrame, anchorParts.waitB2.CFrame, TOL, ROT_DOT_MIN, "S2: transformed b3 == Waiting_Fighter_B_2")
+		assertAlignedToAnchor(a1.rootPart.CFrame, anchorParts.activeA, a1, "S2: transformed a1 == Current_Fighter_A")
+		assertAlignedToAnchor(a2.rootPart.CFrame, anchorParts.waitA1, a2, "S2: transformed a2 == Waiting_Fighter_A")
+		assertAlignedToAnchor(a3.rootPart.CFrame, anchorParts.waitA2, a3, "S2: transformed a3 == Waiting_Fighter_A_2")
+		assertAlignedToAnchor(b1.rootPart.CFrame, anchorParts.activeB, b1, "S2: transformed b1 == Current_Fighter_B")
+		assertAlignedToAnchor(b2.rootPart.CFrame, anchorParts.waitB1, b2, "S2: transformed b2 == Waiting_Fighter_B")
+		assertAlignedToAnchor(b3.rootPart.CFrame, anchorParts.waitB2, b3, "S2: transformed b3 == Waiting_Fighter_B_2")
 
 		-- Troca + KO + retorno do atacante/Stand na arena girada e transladada
 		local standBaseC1 = a1.standMotion.baseC1
@@ -281,12 +287,12 @@ local ok, failure = pcall(function()
 		c:onFighterDied({ sideId = "B", fighterId = "b1", nextActive = "b3" })
 		task.wait(s1Timeline.hits[1].time + s1Timeline.returnTime + config.PLACEHOLDER_KO_TWEEN_SECONDS + config.PLACEHOLDER_SWITCH_TWEEN_SECONDS + 0.2)
 
-		assertCFrameClose(a1.rootPart.CFrame, anchorParts.activeA.CFrame, TOL, ROT_DOT_MIN, "S2: transformed attacker returned")
+		assertAlignedToAnchor(a1.rootPart.CFrame, anchorParts.activeA, a1, "S2: transformed attacker returned")
 		assertCFrameClose(a1.standMotion.joint.C1, standBaseC1, TOL, ROT_DOT_MIN, "S2: transformed Stand C1 returned")
 		assertCFrameClose(a1.standMotion.joint.Part1.CFrame, standWorldBase, TOL, ROT_DOT_MIN, "S2: transformed Stand world returned")
-		assertCFrameClose(b3.rootPart.CFrame, anchorParts.activeB.CFrame, TOL, ROT_DOT_MIN, "S2: transformed substitute b3 at Current_Fighter_B")
-		assertCFrameClose(b1.rootPart.CFrame, anchorParts.waitB2.CFrame, TOL, ROT_DOT_MIN, "S2: transformed dead b1 at vacated Waiting_Fighter_B_2")
-		assertCFrameClose(b2.rootPart.CFrame, anchorParts.waitB1.CFrame, TOL, ROT_DOT_MIN, "S2: transformed b2 untouched at Waiting_Fighter_B")
+		assertAlignedToAnchor(b3.rootPart.CFrame, anchorParts.activeB, b3, "S2: transformed substitute b3 at Current_Fighter_B")
+		assertAlignedToAnchor(b1.rootPart.CFrame, anchorParts.waitB2, b1, "S2: transformed dead b1 at vacated Waiting_Fighter_B_2")
+		assertAlignedToAnchor(b2.rootPart.CFrame, anchorParts.waitB1, b2, "S2: transformed b2 untouched at Waiting_Fighter_B")
 
 		restoreArenaTransform()
 		c:cleanupStage()
@@ -311,17 +317,17 @@ local ok, failure = pcall(function()
 		check(local1.sideId == "B" and local1.sideIndex == 0, "S3: PvP local side B must map to sideIndex 0")
 		check(opp1.sideId == "A" and opp1.sideIndex == 1, "S3: PvP opponent side A must map to sideIndex 1")
 
-		assertCFrameClose(local1.rootPart.CFrame, anchorParts.activeA.CFrame, TOL, ROT_DOT_MIN, "S3: PvP local active at Current_Fighter_A")
-		assertCFrameClose(local2.rootPart.CFrame, anchorParts.waitA1.CFrame, TOL, ROT_DOT_MIN, "S3: PvP local wait 1 at Waiting_Fighter_A")
-		assertCFrameClose(local3.rootPart.CFrame, anchorParts.waitA2.CFrame, TOL, ROT_DOT_MIN, "S3: PvP local wait 2 at Waiting_Fighter_A_2")
-		assertCFrameClose(opp1.rootPart.CFrame, anchorParts.activeB.CFrame, TOL, ROT_DOT_MIN, "S3: PvP opponent active at Current_Fighter_B")
-		assertCFrameClose(opp2.rootPart.CFrame, anchorParts.waitB1.CFrame, TOL, ROT_DOT_MIN, "S3: PvP opponent wait 1 at Waiting_Fighter_B")
-		assertCFrameClose(opp3.rootPart.CFrame, anchorParts.waitB2.CFrame, TOL, ROT_DOT_MIN, "S3: PvP opponent wait 2 at Waiting_Fighter_B_2")
+		assertAlignedToAnchor(local1.rootPart.CFrame, anchorParts.activeA, local1, "S3: PvP local active at Current_Fighter_A")
+		assertAlignedToAnchor(local2.rootPart.CFrame, anchorParts.waitA1, local2, "S3: PvP local wait 1 at Waiting_Fighter_A")
+		assertAlignedToAnchor(local3.rootPart.CFrame, anchorParts.waitA2, local3, "S3: PvP local wait 2 at Waiting_Fighter_A_2")
+		assertAlignedToAnchor(opp1.rootPart.CFrame, anchorParts.activeB, opp1, "S3: PvP opponent active at Current_Fighter_B")
+		assertAlignedToAnchor(opp2.rootPart.CFrame, anchorParts.waitB1, opp2, "S3: PvP opponent wait 1 at Waiting_Fighter_B")
+		assertAlignedToAnchor(opp3.rootPart.CFrame, anchorParts.waitB2, opp3, "S3: PvP opponent wait 2 at Waiting_Fighter_B_2")
 
 		c:onSwitchPerformed({ sideId = "B", previousFighterId = "a1", activeFighterId = "a2" })
 		task.wait(config.PLACEHOLDER_SWITCH_TWEEN_SECONDS + 0.08)
-		assertCFrameClose(local2.rootPart.CFrame, anchorParts.activeA.CFrame, TOL, ROT_DOT_MIN, "S3: PvP local switch active at Current_Fighter_A")
-		assertCFrameClose(local1.rootPart.CFrame, anchorParts.waitA1.CFrame, TOL, ROT_DOT_MIN, "S3: PvP local switch bench at Waiting_Fighter_A")
+		assertAlignedToAnchor(local2.rootPart.CFrame, anchorParts.activeA, local2, "S3: PvP local switch active at Current_Fighter_A")
+		assertAlignedToAnchor(local1.rootPart.CFrame, anchorParts.waitA1, local1, "S3: PvP local switch bench at Waiting_Fighter_A")
 
 		c:cleanupStage()
 		table.insert(scenarios, "S3: PvP reversed sides preserve visual side identity passed")

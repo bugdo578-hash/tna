@@ -84,7 +84,7 @@ local ok, runErr = pcall(function()
 		local s1 = report.scenario1
 		local own1, _, enemy1, enemy2 = startTwoEnemyBattle("K2_EdgeProbe_Scenario1", 50)
 		local enemyActiveCF = enemy1.homeCFrame
-		local enemy1BenchCF = c:computeBenchSlotCFrame(enemy1.sideIndex, enemy1.benchIndex)
+		local enemy1BenchCF = c:computeBenchSlotCFrame(enemy1.sideIndex, enemy1.benchIndex, enemy1.groundContactOffset)
 		local enemy2BenchCF = enemy2.homeCFrame
 		local s1Timeline = SkillData.JOTARO_SKILL_DATA[1]
 
@@ -371,7 +371,7 @@ local ok, runErr = pcall(function()
 		local s2a = report.scenario2_singleHit
 		local own1, _, enemy1, enemy2 = startTwoEnemyBattle("K2_EdgeProbe_Scenario2_1Hit", 50)
 		local enemyActiveCF = enemy1.homeCFrame
-		local enemy1BenchCF = c:computeBenchSlotCFrame(enemy1.sideIndex, enemy1.benchIndex)
+		local enemy1BenchCF = c:computeBenchSlotCFrame(enemy1.sideIndex, enemy1.benchIndex, enemy1.groundContactOffset)
 		local enemy2BenchCF = enemy2.homeCFrame
 		local s1Timeline = SkillData.JOTARO_SKILL_DATA[1]
 
@@ -580,7 +580,7 @@ local ok, runErr = pcall(function()
 		local s2b = report.scenario2_fiveHit
 		local own1, _, enemy1, enemy2 = startTwoEnemyBattle("K2_EdgeProbe_Scenario2_5Hit", 100)
 		local enemyActiveCF = enemy1.homeCFrame
-		local enemy1BenchCF = c:computeBenchSlotCFrame(enemy1.sideIndex, enemy1.benchIndex)
+		local enemy1BenchCF = c:computeBenchSlotCFrame(enemy1.sideIndex, enemy1.benchIndex, enemy1.groundContactOffset)
 		local enemy2BenchCF = enemy2.homeCFrame
 		local s2Timeline = SkillData.JOTARO_SKILL_DATA[2]
 
@@ -802,7 +802,7 @@ local ok, runErr = pcall(function()
 	do
 		local s3 = report.scenario3_koTweenAndGeneration
 		local _, _, enemy1, enemy2 = startTwoEnemyBattle("K2_EdgeProbe_Scenario3_KoPivot", 50)
-		local enemy1BenchCF = c:computeBenchSlotCFrame(enemy1.sideIndex, enemy1.benchIndex)
+		local enemy1BenchCF = c:computeBenchSlotCFrame(enemy1.sideIndex, enemy1.benchIndex, enemy1.groundContactOffset)
 		local enemyActiveCF = enemy1.homeCFrame
 
 		local koStateAtBenchMove = nil

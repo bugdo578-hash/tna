@@ -32,6 +32,7 @@ import { BattleRemotes } from "./BattleRemotes";
 import { CombatArenaAnchorResolver, type ResolvedArenaAnchors } from "./CombatArenaAnchors";
 import { CombatAttackFinalizer, type PendingDeathRecord } from "./CombatAttackFinalizer";
 import { CombatDamagePool, type BillboardPoolItem } from "./CombatDamagePool";
+import { resolveFighterGroundContact } from "./CombatFighterGrounding";
 import { CombatHitQueue } from "./CombatHitQueue";
 import { CombatStandMotion, type StandMotionState } from "./CombatStandMotion";
 import { CombatVfxBridge, type PreloadedVfxEntry } from "./CombatVfxBridge";
@@ -50,6 +51,7 @@ interface FighterVisualEntry {
 	readonly sideId: string;
 	readonly sideIndex: 0 | 1;
 	benchIndex: number;
+	readonly groundContactOffset: Vector3;
 	readonly model: Model;
 	readonly rootPart: BasePart;
 	readonly humanoid: Humanoid | undefined;
@@ -154,8 +156,10 @@ export class CombatController {
 			trackBattleConnection: (connection) => this.trackBattleConnection(connection),
 			untrackBattleConnection: (connection) => this.untrackBattleConnection(connection),
 			onKoAndSwitchesIdle: () => this.launchDeferredAttackIfReady(),
-			computeActiveSlotCFrame: (sideIndex) => this.computeActiveSlotCFrame(sideIndex),
-			computeBenchSlotCFrame: (sideIndex, benchSlot) => this.computeBenchSlotCFrame(sideIndex, benchSlot),
+			computeActiveSlotCFrame: (sideIndex, groundContactOffset) =>
+				this.computeActiveSlotCFrame(sideIndex, groundContactOffset),
+			computeBenchSlotCFrame: (sideIndex, benchSlot, groundContactOffset) =>
+				this.computeBenchSlotCFrame(sideIndex, benchSlot, groundContactOffset),
 			applyActiveVisualState: (entry) => this.applyActiveVisualState(entry),
 			notifyHpVisualChanged: (targetId, hp, hpMax) => this.notifyHpVisualChanged(targetId, hp, hpMax),
 			notifyDeathVisualFlushed: (payload) => this.notifyDeathVisualFlushed(payload),
@@ -301,10 +305,10 @@ export class CombatController {
 				waitingSlotCounterBySide[sideIndex] += 1;
 			}
 
-			const homeCFrame = snapshot.active
-				? this.computeActiveSlotCFrame(sideIndex)
-				: this.computeBenchSlotCFrame(sideIndex, benchSlot);
-			if (homeCFrame === undefined) {
+			const slotAnchor = snapshot.active
+				? this.arenaAnchors.getActiveAnchorPart(sideIndex)
+				: this.arenaAnchors.getBenchAnchorPart(sideIndex, benchSlot);
+			if (slotAnchor === undefined) {
 				continue;
 			}
 
@@ -317,6 +321,7 @@ export class CombatController {
 			clonedModel.Parent = folder;
 
 			const rootPart = this.resolveRootPart(clonedModel);
+			rootPart.PivotOffset = new CFrame();
 			const humanoid = clonedModel.FindFirstChildOfClass("Humanoid");
 			if (humanoid !== undefined) {
 				humanoid.MaxHealth = snapshot.hpMax;
@@ -328,6 +333,15 @@ export class CombatController {
 			const standJoint = rootPart.FindFirstChild("StandJoint");
 			const attachments = this.resolveAttachments(clonedModel, rootPart);
 			const originalTransparency = this.captureBaseTransparency(clonedModel);
+			const groundContact = resolveFighterGroundContact(clonedModel, rootPart, standModel);
+
+			const homeCFrame = snapshot.active
+				? this.computeActiveSlotCFrame(sideIndex, groundContact.offset)
+				: this.computeBenchSlotCFrame(sideIndex, benchSlot, groundContact.offset);
+			if (homeCFrame === undefined) {
+				battleCleanupStep("unplaced fighter clone", () => clonedModel.Destroy());
+				continue;
+			}
 
 			this.prepareModelPhysics(clonedModel, rootPart);
 			clonedModel.PivotTo(homeCFrame);
@@ -338,6 +352,7 @@ export class CombatController {
 				sideId: snapshot.sideId,
 				sideIndex,
 				benchIndex: benchSlot,
+				groundContactOffset: groundContact.offset,
 				model: clonedModel,
 				rootPart,
 				humanoid,
@@ -466,12 +481,16 @@ export class CombatController {
 		}
 	}
 
-	private computeActiveSlotCFrame(sideIndex: 0 | 1): CFrame | undefined {
-		return this.arenaAnchors.getActiveSlotCFrame(sideIndex);
+	private computeActiveSlotCFrame(sideIndex: 0 | 1, groundContactOffset?: Vector3): CFrame | undefined {
+		return this.arenaAnchors.getActiveSlotCFrame(sideIndex, groundContactOffset);
 	}
 
-	private computeBenchSlotCFrame(sideIndex: 0 | 1, benchSlot: number): CFrame | undefined {
-		return this.arenaAnchors.getBenchSlotCFrame(sideIndex, benchSlot);
+	private computeBenchSlotCFrame(
+		sideIndex: 0 | 1,
+		benchSlot: number,
+		groundContactOffset?: Vector3,
+	): CFrame | undefined {
+		return this.arenaAnchors.getBenchSlotCFrame(sideIndex, benchSlot, groundContactOffset);
 	}
 
 	private applyActiveVisualState(entry: FighterVisualEntry): void {

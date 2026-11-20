@@ -15,6 +15,7 @@ export interface AttackFinalizerFighter {
 	readonly targetId: string;
 	readonly sideIndex: 0 | 1;
 	benchIndex: number;
+	readonly groundContactOffset: Vector3;
 	readonly model: Model;
 	hp: number;
 	readonly hpMax: number;
@@ -39,8 +40,12 @@ export interface CombatAttackFinalizerHost<TFighter extends AttackFinalizerFight
 	readonly trackBattleConnection?: (connection: RBXScriptConnection) => void;
 	readonly untrackBattleConnection?: (connection: RBXScriptConnection) => void;
 	readonly onKoAndSwitchesIdle?: () => void;
-	readonly computeActiveSlotCFrame: (sideIndex: 0 | 1) => CFrame | undefined;
-	readonly computeBenchSlotCFrame: (sideIndex: 0 | 1, benchSlot: number) => CFrame | undefined;
+	readonly computeActiveSlotCFrame: (sideIndex: 0 | 1, groundContactOffset?: Vector3) => CFrame | undefined;
+	readonly computeBenchSlotCFrame: (
+		sideIndex: 0 | 1,
+		benchSlot: number,
+		groundContactOffset?: Vector3,
+	) => CFrame | undefined;
 	readonly applyActiveVisualState: (entry: TFighter) => void;
 	readonly notifyHpVisualChanged: (targetId: string, hp: number, hpMax: number) => void;
 	readonly notifyDeathVisualFlushed: (payload: FighterDiedPayload) => void;
@@ -304,7 +309,11 @@ export class CombatAttackFinalizer<TFighter extends AttackFinalizerFighter> {
 				this.appliedDeathSwitches.add(key);
 			}
 			previous.active = false;
-			const benchCFrame = this.host.computeBenchSlotCFrame(previous.sideIndex, previous.benchIndex);
+			const benchCFrame = this.host.computeBenchSlotCFrame(
+				previous.sideIndex,
+				previous.benchIndex,
+				previous.groundContactOffset,
+			);
 			if (benchCFrame !== undefined) {
 				previous.homeCFrame = benchCFrame;
 			}
@@ -322,7 +331,10 @@ export class CombatAttackFinalizer<TFighter extends AttackFinalizerFighter> {
 
 		if (nextActive !== undefined && !nextActive.dead) {
 			nextActive.active = true;
-			const activeCFrame = this.host.computeActiveSlotCFrame(nextActive.sideIndex);
+			const activeCFrame = this.host.computeActiveSlotCFrame(
+				nextActive.sideIndex,
+				nextActive.groundContactOffset,
+			);
 			if (activeCFrame !== undefined) {
 				nextActive.homeCFrame = activeCFrame;
 			}

@@ -4,6 +4,7 @@ import {
 	ARENA_SIDE_ANCHOR_NAMES,
 	ARENA_TEAM_FOLDER_NAMES,
 } from "../UI/CombatVisualConfig";
+import { alignFighterCFrameToAnchor } from "./CombatFighterGrounding";
 
 export interface ResolvedArenaSideAnchors {
 	readonly folder: Instance;
@@ -154,7 +155,7 @@ export class CombatArenaAnchorResolver {
 		return this.lastDiagnostics;
 	}
 
-	public getActiveSlotCFrame(sideIndex: 0 | 1): CFrame | undefined {
+	public getActiveAnchorPart(sideIndex: 0 | 1): BasePart | undefined {
 		const anchors = this.resolved;
 		if (anchors === undefined) {
 			warn(
@@ -169,10 +170,10 @@ export class CombatArenaAnchorResolver {
 			);
 			return undefined;
 		}
-		return anchor.CFrame;
+		return anchor;
 	}
 
-	public getBenchSlotCFrame(sideIndex: 0 | 1, benchSlot: number): CFrame | undefined {
+	public getBenchAnchorPart(sideIndex: 0 | 1, benchSlot: number): BasePart | undefined {
 		const anchors = this.resolved;
 		if (anchors === undefined) {
 			warn(
@@ -194,6 +195,18 @@ export class CombatArenaAnchorResolver {
 			);
 			return undefined;
 		}
-		return anchor.CFrame;
+		return anchor;
+	}
+
+	public getActiveSlotCFrame(sideIndex: 0 | 1, groundContactOffset?: Vector3): CFrame | undefined {
+		const anchor = this.getActiveAnchorPart(sideIndex);
+		if (anchor === undefined) return undefined;
+		return alignFighterCFrameToAnchor(anchor, groundContactOffset);
+	}
+
+	public getBenchSlotCFrame(sideIndex: 0 | 1, benchSlot: number, groundContactOffset?: Vector3): CFrame | undefined {
+		const anchor = this.getBenchAnchorPart(sideIndex, benchSlot);
+		if (anchor === undefined) return undefined;
+		return alignFighterCFrameToAnchor(anchor, groundContactOffset);
 	}
 }

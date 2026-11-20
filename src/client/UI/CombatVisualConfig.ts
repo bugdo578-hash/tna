@@ -11,6 +11,8 @@ export const RIG_ATTACHMENT_NAMES = {
 	Cabeca: "Cabeca",
 } as const;
 
+export const GROUND_CONTACT_ATTACHMENT_NAME = "GroundContact";
+
 export const HIT_RESULT_WAIT_SECONDS = 0.25;
 export const HIT_WAIT_POLL_INTERVAL_SECONDS = 0.02;
 
