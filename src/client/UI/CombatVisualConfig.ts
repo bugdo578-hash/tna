@@ -14,10 +14,18 @@ export const RIG_ATTACHMENT_NAMES = {
 export const HIT_RESULT_WAIT_SECONDS = 0.25;
 export const HIT_WAIT_POLL_INTERVAL_SECONDS = 0.02;
 
-export const COMBAT_STAGE_ORIGIN = new Vector3(0, 3, 45);
-export const COMBAT_ACTIVE_SEPARATION_STUDS = 10;
-export const COMBAT_BENCH_RETREAT_STUDS = 6;
-export const COMBAT_BENCH_LATERAL_SPACING_STUDS = 3.5;
+export const ARENA_BASES_NAME = "Arena_bases";
+export const ARENA_TEAM_FOLDER_NAMES = ["Time A", "Time B"] as const;
+export const ARENA_SIDE_ANCHOR_NAMES = [
+	{
+		active: "Current_Fighter_A",
+		waiting: ["Waiting_Fighter_A", "Waiting_Fighter_A_2"] as const,
+	},
+	{
+		active: "Current_Fighter_B",
+		waiting: ["Waiting_Fighter_B", "Waiting_Fighter_B_2"] as const,
+	},
+] as const;
 
 export const PLACEHOLDER_ADVANCE_FRACTION = 0.65;
 export const PLACEHOLDER_ORA_ADVANCE_FRACTION = 0.5;

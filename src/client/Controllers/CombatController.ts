@@ -3,11 +3,7 @@ import { MIN_DAMAGE } from "../../shared/Config";
 import {
 	ASSETS_FOLDER_NAME,
 	BENCH_FIGHTER_TRANSPARENCY,
-	COMBAT_ACTIVE_SEPARATION_STUDS,
-	COMBAT_BENCH_LATERAL_SPACING_STUDS,
-	COMBAT_BENCH_RETREAT_STUDS,
 	COMBAT_FEEDBACK_COLORS,
-	COMBAT_STAGE_ORIGIN,
 	DAMAGE_POPUP_DURATION_SECONDS,
 	FIGHTER_ASSETS_FOLDER_NAME,
 	HIT_RESULT_WAIT_SECONDS,
@@ -33,6 +29,7 @@ import { ANUBIS_SKILL_DATA, JOTARO_SKILL_DATA, type SkillData } from "../../shar
 import type { SkillSlot, StatusEffect } from "../../shared/TypeDefs";
 import { battleCleanupStep } from "./BattleCleanup";
 import { BattleRemotes } from "./BattleRemotes";
+import { CombatArenaAnchorResolver, type ResolvedArenaAnchors } from "./CombatArenaAnchors";
 import { CombatAttackFinalizer, type PendingDeathRecord } from "./CombatAttackFinalizer";
 import { CombatDamagePool, type BillboardPoolItem } from "./CombatDamagePool";
 import { CombatHitQueue } from "./CombatHitQueue";
@@ -52,7 +49,7 @@ interface FighterVisualEntry {
 	readonly fighterId: string;
 	readonly sideId: string;
 	readonly sideIndex: 0 | 1;
-	readonly benchIndex: number;
+	benchIndex: number;
 	readonly model: Model;
 	readonly rootPart: BasePart;
 	readonly humanoid: Humanoid | undefined;
@@ -78,6 +75,7 @@ interface ActiveAttackState {
 
 export class CombatController {
 	private readonly fightersByTargetId = new Map<string, FighterVisualEntry>();
+	private readonly arenaAnchors: CombatArenaAnchorResolver;
 	private readonly hitQueue: CombatHitQueue;
 	private readonly attackFinalizer: CombatAttackFinalizer<FighterVisualEntry>;
 	private readonly hitResultsByIndex: Map<number, HitResolvedPayload[]>;
@@ -113,7 +111,9 @@ export class CombatController {
 	public constructor(
 		private readonly vfxController?: VFXController,
 		private readonly assetsRoot: Instance = ReplicatedStorage,
+		arenaSearchRoot: Instance = Workspace,
 	) {
+		this.arenaAnchors = new CombatArenaAnchorResolver(arenaSearchRoot);
 		this.damagePool = new CombatDamagePool({
 			createBattleTween: (object, info, goal) => this.createBattleTween(object, info, goal),
 			delayBattle: (seconds, callback) => this.delayBattle(seconds, callback),
@@ -219,6 +219,16 @@ export class CombatController {
 		return this.fightersByTargetId.get(targetId)?.model;
 	}
 
+	/** Retorna as referências de `Arena_bases` resolvidas para a batalha atual, se válidas. */
+	public getResolvedArenaAnchors(): ResolvedArenaAnchors | undefined {
+		return this.arenaAnchors.getResolvedAnchors();
+	}
+
+	/** Retorna os diagnósticos da última resolução de `Arena_bases`. */
+	public getArenaAnchorDiagnostics(): readonly string[] {
+		return this.arenaAnchors.getLastDiagnostics();
+	}
+
 	/** Registra callback disparado quando o HP visual é atualizado após consumir hit/tick/KO. */
 	public onFighterHpVisualChanged(listener: (targetId: string, hp: number, hpMax: number) => void): () => void {
 		this.hpVisualListeners.add(listener);
@@ -264,7 +274,6 @@ export class CombatController {
 	private onBattleStarted(payload: BattleStartedPayload): void {
 		const generation = this.cleanupStage();
 		if (generation !== this.battleVfxGeneration) return;
-		this.battleEnded = false;
 		this.sideIds = payload.sides;
 		this.currentAttackToken += 1;
 		this.activeAttack = undefined;
@@ -273,16 +282,31 @@ export class CombatController {
 		this.hitQueue.clear();
 		this.attackFinalizer.clear();
 
+		const anchorResolution = this.arenaAnchors.resolveForBattle();
+		if (!anchorResolution.ok) {
+			return;
+		}
+		this.battleEnded = false;
+
 		const folder = new Instance("Folder");
 		folder.Name = WORKSPACE_BATTLE_FOLDER_NAME;
 		this.stageFolder = folder;
 
-		const benchCounterBySide: [number, number] = [0, 0];
+		const waitingSlotCounterBySide: [number, number] = [0, 0];
 
 		for (const snapshot of payload.fighters) {
 			const sideIndex: 0 | 1 = snapshot.sideId === payload.sides[0] ? 0 : 1;
-			const benchSlot = benchCounterBySide[sideIndex];
-			benchCounterBySide[sideIndex] += 1;
+			const benchSlot = snapshot.active ? 0 : waitingSlotCounterBySide[sideIndex];
+			if (!snapshot.active) {
+				waitingSlotCounterBySide[sideIndex] += 1;
+			}
+
+			const homeCFrame = snapshot.active
+				? this.computeActiveSlotCFrame(sideIndex)
+				: this.computeBenchSlotCFrame(sideIndex, benchSlot);
+			if (homeCFrame === undefined) {
+				continue;
+			}
 
 			const clonedModel = this.cloneFighterAsset(snapshot.fighterId);
 			if (!this.isCurrentBattle(generation)) {
@@ -304,10 +328,6 @@ export class CombatController {
 			const standJoint = rootPart.FindFirstChild("StandJoint");
 			const attachments = this.resolveAttachments(clonedModel, rootPart);
 			const originalTransparency = this.captureBaseTransparency(clonedModel);
-
-			const homeCFrame = snapshot.active
-				? this.computeActiveSlotCFrame(sideIndex)
-				: this.computeBenchSlotCFrame(sideIndex, benchSlot);
 
 			this.prepareModelPhysics(clonedModel, rootPart);
 			clonedModel.PivotTo(homeCFrame);
@@ -446,21 +466,12 @@ export class CombatController {
 		}
 	}
 
-	private computeActiveSlotCFrame(sideIndex: 0 | 1): CFrame {
-		const halfSep = COMBAT_ACTIVE_SEPARATION_STUDS * 0.5;
-		const xOffset = sideIndex === 0 ? -halfSep : halfSep;
-		const position = COMBAT_STAGE_ORIGIN.add(new Vector3(xOffset, 0, 0));
-		const lookTarget = COMBAT_STAGE_ORIGIN.add(new Vector3(-xOffset, 0, 0));
-		return CFrame.lookAt(position, lookTarget);
+	private computeActiveSlotCFrame(sideIndex: 0 | 1): CFrame | undefined {
+		return this.arenaAnchors.getActiveSlotCFrame(sideIndex);
 	}
 
-	private computeBenchSlotCFrame(sideIndex: 0 | 1, benchSlot: number): CFrame {
-		const halfSep = COMBAT_ACTIVE_SEPARATION_STUDS * 0.5 + COMBAT_BENCH_RETREAT_STUDS;
-		const xOffset = sideIndex === 0 ? -halfSep : halfSep;
-		const zOffset = (benchSlot - 1) * COMBAT_BENCH_LATERAL_SPACING_STUDS;
-		const position = COMBAT_STAGE_ORIGIN.add(new Vector3(xOffset, 0, zOffset));
-		const lookTarget = COMBAT_STAGE_ORIGIN.add(new Vector3(0, 0, zOffset));
-		return CFrame.lookAt(position, lookTarget);
+	private computeBenchSlotCFrame(sideIndex: 0 | 1, benchSlot: number): CFrame | undefined {
+		return this.arenaAnchors.getBenchSlotCFrame(sideIndex, benchSlot);
 	}
 
 	private applyActiveVisualState(entry: FighterVisualEntry): void {
@@ -902,6 +913,7 @@ export class CombatController {
 		battleCleanupStep("stage destroy", () => this.stageFolder?.Destroy());
 		this.stageFolder = undefined;
 		this.fightersByTargetId.clear();
+		this.arenaAnchors.clear();
 		this.attackFinalizer.clear();
 		this.vfxBridge.clearWorkingCopies();
 		this.vfxBridge.clearActiveVfx();

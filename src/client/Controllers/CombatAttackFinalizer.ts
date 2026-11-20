@@ -14,7 +14,7 @@ export interface PendingDeathRecord {
 export interface AttackFinalizerFighter {
 	readonly targetId: string;
 	readonly sideIndex: 0 | 1;
-	readonly benchIndex: number;
+	benchIndex: number;
 	readonly model: Model;
 	hp: number;
 	readonly hpMax: number;
@@ -39,8 +39,8 @@ export interface CombatAttackFinalizerHost<TFighter extends AttackFinalizerFight
 	readonly trackBattleConnection?: (connection: RBXScriptConnection) => void;
 	readonly untrackBattleConnection?: (connection: RBXScriptConnection) => void;
 	readonly onKoAndSwitchesIdle?: () => void;
-	readonly computeActiveSlotCFrame: (sideIndex: 0 | 1) => CFrame;
-	readonly computeBenchSlotCFrame: (sideIndex: 0 | 1, benchSlot: number) => CFrame;
+	readonly computeActiveSlotCFrame: (sideIndex: 0 | 1) => CFrame | undefined;
+	readonly computeBenchSlotCFrame: (sideIndex: 0 | 1, benchSlot: number) => CFrame | undefined;
 	readonly applyActiveVisualState: (entry: TFighter) => void;
 	readonly notifyHpVisualChanged: (targetId: string, hp: number, hpMax: number) => void;
 	readonly notifyDeathVisualFlushed: (payload: FighterDiedPayload) => void;
@@ -288,6 +288,10 @@ export class CombatAttackFinalizer<TFighter extends AttackFinalizerFighter> {
 		const previous = this.host.getFighter(payload.previousFighterId);
 		const nextActive = this.host.getFighter(payload.activeFighterId);
 
+		if (previous !== undefined && nextActive !== undefined && !nextActive.dead) {
+			previous.benchIndex = nextActive.benchIndex;
+		}
+
 		if (previous !== undefined) {
 			const activeKoTween = this.activeKoTweens.get(previous.targetId);
 			if (activeKoTween !== undefined) {
@@ -300,22 +304,32 @@ export class CombatAttackFinalizer<TFighter extends AttackFinalizerFighter> {
 				this.appliedDeathSwitches.add(key);
 			}
 			previous.active = false;
-			previous.homeCFrame = this.host.computeBenchSlotCFrame(previous.sideIndex, previous.benchIndex);
+			const benchCFrame = this.host.computeBenchSlotCFrame(previous.sideIndex, previous.benchIndex);
+			if (benchCFrame !== undefined) {
+				previous.homeCFrame = benchCFrame;
+			}
 			this.host.applyActiveVisualState(previous);
-			if (previous.dead) {
-				if (previous.model.Parent !== undefined) {
-					previous.model.PivotTo(previous.homeCFrame);
+			if (benchCFrame !== undefined) {
+				if (previous.dead) {
+					if (previous.model.Parent !== undefined) {
+						previous.model.PivotTo(previous.homeCFrame);
+					}
+				} else {
+					this.host.tweenModelTo(previous.model, previous.homeCFrame, PLACEHOLDER_SWITCH_TWEEN_SECONDS);
 				}
-			} else {
-				this.host.tweenModelTo(previous.model, previous.homeCFrame, PLACEHOLDER_SWITCH_TWEEN_SECONDS);
 			}
 		}
 
 		if (nextActive !== undefined && !nextActive.dead) {
 			nextActive.active = true;
-			nextActive.homeCFrame = this.host.computeActiveSlotCFrame(nextActive.sideIndex);
+			const activeCFrame = this.host.computeActiveSlotCFrame(nextActive.sideIndex);
+			if (activeCFrame !== undefined) {
+				nextActive.homeCFrame = activeCFrame;
+			}
 			this.host.applyActiveVisualState(nextActive);
-			this.host.tweenModelTo(nextActive.model, nextActive.homeCFrame, PLACEHOLDER_SWITCH_TWEEN_SECONDS);
+			if (activeCFrame !== undefined) {
+				this.host.tweenModelTo(nextActive.model, nextActive.homeCFrame, PLACEHOLDER_SWITCH_TWEEN_SECONDS);
+			}
 		}
 	}
 }
