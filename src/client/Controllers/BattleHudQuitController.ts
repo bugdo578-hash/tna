@@ -1,5 +1,10 @@
 import type { BattleEndedPayload } from "../../shared/Remotes";
-import { QUIT_RETRY_INTERVAL_SECONDS, QUIT_RETRY_MAX_ATTEMPTS, UITheme } from "../UI/UITheme";
+import {
+	QUIT_FINAL_TIMEOUT_SECONDS,
+	QUIT_RETRY_INTERVAL_SECONDS,
+	QUIT_RETRY_MAX_ATTEMPTS,
+	UITheme,
+} from "../UI/UITheme";
 import { BattleRemotes } from "./BattleRemotes";
 
 export interface BattleHudQuitHost {
@@ -19,6 +24,7 @@ export class BattleHudQuitController {
 	private quitRequested = false;
 	private quitRetryTimer: thread | undefined;
 	private quitRetryToken = 0;
+	private battleGeneration = 0;
 	private quitConfirmPending = false;
 	private quitConfirmToken = 0;
 	private quitConfirmTimer: thread | undefined;
@@ -76,13 +82,14 @@ export class BattleHudQuitController {
 		this.quitRequested = true;
 		this.quitRetryToken += 1;
 		const token = this.quitRetryToken;
+		const generation = this.battleGeneration;
 		const screenGui = this.host.getScreenGui();
 		if (screenGui !== undefined) screenGui.Enabled = false;
 		const quitStatusLabel = this.host.getQuitStatusLabel();
 		if (quitStatusLabel !== undefined) quitStatusLabel.Visible = true;
 		const resultScreenGui = this.host.getResultScreenGui();
 		if (resultScreenGui !== undefined) resultScreenGui.Enabled = true;
-		this.sendQuitRequest(1, token);
+		this.sendQuitRequest(1, token, generation);
 	}
 
 	public cancelQuitRetry(): void {
@@ -110,6 +117,7 @@ export class BattleHudQuitController {
 	}
 
 	public resetForNewBattle(): void {
+		this.battleGeneration += 1;
 		this.resetQuitConfirmState();
 		this.cancelQuitRetry();
 		const resultScreenGui = this.host.getResultScreenGui();
@@ -128,8 +136,16 @@ export class BattleHudQuitController {
 		);
 	}
 
-	private sendQuitRequest(attempt: number, token: number): void {
-		if (!this.quitRequested || this.quitRetryToken !== token || !this.host.isBattleActive()) return;
+	private sendQuitRequest(attempt: number, token: number, generation: number): void {
+		if (
+			!this.quitRequested ||
+			this.quitRetryToken !== token ||
+			this.battleGeneration !== generation ||
+			!this.host.isBattleActive() ||
+			this.host.isBattleEnded()
+		) {
+			return;
+		}
 		if (this.quitRetryTimer !== undefined) {
 			task.cancel(this.quitRetryTimer);
 			this.quitRetryTimer = undefined;
@@ -137,10 +153,33 @@ export class BattleHudQuitController {
 		if (attempt < QUIT_RETRY_MAX_ATTEMPTS) {
 			this.quitRetryTimer = task.delay(QUIT_RETRY_INTERVAL_SECONDS, () => {
 				this.quitRetryTimer = undefined;
-				if (this.quitRetryToken !== token) return;
-				this.sendQuitRequest(attempt + 1, token);
+				if (this.quitRetryToken !== token || this.battleGeneration !== generation) return;
+				this.sendQuitRequest(attempt + 1, token, generation);
+			});
+		} else {
+			this.quitRetryTimer = task.delay(QUIT_FINAL_TIMEOUT_SECONDS, () => {
+				this.quitRetryTimer = undefined;
+				this.recoverFromQuitTimeout(token, generation);
 			});
 		}
 		BattleRemotes.requestQuit.FireServer();
+	}
+
+	private recoverFromQuitTimeout(token: number, generation: number): void {
+		if (
+			!this.quitRequested ||
+			this.quitRetryToken !== token ||
+			this.battleGeneration !== generation ||
+			!this.host.isBattleActive() ||
+			this.host.isBattleEnded()
+		) {
+			return;
+		}
+		this.cancelQuitRetry();
+		this.resetQuitConfirmState();
+		const resultScreenGui = this.host.getResultScreenGui();
+		if (resultScreenGui !== undefined) resultScreenGui.Enabled = false;
+		const screenGui = this.host.getScreenGui();
+		if (screenGui !== undefined) screenGui.Enabled = true;
 	}
 }

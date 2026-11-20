@@ -639,6 +639,8 @@ export class BattleHUD {
 		if (this.isPaused && os.clock() - this.lastPauseToggleClock > 0.35) {
 			this.isPaused = false;
 			this.refreshPauseVisuals();
+			this.refreshSkillButtons();
+			this.refreshTagSlots();
 		}
 	}
 

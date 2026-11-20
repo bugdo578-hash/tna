@@ -132,10 +132,23 @@ export class HudSessionControls {
 		backdrop.Size = UITheme.Layout.FullSize;
 		backdrop.BackgroundColor3 = UITheme.Colors.OverlayBackdrop;
 		backdrop.BackgroundTransparency = UITheme.Transparency.ModalBackdrop;
+		backdrop.Active = true;
 		backdrop.Visible = false;
 		backdrop.ZIndex = 20;
 		backdrop.Parent = parent;
 		this.pauseOverlay = backdrop;
+
+		const inputBlocker = new Instance("TextButton");
+		inputBlocker.Name = "InputBlocker";
+		inputBlocker.Position = UITheme.Layout.OriginPosition;
+		inputBlocker.Size = UITheme.Layout.FullSize;
+		inputBlocker.BackgroundTransparency = UITheme.Transparency.Hidden;
+		inputBlocker.Text = "";
+		inputBlocker.AutoButtonColor = false;
+		inputBlocker.Active = true;
+		inputBlocker.Selectable = false;
+		inputBlocker.ZIndex = 20;
+		inputBlocker.Parent = backdrop;
 
 		const card = new Instance("Frame");
 		card.Name = "PauseModalCard";

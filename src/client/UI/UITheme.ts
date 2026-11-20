@@ -9,6 +9,7 @@ import type { AllocationReason, ChallengeStatus, NpcBattleNoticeReason, Purchase
 // Provisórios: a primeira tentativa conta no total e as demais aguardam este intervalo.
 export const QUIT_RETRY_INTERVAL_SECONDS = 0.35;
 export const QUIT_RETRY_MAX_ATTEMPTS = 8;
+export const QUIT_FINAL_TIMEOUT_SECONDS = 0.75;
 
 export const UITheme = {
 	ResultScreenGuiName: "BattleResult",
