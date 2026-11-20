@@ -29,6 +29,7 @@ import {
 	validatePlayerSaveData,
 	type DataStoreLike,
 	type PlayerSaveData,
+	type SavePlayerResult,
 	type SchemaMigrationFn,
 } from "../../Services/PlayerDataValidation";
 import { ProgressionService } from "../../Services/ProgressionService";
@@ -2243,4 +2244,160 @@ export function validateSetRetryShutdownBudget(): void {
 	assertInvariant(!result.ok && attempts <= 3 && waits.size() <= 2 && waited <= 3,
 		`SetAsync limita backoff ao prazo do BindToClose (tentativas=${attempts}, waits=${waits.size()}, primeiro=${waits[0]})`);
 	print("SET_RETRY_SHUTDOWN_BUDGET_PASSED");
+}
+
+export function validateSlowAutosaveLogoutRetry(): void {
+	const backing = new InMemoryDataStore();
+	const progression = new ProgressionService();
+	const simulatedNow = 2000;
+	let inFlightUpdateAsync = 0;
+	let maxConcurrentUpdateAsync = 0;
+	let updateAsyncCalls = 0;
+	let yieldNextUpdate = false;
+	const waits: number[] = [];
+	const waitThreads: thread[] = [];
+	let service!: PlayerDataService;
+
+	const store: DataStoreLike = {
+		UpdateAsync(key, transform) {
+			inFlightUpdateAsync += 1;
+			if (inFlightUpdateAsync > maxConcurrentUpdateAsync) {
+				maxConcurrentUpdateAsync = inFlightUpdateAsync;
+			}
+			updateAsyncCalls += 1;
+			assertInvariant(inFlightUpdateAsync === 1, "não deve executar UpdateAsync concorrente");
+			if (yieldNextUpdate) {
+				yieldNextUpdate = false;
+				coroutine.yield();
+			}
+			const [ok, resultOrErr] = pcall(() => backing.UpdateAsync(key, transform));
+			inFlightUpdateAsync -= 1;
+			if (!ok) error(resultOrErr);
+			return resultOrErr;
+		},
+	};
+
+	service = new PlayerDataService(progression, {
+		dataStore: store,
+		serverId: "Server_SlowAutosave",
+		now: () => simulatedNow,
+		waitFn: (seconds) => {
+			waits.push(seconds);
+			waitThreads.push(coroutine.running());
+			coroutine.yield();
+		},
+		warnFn: () => {},
+		disableStudioAutoFallbackOnInjectedStore: true,
+	});
+
+	const player = { Parent: Players, Name: "SlowAutosavePlayer", UserId: 991050 } as unknown as Player;
+	assertInvariant(service.loadPlayer(player).ok, "deve carregar jogador para teste de autosave lento");
+	service.addTinyes(player, 100);
+
+	yieldNextUpdate = true;
+	let autosaveResult: SavePlayerResult | undefined;
+	const autosaveThread = coroutine.create(() => {
+		autosaveResult = service.savePlayer(player, false);
+	});
+	const [autosaveStartOk, autosaveStartErr] = coroutine.resume(autosaveThread);
+	assertInvariant(autosaveStartOk, `falha ao iniciar autosave lento: ${tostring(autosaveStartErr)}`);
+	assertInvariant(
+		coroutine.status(autosaveThread) === "suspended" && inFlightUpdateAsync === 1,
+		"autosave lento deve permanecer em UpdateAsync durante o logout",
+	);
+
+	// Muta dados enquanto o autosave antigo já capturou snapshot (+100) e está em voo
+	service.addTinyes(player, 250);
+
+	let logoutResult: SavePlayerResult | undefined;
+	const logoutThread = coroutine.create(() => {
+		logoutResult = service.handlePlayerRemoving(player);
+	});
+	const [logoutStartOk, logoutStartErr] = coroutine.resume(logoutThread);
+	assertInvariant(logoutStartOk, `falha ao iniciar logout durante autosave lento: ${tostring(logoutStartErr)}`);
+
+	let pollSteps = 0;
+	while (coroutine.status(logoutThread) === "suspended") {
+		pollSteps += 1;
+		assertInvariant(pollSteps <= 500, "espera inicial do logout não deve entrar em loop infinito");
+		const [resOk, resErr] = coroutine.resume(logoutThread);
+		assertInvariant(resOk, `erro ao avançar timeout do logout: ${tostring(resErr)}`);
+	}
+
+	assertInvariant(
+		logoutResult !== undefined &&
+			!logoutResult.ok &&
+			logoutResult.status === "RETRY_SCHEDULED" &&
+			service.isSessionLoaded(player) &&
+			service.hasPendingRetrySave(player),
+		"logout durante autosave lento além de SAVE_WAIT_TIMEOUT_SECONDS deve agendar retry em background",
+	);
+
+	// O último wait registrado antes de logoutThread encerrar foi o 1º wait da task de background
+	const bgThread = waitThreads[waitThreads.size() - 1];
+	assertInvariant(
+		bgThread !== undefined &&
+			bgThread !== logoutThread &&
+			coroutine.status(bgThread) === "suspended" &&
+			math.abs((waits[waits.size() - 1] ?? -1) - DATASTORE_RETRY_BASE_DELAY_SECONDS) <= FLOAT_TOLERANCE,
+		"worker de retry em background deve aguardar backoff inicial",
+	);
+
+	// Simula 2 despertares do worker enquanto o autosave lento ainda não terminou (saving === true)
+	for (const expectedNextDelay of [
+		DATASTORE_RETRY_BASE_DELAY_SECONDS * DATASTORE_RETRY_BACKOFF_FACTOR,
+		DATASTORE_RETRY_BASE_DELAY_SECONDS * DATASTORE_RETRY_BACKOFF_FACTOR * DATASTORE_RETRY_BACKOFF_FACTOR,
+	]) {
+		const [bgOk, bgErr] = coroutine.resume(bgThread);
+		assertInvariant(bgOk, `erro no worker aguardando autosave: ${tostring(bgErr)}`);
+		assertInvariant(
+			coroutine.status(bgThread) === "suspended" &&
+				inFlightUpdateAsync === 1 &&
+				updateAsyncCalls === 2 &&
+				math.abs((waits[waits.size() - 1] ?? -1) - expectedNextDelay) <= FLOAT_TOLERANCE,
+			`worker não deve encerrar nem disparar UpdateAsync concorrente enquanto saving=true (status=${coroutine.status(bgThread)}, ultimoWait=${waits[waits.size() - 1]})`,
+		);
+	}
+
+	// Agora o autosave lento conclui com o snapshot antigo (+100) e lock ainda ativo
+	const [autosaveEndOk, autosaveEndErr] = coroutine.resume(autosaveThread);
+	assertInvariant(autosaveEndOk, `erro ao concluir autosave lento: ${tostring(autosaveEndErr)}`);
+	assertInvariant(
+		autosaveResult !== undefined &&
+			autosaveResult.ok &&
+			autosaveResult.status === "SAVED" &&
+			inFlightUpdateAsync === 0 &&
+			service.isSessionLoaded(player) &&
+			service.hasPendingRetrySave(player),
+		"término do autosave lento com closing=true deve manter retry pendente até releaseLock=true",
+	);
+
+	// Próximo despertar do worker encontra saving=false e executa save final com releaseLock=true
+	const [bgFinalOk, bgFinalErr] = coroutine.resume(bgThread);
+	assertInvariant(bgFinalOk, `erro ao finalizar retry após autosave: ${tostring(bgFinalErr)}`);
+	assertInvariant(
+		coroutine.status(bgThread) === "dead" &&
+			maxConcurrentUpdateAsync === 1 &&
+			updateAsyncCalls === 3 &&
+			!service.isSessionLoaded(player) &&
+			!service.hasPendingRetrySave(player) &&
+			progression.getPlayerData(player) === undefined,
+		"retry após autosave deve concluir sem UpdateAsync concorrente e remover sessão",
+	);
+
+	const finalStored = backing.peekRaw(service.getPlayerKey(991050)) as PlayerSaveData | undefined;
+	assertInvariant(
+		finalStored !== undefined &&
+			finalStored.tinyes === INITIAL_TINYES + 350 &&
+			finalStored.sessionLock === undefined,
+		`save final deve preservar dados recentes (+350 Tinyes) e liberar sessionLock (tinyes=${finalStored?.tinyes}, lock=${tostring(finalStored?.sessionLock)})`,
+	);
+
+	service.autosaveAllPlayers();
+	const storedAfterAutosave = backing.peekRaw(service.getPlayerKey(991050)) as PlayerSaveData | undefined;
+	assertInvariant(
+		storedAfterAutosave !== undefined && storedAfterAutosave.sessionLock === undefined,
+		"autosave posterior não deve recriar sessionLock após remoção da sessão",
+	);
+	print("SLOW_AUTOSAVE_LOGOUT_RETRY_PASSED");
 }

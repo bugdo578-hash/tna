@@ -316,18 +316,30 @@ export class PlayerDataService {
 		return true;
 	}
 
+	private getPvpPairState(pvp: PvpSaveData, opponentUserId: number): {
+		readonly key: string;
+		readonly entry: { readonly count: number; readonly windowStart: number } | undefined;
+		readonly blocked: boolean;
+	} {
+		const key = tostring(opponentUserId);
+		const entry = pvp.pairs[key];
+		let entries = 0;
+		for (const _ of pairs(pvp.pairs)) entries++;
+		// Nunca expulsa janela ativa: isso permitiria contornar o limite alternando oponentes.
+		const blocked =
+			(entry !== undefined && entry.count >= PVP_PAIR_MAX_REWARDED_WINS) ||
+			(entry === undefined && entries >= PVP_MAX_PAIR_ENTRIES);
+		return { key, entry, blocked };
+	}
+
 	/** Commit unico em memoria: saldo, janela e teto sem callback/yield. Notificacao ocorre depois. */
 	public awardPvpWin(player: Player, opponentUserId: number, requested: number): { amount: number; blockedReason?: "limite_par" | "limite_diario" } {
 		const session = this.sessions.get(player);
 		if (session === undefined || session.closing || player.Parent !== Players || !isNonNegativeInteger(requested) || requested === 0) return { amount: 0 };
 		const now = this.now();
 		const pvp = cleanPvpData(session.pvp, now);
-		const key = tostring(opponentUserId);
-		const entry = pvp.pairs[key];
-		let entries = 0;
-		for (const _ of pairs(pvp.pairs)) entries++;
-		// Nunca expulsa janela ativa: isso permitiria contornar o limite alternando oponentes.
-		if ((entry !== undefined && entry.count >= PVP_PAIR_MAX_REWARDED_WINS) || (entry === undefined && entries >= PVP_MAX_PAIR_ENTRIES)) return { amount: 0, blockedReason: "limite_par" };
+		const { key, entry, blocked } = this.getPvpPairState(pvp, opponentUserId);
+		if (blocked) return { amount: 0, blockedReason: "limite_par" };
 		const remaining = PVP_DAILY_TINYES_CAP - pvp.dailyTinyes;
 		if (remaining <= 0) return { amount: 0, blockedReason: "limite_diario" };
 		const amount = math.min(requested, remaining, MAX_SAVED_NUMBER - session.tinyes);
@@ -338,6 +350,20 @@ export class PlayerDataService {
 		session.tinyes += amount;
 		this.updateLastValidSnapshotFromSession(session);
 		return { amount, blockedReason: amount < requested && remaining < requested ? "limite_diario" : undefined };
+	}
+
+	/** Registra uma vitória elegível no limite por par quando apenas XP foi concedido (sem Tinyes). */
+	public recordPvpPairWin(player: Player, opponentUserId: number): boolean {
+		const session = this.sessions.get(player);
+		if (session === undefined || session.closing || player.Parent !== Players) return false;
+		const now = this.now();
+		const pvp = cleanPvpData(session.pvp, now);
+		const { key, entry, blocked } = this.getPvpPairState(pvp, opponentUserId);
+		if (blocked) return false;
+		pvp.pairs[key] = { count: (entry?.count ?? 0) + 1, windowStart: entry?.windowStart ?? now };
+		session.pvp = pvp;
+		this.updateLastValidSnapshotFromSession(session);
+		return true;
 	}
 
 	public getTinyes(player: Player): number | undefined {
@@ -1314,6 +1340,9 @@ export class PlayerDataService {
 		task.spawn(() => {
 			const [taskOk, taskErr] = pcall(() => {
 				let retryDelay = this.retryBaseDelaySeconds;
+				let savingWaitCycles = 0;
+				let savingWaitedSeconds = 0;
+				const maxSavingWaitCycles = math.max(8, this.maxRetries + 4);
 				while (this.started && !this.shuttingDown) {
 					const currentSession = this.sessions.get(player);
 					if (currentSession === undefined || currentSession !== session || !currentSession.pendingRetrySave) {
@@ -1330,8 +1359,25 @@ export class PlayerDataService {
 						break;
 					}
 					if (activeSession.saving) {
-						break;
+						savingWaitCycles += 1;
+						savingWaitedSeconds += retryDelay;
+						if (
+							savingWaitCycles >= maxSavingWaitCycles ||
+							(this.lockExpirationSeconds > 0 && savingWaitedSeconds >= this.lockExpirationSeconds)
+						) {
+							this.warnFn(
+								`[PlayerDataService] Limite de espera por save em andamento excedido no retry em background para ${activeSession.key}.`,
+							);
+							break;
+						}
+						retryDelay = math.min(
+							retryDelay * this.retryBackoffFactor,
+							this.logoutRetryMaxBackoffSeconds,
+						);
+						continue;
 					}
+					savingWaitCycles = 0;
+					savingWaitedSeconds = 0;
 					const releaseLock = activeSession.closing;
 					if (!releaseLock && player.Parent !== Players) break;
 					const [saveOk, retryResultOrErr] = pcall(() => this.savePlayer(player, releaseLock));
@@ -1350,8 +1396,11 @@ export class PlayerDataService {
 								retryResult.status === "NO_SESSION"
 							) {
 								session.pendingRetrySave = false;
-								this.retrySaveQueue.delete(player);
-								if (this.sessions.get(player) === session) {
+								const latestSession = this.sessions.get(player);
+								if (latestSession === undefined || latestSession === session) {
+									this.retrySaveQueue.delete(player);
+								}
+								if (latestSession === session) {
 									this.sessions.delete(player);
 									this.progressionService.forgetPlayer(player);
 								}

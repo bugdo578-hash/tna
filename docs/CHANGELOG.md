@@ -2,6 +2,12 @@
 
 Registro conciso de mudanças a partir de `2026-11-14` (ordem cronológica reversa). Histórico anterior a `2026-11-14` (base inicial T1–T5, T7.1, T7.2 e primeira correção de DataStore/autosave): [CHANGELOG_ARCHIVE.md](CHANGELOG_ARCHIVE.md). Estado operacional atual: [HANDOFF.md](HANDOFF.md).
 
+## 2026-11-20 — Lote J1: Retry de logout e anti-farm PvP (C-03 e C-02)
+
+- **C-03 (`src/server/Services/PlayerDataService.ts`):** em `enqueueBackgroundRetrySave()`, substituído o `break` quando `activeSession.saving === true` por espera controlada com backoff progressivo (`retryDelay` até `logoutRetryMaxBackoffSeconds`), limites contra loop infinito (`maxSavingWaitCycles` e `lockExpirationSeconds`), checagem de identidade da sessão, `BindToClose` (`!this.started || this.shuttingDown`) e propriedade do lock, evitando `UpdateAsync` concorrentes e concluindo o save final com `releaseLock = true` após autosave lento.
+- **C-02 (`src/server/Services/PlayerDataService.ts`, `src/server/Services/TinyesService.ts`, `src/server/Services/BattleRewardService.ts`):** extraído `getPvpPairState()` e adicionado `recordPvpPairWin()` para contabilizar a vitória no limite por par quando apenas XP útil é concedido (ex.: Tinyes no teto diário), preservando `rewardBlockedReason = "limite_diario"` nas duas primeiras vitórias elegíveis, bloqueando a terceira com `"limite_par"` sem XP, sem contagem dupla quando ambos os prêmios são pagos, sem consumir oportunidade quando nenhuma recompensa é elegível e mantendo PvE inalterado.
+- **Regressões e validação:** adicionados `validateSlowAutosaveLogoutRetry` (`SLOW_AUTOSAVE_LOGOUT_RETRY_PASSED`) em `src/server/Dev/tests/persistenceTests.ts` e `validatePvpPairAntiFarmWithTinyesCap` (`PVP_PAIR_ANTIFARM_TINYES_CAP_PASSED`) em `src/server/Dev/tests/pvpTests.ts`, registrados em `BattleSimulator.ts`. Validados com falha antes e sucesso depois: `npx.cmd rbxtsc` (0 erros), `git diff --check`, `tools/check-structure.ps1` e `BattleSimulator.runSimulation()` em Play no Studio (`SIMULATION_ALL_PASSED`, 43 marcadores, 0 erros; dummy `49,7% / 298,98275s`, Jotaro vs Anubis `68% / 67,5943s`).
+
 ## 2026-11-20 — Padronização global da fonte Finger Paint (`12187375716`)
 
 - **Fonte centralizada (`src/client/UI/UITheme.ts`):** adicionada `export const GAME_FONT = Font.fromId(12187375716)` como fonte única de verdade (sem repetir o Asset ID nos demais módulos).

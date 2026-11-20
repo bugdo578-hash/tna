@@ -95,7 +95,16 @@ export class BattleRewardService {
 						if (reward.blockedReason !== "limite_par") {
 							const remainingXp = this.tinyesService.getRemainingPvpXp(player);
 							if (remainingXp === 0) result.rewardBlockedReason = "limite_diario_xp";
-							else result.xpRewards = awardXp(session, participant, remainingXp);
+							else {
+								const [xpOk, xpResOrErr] = pcall(() => awardXp(session, participant, remainingXp));
+								const gainedFromReturn = xpOk && xpResOrErr !== undefined && xpResOrErr.some((xp) => xp.xpGained > 0);
+								const gainedFromDailyCounter = this.tinyesService.getRemainingPvpXp(player) < remainingXp;
+								if (reward.amount === 0 && (gainedFromReturn || gainedFromDailyCounter)) {
+									this.tinyesService.recordPvpPairWin?.(player, opponent.player.UserId);
+								}
+								if (!xpOk) error(xpResOrErr);
+								result.xpRewards = xpResOrErr;
+							}
 						}
 						pcall(() => this.tinyesService?.syncBalance(player));
 					}

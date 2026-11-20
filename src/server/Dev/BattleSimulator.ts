@@ -22,6 +22,7 @@ import {
 	validatePlayerDataPersistence,
 	validateSessionTokensAndConfirmations,
 	validateSetRetryShutdownBudget,
+	validateSlowAutosaveLogoutRetry,
 } from "./tests/persistenceTests";
 import {
 	validateInventoryTestBattles,
@@ -32,7 +33,7 @@ import {
 	validateTinyesEconomy,
 	validateXpCurveAndTeamDistribution,
 } from "./tests/progressionTests";
-import { validatePvpBattles, validatePvpDailyXpAndMinimumFight } from "./tests/pvpTests";
+import { validatePvpBattles, validatePvpDailyXpAndMinimumFight, validatePvpPairAntiFarmWithTinyesCap } from "./tests/pvpTests";
 import {
 	validatePurchaseAndAllocationResults,
 	validateShop,
@@ -48,10 +49,11 @@ import {
 export { validateDayNightCycle } from "./tests/coreTests";
 export { validateNpcBattles, validateNpcRematchCooldown } from "./tests/npcTests";
 export { validatePostBattleXp, validateTinyesEconomy } from "./tests/progressionTests";
-export { validatePvpBattles, validatePvpDailyXpAndMinimumFight } from "./tests/pvpTests";
+export { validatePvpBattles, validatePvpDailyXpAndMinimumFight, validatePvpPairAntiFarmWithTinyesCap } from "./tests/pvpTests";
 export { validatePurchaseAndAllocationResults, validateShop } from "./tests/shopTests";
 export { validateBattleTeardownLifecycle } from "./tests/teardownTests";
 export { validateQuitRequestRateLimit } from "./tests/teardownTests";
+export { validateSlowAutosaveLogoutRetry } from "./tests/persistenceTests";
 
 export function runSimulation(): void {
 	validateMultiHitDeath();
@@ -62,6 +64,7 @@ export function runSimulation(): void {
 	validateNpcRematchCooldown();
 	validatePvpBattles();
 	validatePvpDailyXpAndMinimumFight();
+	validatePvpPairAntiFarmWithTinyesCap();
 	validatePurchaseAndAllocationResults();
 	validateShopSynchronization();
 	validateShop();
@@ -71,6 +74,7 @@ export function runSimulation(): void {
 	validateInventoryTestBattles();
 	validateTinyesEconomy();
 	validateSetRetryShutdownBudget();
+	validateSlowAutosaveLogoutRetry();
 	validateLoadGuardsAndInvalidLock();
 	validateLeavingDuringLoad();
 	validateCorruptionBackupAndInventory();

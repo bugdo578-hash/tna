@@ -401,3 +401,207 @@ export function validatePvpBattles(): void {
 	a.character.Destroy(); b.character.Destroy(); a.removing.Destroy(); b.removing.Destroy();
 	print("PVP_INVITES_AND_PERSISTENCE_PASSED");
 }
+
+/** Anti-farm PvP: teto diário de Tinyes não contorna limite por par para XP; sem contagem dupla, sem gasto quando inelegível e PvE inalterado. */
+export function validatePvpPairAntiFarmWithTinyesCap(): void {
+	let now = PVP_DAY_SECONDS + 500;
+	const store = new InMemoryDataStore();
+	const progression = new ProgressionService();
+	const data = new PlayerDataService(progression, {
+		dataStore: store,
+		serverId: "PairAntiFarm",
+		now: () => now,
+		waitFn: () => {},
+		warnFn: () => {},
+		disableStudioAutoFallbackOnInjectedStore: true,
+	});
+	const tinyes = new TinyesService(data, () => {});
+	const ends = new Map<Player, BattleEndedPayload>();
+	const sessions = new BattleSessionService(
+		createSurgicalMockAdapter({ onBattleEnded: (player, payload) => ends.set(player, payload) }),
+		tinyes,
+		progression,
+	);
+
+	const a = { Parent: Players, Name: "AntiFarmWinner", UserId: 995001 } as unknown as Player;
+	const b = { Parent: Players, Name: "AntiFarmOppB", UserId: 995002 } as unknown as Player;
+	const c = { Parent: Players, Name: "AntiFarmOppC", UserId: 995003 } as unknown as Player;
+	const d = { Parent: Players, Name: "AntiFarmOppD", UserId: 995004 } as unknown as Player;
+	const e = { Parent: Players, Name: "AntiFarmOppE", UserId: 995005 } as unknown as Player;
+	const f = { Parent: Players, Name: "AntiFarmOppF", UserId: 995006 } as unknown as Player;
+	for (const p of [a, b, c, d, e, f]) {
+		assertInvariant(data.loadPlayer(p).ok, `load ${p.Name}`);
+	}
+
+	const original = data.getPlayerSaveSnapshot(a)!;
+	const setTeamLevel = (level: number) => {
+		const inv = [0, 1, 2].map((index) => ({
+			...original.inventory[0],
+			itemUuid: `antifarm-${index}`,
+			level,
+			xp: 0,
+		}));
+		progression.loadValidatedPlayerData(a, { version: PLAYER_DATA_SCHEMA_VERSION, inventory: inv });
+		data.setActiveTeam(a, inv.map((item) => item.itemUuid));
+	};
+	setTeamLevel(1);
+
+	const roll = { t: 0.5, cost: 1.875, mult: 1 };
+	const timeline = {
+		prepareTime: 0.1,
+		hits: [0.1, 0.2, 0.3].map((time) => ({ time, damageShare: 1, followUp: false })),
+		returnTime: 0.1,
+		dodgeReturnTime: 0.1,
+	};
+	const makeFighter = (item: FighterInventoryItem) =>
+		new Fighter({
+			itemUuid: item.itemUuid,
+			fighterId: item.fighterId,
+			hp: 100,
+			hpMax: 100,
+			stats: { hp: 100, atk: 50, crit: 0, dodge: 0 },
+			level: item.level,
+			className: "Fury",
+			slots: [roll, roll, roll],
+			skillData: [timeline, timeline, timeline],
+			currentAtbSpeed: 0,
+		});
+
+	const runWin = (opponent?: Player): BattleEndedPayload => {
+		ends.delete(a);
+		const snap = data.getPlayerSaveSnapshot(a)!;
+		const own = new BattleSide(
+			[makeFighter(snap.inventory[0]), makeFighter(snap.inventory[1]), makeFighter(snap.inventory[2])],
+			() => 0.5,
+		);
+		const enemy = new BattleSide(
+			[makeFighter(original.inventory[0]), makeFighter(original.inventory[0]), makeFighter(original.inventory[0])],
+			() => 0.5,
+		);
+		const mode = opponent === undefined ? "PVE" : "PVP";
+		assertInvariant(sessions.createSession(a, opponent, own, enemy, () => 0.5, mode), `cria sessao ${mode}`);
+		const record = (sessions as unknown as { activeSessions: { battle: BattleService; resolvedHits: number }[] }).activeSessions[0];
+		record.resolvedHits = 3;
+		record.battle.events.battleEnd.fire(own);
+		sessions.step(0);
+		return ends.get(a)!;
+	};
+
+	const getLivePvp = () =>
+		(data as unknown as { sessions: Map<Player, { pvp: NonNullable<PlayerSaveData["pvp"]> }> }).sessions.get(a)!.pvp;
+	getLivePvp().dailyTinyes = PVP_DAILY_TINYES_CAP;
+	getLivePvp().dailyXp = 0;
+
+	// 1) Teto diário de Tinyes atingido: 2 primeiras vitórias contra B concedem XP e contam no par; 3ª retorna limite_par sem XP
+	const win1B = runWin(b);
+	const xpAfter1 = data.getPlayerSaveSnapshot(a)!.pvp!.dailyXp;
+	assertInvariant(
+		win1B.tinyesReward === 0 &&
+			win1B.rewardBlockedReason === "limite_diario" &&
+			win1B.xpRewards !== undefined &&
+			xpAfter1 > 0 &&
+			data.getPlayerSaveSnapshot(a)!.pvp!.pairs[tostring(b.UserId)]?.count === 1,
+		"1ª vitória contra B no teto de Tinyes concede XP e incrementa par para 1",
+	);
+
+	const win2B = runWin(b);
+	const xpAfter2 = data.getPlayerSaveSnapshot(a)!.pvp!.dailyXp;
+	assertInvariant(
+		win2B.tinyesReward === 0 &&
+			win2B.rewardBlockedReason === "limite_diario" &&
+			win2B.xpRewards !== undefined &&
+			xpAfter2 > xpAfter1 &&
+			data.getPlayerSaveSnapshot(a)!.pvp!.pairs[tostring(b.UserId)]?.count === 2,
+		"2ª vitória contra B no teto de Tinyes concede XP e incrementa par para 2",
+	);
+
+	const win3B = runWin(b);
+	const xpAfter3 = data.getPlayerSaveSnapshot(a)!.pvp!.dailyXp;
+	assertInvariant(
+		win3B.tinyesReward === 0 &&
+			win3B.rewardBlockedReason === "limite_par" &&
+			win3B.xpRewards === undefined &&
+			xpAfter3 === xpAfter2 &&
+			data.getPlayerSaveSnapshot(a)!.pvp!.pairs[tostring(b.UserId)]?.count === 2,
+		`3ª vitória contra B no teto de Tinyes deve retornar limite_par e não conceder XP (reason=${tostring(win3B.rewardBlockedReason)}, xpDelta=${xpAfter3 - xpAfter2})`,
+	);
+
+	// 2) Adversário independente C na mesma janela ainda é elegível para XP (e conta separado)
+	const win1C = runWin(c);
+	assertInvariant(
+		win1C.tinyesReward === 0 &&
+			win1C.rewardBlockedReason === "limite_diario" &&
+			win1C.xpRewards !== undefined &&
+			data.getPlayerSaveSnapshot(a)!.pvp!.dailyXp > xpAfter3 &&
+			data.getPlayerSaveSnapshot(a)!.pvp!.pairs[tostring(c.UserId)]?.count === 1,
+		"adversário independente C deve continuar concedendo XP quando par B atingiu limite",
+	);
+
+	// 3) Sem contagem dupla quando Tinyes e XP são elegíveis simultaneamente
+	getLivePvp().dailyTinyes = 0;
+	getLivePvp().dailyXp = 0;
+	const win1D = runWin(d);
+	assertInvariant(
+		(win1D.tinyesReward ?? 0) > 0 &&
+			win1D.xpRewards !== undefined &&
+			data.getPlayerSaveSnapshot(a)!.pvp!.pairs[tostring(d.UserId)]?.count === 1,
+		"vitória com Tinyes e XP elegíveis deve contar apenas 1 oportunidade no par",
+	);
+	const win2D = runWin(d);
+	assertInvariant(
+		(win2D.tinyesReward ?? 0) > 0 &&
+			win2D.xpRewards !== undefined &&
+			data.getPlayerSaveSnapshot(a)!.pvp!.pairs[tostring(d.UserId)]?.count === 2,
+		"2ª vitória com Tinyes e XP deve contar 2 no par",
+	);
+	const win3D = runWin(d);
+	assertInvariant(
+		win3D.tinyesReward === 0 && win3D.rewardBlockedReason === "limite_par" && win3D.xpRewards === undefined,
+		"3ª vitória contra D bloqueada por limite_par sem dupla contagem antecipada",
+	);
+
+	// 4) Sem consumir oportunidade do par quando nenhuma recompensa é elegível (ambos tetos ou Lv máximo + teto Tinyes)
+	getLivePvp().dailyTinyes = PVP_DAILY_TINYES_CAP;
+	getLivePvp().dailyXp = PVP_DAILY_XP_CAP;
+	const win1E = runWin(e);
+	assertInvariant(
+		win1E.tinyesReward === 0 &&
+			win1E.xpRewards === undefined &&
+			win1E.rewardBlockedReason === "limite_diario_xp" &&
+			data.getPlayerSaveSnapshot(a)!.pvp!.pairs[tostring(e.UserId)] === undefined,
+		"vitória com ambos tetos esgotados não deve consumir oportunidade do par",
+	);
+
+	setTeamLevel(MAX_LEVEL);
+	getLivePvp().dailyTinyes = PVP_DAILY_TINYES_CAP;
+	getLivePvp().dailyXp = 0;
+	const win1F = runWin(f);
+	assertInvariant(
+		win1F.tinyesReward === 0 &&
+			data.getPlayerSaveSnapshot(a)!.pvp!.dailyXp === 0 &&
+			data.getPlayerSaveSnapshot(a)!.pvp!.pairs[tostring(f.UserId)] === undefined,
+		"vitória sem Tinyes e com 0 XP útil (nível máximo) não deve consumir oportunidade do par",
+	);
+
+	// 5) PvE permanece inalterado mesmo com tetos e pares PvP preenchidos
+	setTeamLevel(1);
+	getLivePvp().dailyTinyes = PVP_DAILY_TINYES_CAP;
+	getLivePvp().dailyXp = PVP_DAILY_XP_CAP;
+	const tinyesBeforePve = data.getTinyes(a)!;
+	const xpBeforePve = progression.getFighter(a, "antifarm-0")!.xp;
+	const pveEnd = runWin(undefined);
+	assertInvariant(
+		(pveEnd.tinyesReward ?? 0) > 0 &&
+			pveEnd.rewardBlockedReason === undefined &&
+			pveEnd.xpRewards !== undefined &&
+			data.getTinyes(a)! > tinyesBeforePve &&
+			progression.getFighter(a, "antifarm-0")!.xp > xpBeforePve &&
+			data.getPlayerSaveSnapshot(a)!.pvp!.pairs[tostring(b.UserId)]?.count === 2,
+		"PvE deve continuar pagando Tinyes e XP normalmente sem ser afetado pelos limites PvP",
+	);
+
+	for (const p of [a, b, c, d, e, f]) {
+		data.handlePlayerRemoving(p);
+	}
+	print("PVP_PAIR_ANTIFARM_TINYES_CAP_PASSED");
+}

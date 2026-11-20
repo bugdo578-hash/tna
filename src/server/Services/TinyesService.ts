@@ -35,6 +35,10 @@ export class TinyesService {
 		return this.data.awardPvpWin(player, opponentUserId, amount);
 	}
 
+	public recordPvpPairWin(player: Player, opponentUserId: number): boolean {
+		return this.data.recordPvpPairWin(player, opponentUserId);
+	}
+
 	public getRemainingPvpXp(player: Player): number {
 		return this.data.getRemainingPvpXp(player);
 	}
