@@ -1,5 +1,5 @@
 import { ReplicatedStorage, TweenService, Workspace } from "@rbxts/services";
-import { ARENA_INSTANCE_ID_ATTRIBUTE, MIN_DAMAGE } from "../../shared/Config";
+import { ARENA_CLIENT_REPLICATION_TIMEOUT_SECONDS, ARENA_INSTANCE_ID_ATTRIBUTE, MIN_DAMAGE } from "../../shared/Config";
 import {
 	ASSETS_FOLDER_NAME,
 	BENCH_FIGHTER_TRANSPARENCY,
@@ -28,7 +28,7 @@ import type {
 import { ANUBIS_SKILL_DATA, JOTARO_SKILL_DATA, type SkillData } from "../../shared/SkillData";
 import type { SkillSlot, StatusEffect } from "../../shared/TypeDefs";
 import { battleCleanupStep } from "./BattleCleanup";
-import { CombatCameraController } from "./CombatCameraController";
+import { CombatCameraController, resolveSideCameraAnchor } from "./CombatCameraController";
 import { BattleRemotes } from "./BattleRemotes";
 import { CombatArenaAnchorResolver, type ResolvedArenaAnchors } from "./CombatArenaAnchors";
 import { CombatAttackFinalizer, type PendingDeathRecord } from "./CombatAttackFinalizer";
@@ -255,6 +255,16 @@ export class CombatController {
 		return this.arenaAnchors.getLastDiagnostics();
 	}
 
+	/** Retorna a Part de câmera ativa da arena na batalha atual, se houver. */
+	public getActiveCameraPart(): BasePart | undefined {
+		return this.cameraController.getActiveCameraPart();
+	}
+
+	/** Retorna os diagnósticos da última tentativa de resolução de câmera da arena. */
+	public getLastCameraDiagnostics(): readonly string[] {
+		return this.cameraController.getLastDiagnostics();
+	}
+
 	/** Registra callback disparado quando o HP visual é atualizado após consumir hit/tick/KO. */
 	public onFighterHpVisualChanged(listener: (targetId: string, hp: number, hpMax: number) => void): () => void {
 		this.hpVisualListeners.add(listener);
@@ -335,13 +345,40 @@ export class CombatController {
 			playerPhysicalSideIndex = 0;
 		} else if (playerSideId === physicalSides[1]) {
 			playerPhysicalSideIndex = 1;
+		} else {
+			warn(`[CombatController] sideId do jogador "${playerSideId}" não pertence aos lados físicos da arena.`);
 		}
 		if (playerPhysicalSideIndex !== undefined) {
-			const cameraPart = this.arenaAnchors.getCameraAnchorPart(playerPhysicalSideIndex);
-			if (cameraPart !== undefined) {
-				this.cameraController.activateForArenaPart(cameraPart, generation, () =>
-					this.isCurrentBattle(generation),
-				);
+			const sideIndex = playerPhysicalSideIndex;
+			const sideFolder = this.arenaAnchors.getSideFolder(sideIndex);
+			if (sideFolder !== undefined) {
+				const isInActiveRoot = (inst: Instance) => this.arenaAnchors.isDescendantInActiveRoot(inst);
+				const isCurrent = () => this.isCurrentBattle(generation);
+				const initialCheck = resolveSideCameraAnchor(sideFolder, sideIndex);
+				if (initialCheck.ok && initialCheck.camera !== undefined && isInActiveRoot(initialCheck.camera)) {
+					this.cameraController.activateForArenaPart(initialCheck.camera, generation, isCurrent);
+				} else if (payload.arena !== undefined && !initialCheck.fatal) {
+					const timeout = this.arenaReplicationTimeoutSeconds ?? ARENA_CLIENT_REPLICATION_TIMEOUT_SECONDS;
+					this.spawnBattle(() => {
+						this.cameraController.resolveAndActivateForSide(
+							sideFolder,
+							isInActiveRoot,
+							sideIndex,
+							generation,
+							isCurrent,
+							timeout,
+						);
+					});
+				} else {
+					this.cameraController.resolveAndActivateForSide(
+						sideFolder,
+						isInActiveRoot,
+						sideIndex,
+						generation,
+						isCurrent,
+						0,
+					);
+				}
 			}
 		}
 

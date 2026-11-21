@@ -16,12 +16,13 @@ import {
 	ARENA_TEAM_FOLDER_NAMES,
 } from "../UI/CombatVisualConfig";
 import { alignFighterCFrameToAnchor } from "./CombatFighterGrounding";
+import { resolveSideCameraAnchor } from "./CombatCameraController";
 
 export interface ResolvedArenaSideAnchors {
 	readonly folder: Instance;
 	readonly active: BasePart;
 	readonly waiting: readonly [BasePart, BasePart];
-	readonly camera: BasePart;
+	readonly camera?: BasePart;
 }
 
 export interface ResolvedArenaAnchors {
@@ -104,16 +105,16 @@ function resolveSideAnchors(
 	const active = resolveUniqueAnchorPart(folder, anchorNames.active, diagnostics);
 	const waiting0 = resolveUniqueAnchorPart(folder, anchorNames.waiting[0], diagnostics);
 	const waiting1 = resolveUniqueAnchorPart(folder, anchorNames.waiting[1], diagnostics);
-	const camera = resolveUniqueAnchorPart(folder, anchorNames.camera, diagnostics);
 
-	if (active === undefined || waiting0 === undefined || waiting1 === undefined || camera === undefined) {
+	if (active === undefined || waiting0 === undefined || waiting1 === undefined) {
 		return undefined;
 	}
+	const cameraResult = resolveSideCameraAnchor(folder, sideIndex);
 	return {
 		folder,
 		active,
 		waiting: [waiting0, waiting1],
-		camera,
+		camera: cameraResult.camera,
 	};
 }
 
@@ -368,6 +369,22 @@ export class CombatArenaAnchorResolver {
 		return this.lastDiagnostics;
 	}
 
+	public isDescendantInActiveRoot(instance: Instance): boolean {
+		if (!instance.IsDescendantOf(this.activeRoot)) {
+			return false;
+		}
+		if (this.activeRoot !== this.searchRoot && !this.activeRoot.IsDescendantOf(this.searchRoot)) {
+			return false;
+		}
+		return true;
+	}
+
+	public getSideFolder(sideIndex: 0 | 1): Instance | undefined {
+		const folder = this.resolved?.sides[sideIndex].folder;
+		if (folder === undefined || !this.isDescendantInActiveRoot(folder)) return undefined;
+		return folder;
+	}
+
 	private isAnchorValidInActiveRoot(anchor: BasePart): boolean {
 		if (!anchor.IsDescendantOf(this.activeRoot)) {
 			return false;
@@ -434,21 +451,14 @@ export class CombatArenaAnchorResolver {
 	}
 
 	public getCameraAnchorPart(sideIndex: 0 | 1): BasePart | undefined {
-		const anchors = this.resolved;
-		if (anchors === undefined) {
-			warn(
-				`[CombatArenaAnchors] Câmera indisponível para lado ${sideIndex}: referências da arena não resolvidas.`,
-			);
+		const sideFolder = this.getSideFolder(sideIndex);
+		if (sideFolder === undefined) return undefined;
+		const result = resolveSideCameraAnchor(sideFolder, sideIndex);
+		if (!result.ok || result.camera === undefined || !this.isDescendantInActiveRoot(result.camera)) {
+			for (const message of result.diagnostics) warn(message);
 			return undefined;
 		}
-		const camera = anchors.sides[sideIndex].camera;
-		if (!this.isAnchorValidInActiveRoot(camera)) {
-			warn(
-				`[CombatArenaAnchors] Referência inválida em tempo de batalha: câmera "${camera.Name}" não está mais em "${this.activeRoot.GetFullName()}".`,
-			);
-			return undefined;
-		}
-		return camera;
+		return result.camera;
 	}
 
 	public getCameraCFrame(sideIndex: 0 | 1): CFrame | undefined {

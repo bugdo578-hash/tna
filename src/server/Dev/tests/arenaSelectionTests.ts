@@ -6,10 +6,16 @@ import {
 	ARENA_INSTANCE_ID_ATTRIBUTE,
 	ARENA_SESSION_ID_ATTRIBUTE,
 	ARENA_SLOT_ID_ATTRIBUTE,
+	PLAYER_DATA_SCHEMA_VERSION,
+	PVP_INVITE_INTERVAL_SECONDS,
 } from "../../../shared/Config";
 import type { BattleStartedPayload } from "../../../shared/Remotes";
 import { ArenaRegistry } from "../../Services/ArenaRegistry";
 import { BattleSessionService } from "../../Services/BattleSessionService";
+import { PlayerDataService } from "../../Services/PlayerDataService";
+import { InMemoryDataStore } from "../../Services/PlayerDataValidation";
+import { ProgressionService } from "../../Services/ProgressionService";
+import { PvpService } from "../../Services/PvpService";
 import { createDummySide } from "../DummyFighters";
 import { buildTestArenaTemplate, buildTestSlotPart, makeArenaMockPlayer } from "./arenaRegistryTests";
 import { assertInvariant, createSurgicalMockAdapter } from "./testHelpers";
@@ -332,6 +338,99 @@ function validateRandomSelectionAndNonRepetition(root: Folder): void {
 	activeParent.Destroy();
 }
 
+function validatePvpRandomPhysicalSidesWithArena(root: Folder): void {
+	const templates = new Instance("Folder");
+	templates.Name = "L2PvpTemplates";
+	templates.Parent = root;
+	const slots = new Instance("Folder");
+	slots.Name = "L2PvpSlots";
+	slots.Parent = root;
+	const activeParent = new Instance("Folder");
+	activeParent.Name = "L2PvpActive";
+	activeParent.Parent = root;
+
+	buildTestArenaTemplate(templates, "Arena_PvP", "pvp_arena_1", new CFrame(0, 0, 0));
+	buildTestSlotPart(slots, "Slot_01", new CFrame(0, 0, 0));
+
+	const registry = new ArenaRegistry({ templatesContainer: templates, slotsContainer: slots, activeArenasParent: activeParent });
+	registry.discoverTemplates();
+
+	const p1 = makeArenaMockPlayer(8801, "PvpDrawP1");
+	const p2 = makeArenaMockPlayer(8802, "PvpDrawP2");
+	let now = 1000;
+	let currentRoll = 0.1;
+	const progression = new ProgressionService();
+	const data = new PlayerDataService(progression, {
+		dataStore: new InMemoryDataStore(),
+		serverId: "PvpDrawArena",
+		now: () => now,
+		waitFn: () => {},
+		warnFn: () => {},
+		disableStudioAutoFallbackOnInjectedStore: true,
+	});
+	assertInvariant(data.loadPlayer(p1.player).ok && data.loadPlayer(p2.player).ok, "load jogadores sorteio PvP");
+	const p2Orig = progression.getPlayerData(p2.player)!.inventory[0];
+	progression.loadValidatedPlayerData(p2.player, {
+		version: PLAYER_DATA_SCHEMA_VERSION,
+		inventory: [{ ...p2Orig, level: 30 }],
+	});
+
+	const starts = new Map<Player, BattleStartedPayload>();
+	const sessions = new BattleSessionService(
+		createSurgicalMockAdapter({ onBattleStarted: (player, payload) => starts.set(player, payload) }),
+		undefined,
+		progression,
+		registry,
+	);
+	let inviteId = "";
+	const pvp = new PvpService(
+		sessions,
+		data,
+		progression,
+		(_, payload) => { inviteId = payload.inviteId; },
+		() => {},
+		() => now,
+		() => currentRoll,
+	);
+
+	// Sequência [0.1, 0.2, 0.8, 0.9] comprova 50/50 (A/B) e repetição permitida (A->A e B->B)
+	for (const roll of [0.1, 0.2, 0.8, 0.9]) {
+		currentRoll = roll;
+		starts.clear();
+		now += PVP_INVITE_INTERVAL_SECONDS + 1;
+		assertInvariant(pvp.challenge(p1.player, p2.player), `convite PvP roll=${roll}`);
+		assertInvariant(pvp.respond(p2.player, { inviteId, accept: true }), `aceite PvP roll=${roll}`);
+
+		const s1 = starts.get(p1.player)!;
+		const s2 = starts.get(p2.player)!;
+		assertInvariant(s1.arena !== undefined && s2.arena !== undefined, `payload.arena presente roll=${roll}`);
+		assertInvariant(s1.arena!.instanceId === s2.arena!.instanceId, `mesmo clone roll=${roll}`);
+		assertInvariant(
+			s1.arena!.physicalSides[0] === s2.arena!.physicalSides[0] &&
+				s1.arena!.physicalSides[1] === s2.arena!.physicalSides[1],
+			`physicalSides idênticos roll=${roll}`,
+		);
+		const p1IsSideA = roll < 0.5;
+		const expectedP1Side = p1IsSideA ? s1.arena!.physicalSides[0] : s1.arena!.physicalSides[1];
+		const expectedP2Side = p1IsSideA ? s1.arena!.physicalSides[1] : s1.arena!.physicalSides[0];
+		assertInvariant(s1.sides[0] === expectedP1Side && s2.sides[0] === expectedP2Side, `sides relativos batem com sorteio físico roll=${roll}`);
+		assertInvariant(
+			s1.fighters.find((f) => f.sideId === expectedP1Side)!.level === 1 &&
+				s2.fighters.find((f) => f.sideId === expectedP2Side)!.level === 30,
+			`fighters, HUD e physicalSides/câmera usam o mesmo sorteio roll=${roll}`,
+		);
+
+		sessions.requestQuit(p1.player);
+	}
+
+	p1.cleanup();
+	p2.cleanup();
+	registry.destroy();
+	templates.Destroy();
+	slots.Destroy();
+	activeParent.Destroy();
+}
+
 export function validateArenaSelectionL16(): void {
 	const root = new Instance("Folder");
 	root.Name = "ArenaSelectionL16TestRoot";
@@ -340,6 +439,7 @@ export function validateArenaSelectionL16(): void {
 		validateUniversalCatalogAndNameIndependence(root);
 		validateSameTemplateSimultaneousAndPhysicalSeparation(root);
 		validateRandomSelectionAndNonRepetition(root);
+		validatePvpRandomPhysicalSidesWithArena(root);
 	});
 	root.Destroy();
 	if (!ok) {
