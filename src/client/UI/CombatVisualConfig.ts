@@ -22,10 +22,12 @@ export const ARENA_SIDE_ANCHOR_NAMES = [
 	{
 		active: "Current_Fighter_A",
 		waiting: ["Waiting_Fighter_A", "Waiting_Fighter_A_2"] as const,
+		camera: "Camera_A",
 	},
 	{
 		active: "Current_Fighter_B",
 		waiting: ["Waiting_Fighter_B", "Waiting_Fighter_B_2"] as const,
+		camera: "Camera_B",
 	},
 ] as const;
 

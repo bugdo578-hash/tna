@@ -21,6 +21,7 @@ export interface ResolvedArenaSideAnchors {
 	readonly folder: Instance;
 	readonly active: BasePart;
 	readonly waiting: readonly [BasePart, BasePart];
+	readonly camera: BasePart;
 }
 
 export interface ResolvedArenaAnchors {
@@ -103,14 +104,16 @@ function resolveSideAnchors(
 	const active = resolveUniqueAnchorPart(folder, anchorNames.active, diagnostics);
 	const waiting0 = resolveUniqueAnchorPart(folder, anchorNames.waiting[0], diagnostics);
 	const waiting1 = resolveUniqueAnchorPart(folder, anchorNames.waiting[1], diagnostics);
+	const camera = resolveUniqueAnchorPart(folder, anchorNames.camera, diagnostics);
 
-	if (active === undefined || waiting0 === undefined || waiting1 === undefined) {
+	if (active === undefined || waiting0 === undefined || waiting1 === undefined || camera === undefined) {
 		return undefined;
 	}
 	return {
 		folder,
 		active,
 		waiting: [waiting0, waiting1],
+		camera,
 	};
 }
 
@@ -428,5 +431,27 @@ export class CombatArenaAnchorResolver {
 		const anchor = this.getBenchAnchorPart(sideIndex, benchSlot);
 		if (anchor === undefined) return undefined;
 		return alignFighterCFrameToAnchor(anchor, groundContactOffset);
+	}
+
+	public getCameraAnchorPart(sideIndex: 0 | 1): BasePart | undefined {
+		const anchors = this.resolved;
+		if (anchors === undefined) {
+			warn(
+				`[CombatArenaAnchors] Câmera indisponível para lado ${sideIndex}: referências da arena não resolvidas.`,
+			);
+			return undefined;
+		}
+		const camera = anchors.sides[sideIndex].camera;
+		if (!this.isAnchorValidInActiveRoot(camera)) {
+			warn(
+				`[CombatArenaAnchors] Referência inválida em tempo de batalha: câmera "${camera.Name}" não está mais em "${this.activeRoot.GetFullName()}".`,
+			);
+			return undefined;
+		}
+		return camera;
+	}
+
+	public getCameraCFrame(sideIndex: 0 | 1): CFrame | undefined {
+		return this.getCameraAnchorPart(sideIndex)?.CFrame;
 	}
 }

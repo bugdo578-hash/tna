@@ -28,6 +28,7 @@ import type {
 import { ANUBIS_SKILL_DATA, JOTARO_SKILL_DATA, type SkillData } from "../../shared/SkillData";
 import type { SkillSlot, StatusEffect } from "../../shared/TypeDefs";
 import { battleCleanupStep } from "./BattleCleanup";
+import { CombatCameraController } from "./CombatCameraController";
 import { BattleRemotes } from "./BattleRemotes";
 import { CombatArenaAnchorResolver, type ResolvedArenaAnchors } from "./CombatArenaAnchors";
 import { CombatAttackFinalizer, type PendingDeathRecord } from "./CombatAttackFinalizer";
@@ -78,6 +79,7 @@ interface ActiveAttackState {
 export class CombatController {
 	private readonly fightersByTargetId = new Map<string, FighterVisualEntry>();
 	private readonly arenaAnchors: CombatArenaAnchorResolver;
+	private readonly cameraController: CombatCameraController;
 	private readonly hitQueue: CombatHitQueue;
 	private readonly attackFinalizer: CombatAttackFinalizer<FighterVisualEntry>;
 	private readonly hitResultsByIndex: Map<number, HitResolvedPayload[]>;
@@ -117,8 +119,10 @@ export class CombatController {
 		private readonly assetsRoot: Instance = ReplicatedStorage,
 		arenaSearchRoot: Instance = Workspace,
 		private readonly arenaReplicationTimeoutSeconds?: number,
+		getCamera?: () => Camera | undefined,
 	) {
 		this.arenaAnchors = new CombatArenaAnchorResolver(arenaSearchRoot);
+		this.cameraController = new CombatCameraController(getCamera);
 		this.damagePool = new CombatDamagePool({
 			createBattleTween: (object, info, goal) => this.createBattleTween(object, info, goal),
 			delayBattle: (seconds, callback) => this.delayBattle(seconds, callback),
@@ -323,6 +327,22 @@ export class CombatController {
 			this.battleEnded = true;
 			this.activeArenaInstanceId = undefined;
 			return;
+		}
+
+		const playerSideId = payload.sides[0];
+		let playerPhysicalSideIndex: 0 | 1 | undefined;
+		if (playerSideId === physicalSides[0]) {
+			playerPhysicalSideIndex = 0;
+		} else if (playerSideId === physicalSides[1]) {
+			playerPhysicalSideIndex = 1;
+		}
+		if (playerPhysicalSideIndex !== undefined) {
+			const cameraPart = this.arenaAnchors.getCameraAnchorPart(playerPhysicalSideIndex);
+			if (cameraPart !== undefined) {
+				this.cameraController.activateForArenaPart(cameraPart, generation, () =>
+					this.isCurrentBattle(generation),
+				);
+			}
 		}
 
 		const folder = new Instance("Folder");
@@ -976,6 +996,7 @@ export class CombatController {
 			battleCleanupStep("fighter base", () => entry.model.PivotTo(entry.homeCFrame));
 		}
 		this.damagePool.clear();
+		battleCleanupStep("camera restore", () => this.cameraController.restore());
 		battleCleanupStep("stage destroy", () => this.stageFolder?.Destroy());
 		this.stageFolder = undefined;
 		this.fightersByTargetId.clear();
