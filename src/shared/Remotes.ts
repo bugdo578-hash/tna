@@ -1,4 +1,5 @@
 import type { AllocatableStat, BattleGlobalState, ClassName, FighterXpReward, Rarity, StatBlock, SkillSlot, StatusEffect } from "./TypeDefs";
+import type { ArenaType } from "./configs/Arena";
 
 export interface RequestPurchasePayload { readonly offerId: string; readonly requestId: string; }
 export type PurchaseReason = "saldo" | "oferta_invalida" | "em_batalha" | "limite" | "erro";
@@ -20,7 +21,7 @@ export interface ShopStatePayload {
 
 export const REMOTES_FOLDER_NAME = "Remotes";
 
-export type NpcBattleNoticeReason = "em_batalha" | "carregando" | "distancia" | "time_invalido" | "erro";
+export type NpcBattleNoticeReason = "em_batalha" | "carregando" | "distancia" | "time_invalido" | "arena_indisponivel" | "erro";
 export type NpcBattleNoticePayload =
 	| { readonly reason: NpcBattleNoticeReason }
 	| { readonly reason: "cooldown"; readonly npcId: string; readonly remainingSeconds: number };
@@ -98,12 +99,25 @@ export interface BattleFighterSnapshot {
 	readonly slotCosts?: readonly [number, number, number];
 }
 
+export interface BattleArenaPayload {
+	/** Identificador estável do template reservado pelo servidor. */
+	readonly arenaId: string;
+	/** Categoria física da arena reservada ("PVE" ou "PVP"). */
+	readonly arenaType: ArenaType;
+	/** Identificador inequívoco da instância clonada em Workspace/ActiveArenas. */
+	readonly instanceId: string;
+	/** Ordem física canônica `[sideIdNoTimeA, sideIdNoTimeB]` para consistência entre clientes em PvP. */
+	readonly physicalSides: readonly [string, string];
+}
+
 export interface BattleStartedPayload {
 	readonly sides: readonly [string, string];
 	readonly fighters: readonly BattleFighterSnapshot[];
 	readonly mode?: BattleSessionMode;
 	/** Em PVE o botão de pause fica disponível; em PVP aparece apenas o botão de quit. */
 	readonly canPause?: boolean;
+	/** Identificação mínima da instância de arena reservada para esta sessão. */
+	readonly arena?: BattleArenaPayload;
 }
 
 export interface StateChangedPayload {

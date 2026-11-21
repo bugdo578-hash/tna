@@ -9,10 +9,12 @@ import {
 	MIN_CLIENT_FIGHTER_INDEX,
 	PVE_PAUSE_MAX_SECONDS,
 	S3_UNLOCK_LEVEL,
+	type BattleEncounterKind,
 } from "../../shared/Config";
 import type {
 	AttackStartedPayload,
 	AtbSyncPayload,
+	BattleArenaPayload,
 	BattleFighterSnapshot,
 	BattleSessionMode,
 	BattleStartedPayload,
@@ -29,6 +31,7 @@ import type { ProgressionService } from "./ProgressionService";
 import { BattleSide, type FighterIndex } from "../Components/BattleSide";
 import type { Fighter } from "../Components/Fighter";
 import { AIService } from "./AIService";
+import type { ArenaRegistry, ArenaReservation, ArenaReserveFailureReason } from "./ArenaRegistry";
 import { BattleRewardService } from "./BattleRewardService";
 import { BattleService } from "./BattleService";
 import type { BattleRemoteAdapter } from "./RemoteService";
@@ -51,6 +54,7 @@ interface BattleSessionRecord {
 	readonly id: number;
 	readonly battle: BattleService;
 	readonly mode: SessionMode;
+	arenaReservation?: ArenaReservation;
 	readonly sides: readonly [BattleSide, BattleSide];
 	readonly participants: readonly SessionParticipant[];
 	readonly sideIds: readonly [string, string];
@@ -79,12 +83,14 @@ export class BattleSessionService {
 	private activeSessions: BattleSessionRecord[] = [];
 	private nextSessionId = 0;
 	private started = false;
+	private lastCreateFailureReason?: ArenaReserveFailureReason;
 	private readonly rewardService: BattleRewardService;
 
 	public constructor(
 		private readonly remoteService: BattleRemoteAdapter,
 		private readonly tinyesService?: TinyesService,
 		private readonly progressionService?: ProgressionService,
+		private readonly arenaRegistry?: ArenaRegistry,
 	) {
 		this.rewardService = new BattleRewardService(tinyesService, progressionService);
 	}
@@ -110,7 +116,9 @@ export class BattleSessionService {
 		rng: () => number,
 		mode: SessionMode = secondPlayer === undefined ? "PVE" : "PVP",
 		onFinished?: (firstSideWon: boolean) => void,
+		encounterKind?: BattleEncounterKind,
 	): boolean {
+		this.lastCreateFailureReason = undefined;
 		if (firstPlayer.Parent !== Players) return false;
 		if (secondPlayer !== undefined && secondPlayer.Parent !== Players) return false;
 		if (this.playerSessions.has(firstPlayer)) return false;
@@ -118,8 +126,21 @@ export class BattleSessionService {
 
 		const id = this.nextSessionId;
 		this.nextSessionId += 1;
-		const firstSideId = `battle-${id}-A`;
-		const secondSideId = `battle-${id}-B`;
+		const sessionKey = `battle-${id}`;
+
+		let arenaReservation: ArenaReservation | undefined;
+		if (this.arenaRegistry !== undefined) {
+			const arenaKind: BattleEncounterKind = mode === "PVP" ? "PVP" : (encounterKind ?? "PVE");
+			const reserveResult = this.arenaRegistry.reserveForSession(sessionKey, arenaKind);
+			if (!reserveResult.ok || reserveResult.reservation === undefined) {
+				this.lastCreateFailureReason = reserveResult.reason;
+				return false;
+			}
+			arenaReservation = reserveResult.reservation;
+		}
+
+		const firstSideId = `${sessionKey}-A`;
+		const secondSideId = `${sessionKey}-B`;
 		const sideIds: readonly [string, string] = [firstSideId, secondSideId];
 		const sideIdBySide = new Map<BattleSide, string>();
 		sideIdBySide.set(firstSide, firstSideId);
@@ -135,6 +156,18 @@ export class BattleSessionService {
 		const participants: SessionParticipant[] = [{ player: firstPlayer, side: firstSide, sideId: firstSideId }];
 		if (secondPlayer !== undefined) participants.push({ player: secondPlayer, side: secondSide, sideId: secondSideId });
 
+		let battle: BattleService | undefined;
+		const [battleOk, battleError] = pcall(() => {
+			battle = new BattleService(firstSide, secondSide, rng);
+		});
+		if (!battleOk || battle === undefined) {
+			if (arenaReservation !== undefined && this.arenaRegistry !== undefined) {
+				this.cleanupSessionStep("arena rollback", () => this.arenaRegistry?.releaseReservation(arenaReservation));
+			}
+			warn(`[BattleSessionService] erro ao inicializar ${sessionKey}: ${tostring(battleError)}`);
+			return false;
+		}
+
 		const session: BattleSessionRecord = {
 			resolvedHits: 0,
 			averageLevels: [calcAverageLevel(firstSide.fighters.map(f => f.level)), calcAverageLevel(secondSide.fighters.map(f => f.level))],
@@ -143,8 +176,9 @@ export class BattleSessionService {
 			rewardRng: rng,
 			rewardPaid: false,
 			id,
-			battle: new BattleService(firstSide, secondSide, rng),
+			battle,
 			mode,
+			arenaReservation,
 			sides: [firstSide, secondSide],
 			participants,
 			sideIds,
@@ -222,6 +256,14 @@ export class BattleSessionService {
 
 	public hasActiveSession(player: Player): boolean {
 		return this.playerSessions.has(player);
+	}
+
+	public getLastCreateFailureReason(): ArenaReserveFailureReason | undefined {
+		return this.lastCreateFailureReason;
+	}
+
+	public getSessionArenaReservation(player: Player): ArenaReservation | undefined {
+		return this.playerSessions.get(player)?.session.arenaReservation;
 	}
 
 	/**
@@ -498,6 +540,7 @@ export class BattleSessionService {
 			}));
 			if (!sent) warn(`[BattleSessionService] erro de resultado privado: ${tostring(sendError)}`);
 		}
+		this.releaseArena(session);
 	}
 
 	private awardSessionXp(session: BattleSessionRecord, participant: SessionParticipant, maxTotalXp = math.huge): FighterXpReward[] | undefined {
@@ -524,11 +567,20 @@ export class BattleSessionService {
 				});
 			}
 		}
+		const arena: BattleArenaPayload | undefined = session.arenaReservation === undefined
+			? undefined
+			: {
+				arenaId: session.arenaReservation.arenaId,
+				arenaType: session.arenaReservation.arenaType,
+				instanceId: session.arenaReservation.instanceId,
+				physicalSides: session.sideIds,
+			};
 		const payload: BattleStartedPayload = {
 			sides: session.sideIds,
 			fighters,
 			mode: session.mode,
 			canPause: session.mode === "PVE",
+			arena,
 		};
 		for (const participant of session.participants) {
 			const opponentId = session.sideIds[0] === participant.sideId ? session.sideIds[1] : session.sideIds[0];
@@ -565,6 +617,7 @@ export class BattleSessionService {
 		if (session.closed) return;
 		session.closed = true;
 		this.releaseSession(session);
+		this.releaseArena(session);
 		session.paused = false;
 		for (const aiController of session.aiControllers) {
 			this.cleanupSessionStep("IA", () => aiController.destroy());
@@ -592,6 +645,14 @@ export class BattleSessionService {
 		if (release !== undefined) {
 			const [ok, failure] = pcall(() => release(firstSideWon));
 			if (!ok) warn(`[BattleSessionService] erro de limpeza: ${tostring(failure)}`);
+		}
+	}
+
+	private releaseArena(session: BattleSessionRecord): void {
+		const reservation = session.arenaReservation;
+		session.arenaReservation = undefined;
+		if (reservation !== undefined && this.arenaRegistry !== undefined) {
+			this.cleanupSessionStep("arena", () => this.arenaRegistry?.releaseReservation(reservation));
 		}
 	}
 

@@ -1,4 +1,5 @@
 // Ponto de entrada da suíte de testes e simulação do servidor (re-exporta validações públicas e executa runSimulation).
+import { validateArenaRegistry } from "./tests/arenaRegistryTests";
 import {
 	runDummy1000Battles,
 	validateBronzeAI,
@@ -50,6 +51,7 @@ import {
 	validateSessionErrorIsolation,
 } from "./tests/teardownTests";
 
+export { validateArenaRegistry } from "./tests/arenaRegistryTests";
 export { validateDayNightCycle } from "./tests/coreTests";
 export { validateNpcBattles, validateNpcRematchCooldown } from "./tests/npcTests";
 export { validatePostBattleXp, validateTinyesEconomy } from "./tests/progressionTests";
@@ -102,4 +104,5 @@ export function runSimulation(): void {
 	validateTrocarIndexValidation();
 	runDummy1000Battles();
 	validateJotaroAndAnubis();
+	validateArenaRegistry();
 }

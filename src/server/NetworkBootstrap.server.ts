@@ -10,6 +10,7 @@ import {
 	SHOP_REFRESH_INTERVAL_SECONDS,
 } from "../shared/Config";
 import { createJotaroVsAnubisBattleSession } from "./Dev/DummyBattleSession";
+import { ArenaRegistry } from "./Services/ArenaRegistry";
 import { BattleSessionService } from "./Services/BattleSessionService";
 import { PlayerDataService } from "./Services/PlayerDataService";
 import { ProgressionService } from "./Services/ProgressionService";
@@ -25,7 +26,9 @@ const remoteService = new RemoteService();
 const progressionService = new ProgressionService(remoteService);
 const playerDataService = new PlayerDataService(progressionService);
 const tinyesService = new TinyesService(playerDataService, (player, payload) => remoteService.tinyesChanged.FireClient(player, payload));
-const battleSessionService = new BattleSessionService(remoteService, tinyesService, progressionService);
+const arenaRegistry = new ArenaRegistry();
+arenaRegistry.start();
+const battleSessionService = new BattleSessionService(remoteService, tinyesService, progressionService, arenaRegistry);
 const inventoryService = new InventoryService(playerDataService, progressionService,
 	(player) => battleSessionService.hasActiveSession(player),
 	(player, payload) => remoteService.inventoryState.FireClient(player, payload));

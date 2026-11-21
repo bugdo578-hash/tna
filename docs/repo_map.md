@@ -9,6 +9,7 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `src/client/main.client.ts`: entrypoint client; instancia e inicia controllers e UI na ordem de assinatura dos snapshots.
 ### Server (`src/server/`)
 - `Services/AIService.ts`: IA Bronze PVE (reação, erro 30%, S3 bloqueado < Lv5, trocas por HP/tempo; só envia intenções).
+- `Services/ArenaRegistry.ts`: descoberta/validação de templates em `ServerStorage/ArenaTemplates`, reserva exclusiva (`PVE`/`BOSS` -> `"PVE"`, `PVP` -> `"PVP"`), clonagem para `Workspace/ActiveArenas`, rollback e liberação idempotente por sessão.
 - `Services/ATBService.ts`: avança barra ATB (`0–10`) em `IDLE` quando ativo está vivo e `NORMAL`.
 - `Services/BattleMovement.ts`: congela/restaura `WalkSpeed`/`JumpPower`/`JumpHeight`/`UseJumpPower` e `NpcBattleActive` (NPC/PVP).
 - `Services/BattleRewardService.ts`: decisão e cálculo de recompensas ao fim da sessão (PVE Bronze/PVP, Tinyes, XP, tetos diários, `RewardBlockedReason`), com `pcall`/`warn` por participante; `settleParticipant` e `awardSessionXp` (`session.rewardPaid` continua sendo marcado como guarda anti-pagamento duplicado).
@@ -38,6 +39,7 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `Dev/tests/persistenceTests.ts`: testes de persistência no DataStore, locks de sessão, tokens, backups de corrupção, saída durante load e orçamento de shutdown.
 - `Dev/tests/dataStoreIntegrityTests.ts`: testes de integridade do DataStore (esgotamento de confirmação no load com kick único e round-trip JSON de floats/economia).
 - `Dev/tests/teardownTests.ts`: testes de ciclo de vida de teardown de sessão de batalha, exigência de `Players.Parent` e isolamento de erros entre sessões.
+- `Dev/tests/arenaRegistryTests.ts`: testes L1.5 de descoberta/validação de templates, categorias `PVE`/`BOSS`/`PVP`, rollback, indisponibilidade, lifecycle completo e consistência PvP.
 - `Dev/DummyBattleSession.ts`: cria sessões dev (`createDummyBattleSession`, `createJotaroVsAnubisBattleSession`).
 - `Dev/DummyFighters.ts`: cria times dummy/fixos dev (`createDummySide`, `createDevOpponentSide`) e re-exporta factory.
 ### Client (`src/client/`)
@@ -49,7 +51,7 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `Controllers/BattleRemotes.ts`: resolve e expõe referências dos remotes de batalha via `WaitForChild`.
 - `Controllers/ChallengePromptController.ts`: oculta próprio prompt PVP e todos durante `NpcBattleActive` (`RequiresLineOfSight=false`).
 - `Controllers/CharacterAnimationController.ts`: controla animação de caminhada via `Animate` nativo ou fallback `Movement`.
-- `Controllers/CombatArenaAnchors.ts`: resolve, valida e mantém em cache por batalha as referências de posicionamento de `Workspace.Arena_bases` (`Time A`/`Time B`, `Current_Fighter_*`, `Waiting_Fighter_*` e `Waiting_Fighter_*_2`), lendo o `CFrame` completo das Parts e registrando diagnóstico claro em ausência/duplicidade/tipo inválido.
+- `Controllers/CombatArenaAnchors.ts`: resolve, valida e mantém em cache por batalha as referências de posicionamento de `Arena_bases` (na instância reservada em `Workspace/ActiveArenas` com espera limitada de replicação e sem fallback para arena errada, ou em `Workspace.Arena_bases` em testes legados), lendo o `CFrame` completo das Parts.
 - `Controllers/CombatAttackFinalizer.ts`: coordena finalização do último hit (retorno visual de Stand/corpo), processamento de mortes pendentes (`pendingDeaths`, `flushPendingDeaths`) e fila/aplicação de trocas pendentes (`pendingSwitches`, `handleSwitchPerformed`), com limpeza entre batalhas/teardown.
 - `Controllers/CombatController.ts`: palco `Workspace/ClientBattleStage`, rigs, `AnimationTrack`/markers e apresentação de hits; delega anchors de arena a `CombatArenaAnchors`, apoio físico nos anchors a `CombatFighterGrounding`, pool de popups a `CombatDamagePool`, fila de resultados de hits a `CombatHitQueue`, finalização/KO/trocas a `CombatAttackFinalizer`, movimentação do Stand/placeholders a `CombatStandMotion` e preload/deload/emissão de VFX a `CombatVfxBridge`.
 - `Controllers/CombatDamagePool.ts`: pool de `BillboardGui` (`CombatBillboardPool`), popups flutuantes de dano, crítico, esquiva e tick de DoT, com limpeza no teardown.
@@ -76,7 +78,7 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `UI/XpRewardCards.ts`: cards animados de XP pós-batalha em `BattleResult` com guarda de ciclo de vida.
 - `types/Part_Icles.d.ts`: declaração TypeScript do módulo externo `ReplicatedStorage.Part_Icles`.
 ### Shared (`src/shared/`, além do template não usado `module.ts`) & `tools/`
-- `Config.ts`: re-exporta os 10 módulos de `configs/` (`AI`, `Animation`, `Combat`, `Dev`, `Economy`, `Network`, `Persistence`, `Progression`, `Pvp`, `World`).
+- `Config.ts`: re-exporta os 11 módulos de `configs/` (`AI`, `Animation`, `Arena`, `Combat`, `Dev`, `Economy`, `Network`, `Persistence`, `Progression`, `Pvp`, `World`).
 - `ClassData.ts`: ranges de `baseStats` das 5 classes e triângulo de counter (`×1.175`).
 - `FighterData.ts`: catálogo `FIGHTER_DATA` (`jotaro`, `anubis`) e `rollClassBaseStats`.
 - `SkillData.ts`: timelines provisórias de skills (`JOTARO_SKILL_DATA`, `ANUBIS_SKILL_DATA`).
@@ -118,4 +120,4 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 
 ## FUTURO (não existe)
 - **Funções puras/constantes sem uso em combate (FUTURO):** `CARREGANDO` (`CHARGE_DAMAGE_MULTIPLIER = 1.5`), dupla `Bruford/Tarkus` (`DuoState`/`DUO_*`), `BuffMulti`/`WeakMulti` (`MathUtils`: `capFinal * min(aplicações, 4) / 4`) e `Time Stop` real (Jotaro S3 é 1 hit provisório).
-- **Não existem no código:** `Hamon`, `Block`, `Stun`, `Silence`, `Weaken`, `Clean`, `Vulnerabilidade`, `Resistência`, `Freeze`, chips equipáveis, reorganizar skills, soft counter Support/Controller, tiers/NPCs `Rival`/`Prata`/`Ouro`/`Boss`, `Torneio`, `Crate`, `Arena`/`ServerStorage/Arenas`, `Tag`, `Input`, `Camera`, `Cutscene`, `Sound`, `ShopData`, `AIBrain` e `Components/Skill`.
+- **Não existem no código:** `Hamon`, `Block`, `Stun`, `Silence`, `Weaken`, `Clean`, `Vulnerabilidade`, `Resistência`, `Freeze`, chips equipáveis, reorganizar skills, soft counter Support/Controller, tiers/NPCs `Rival`/`Prata`/`Ouro`/`Boss`, `Torneio`, `Crate`, `Tag`, `Input`, `Camera`, `Cutscene`, `Sound`, `ShopData`, `AIBrain` e `Components/Skill`.

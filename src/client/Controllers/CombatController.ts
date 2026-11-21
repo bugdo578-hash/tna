@@ -1,5 +1,5 @@
 import { ReplicatedStorage, TweenService, Workspace } from "@rbxts/services";
-import { MIN_DAMAGE } from "../../shared/Config";
+import { ARENA_INSTANCE_ID_ATTRIBUTE, MIN_DAMAGE } from "../../shared/Config";
 import {
 	ASSETS_FOLDER_NAME,
 	BENCH_FIGHTER_TRANSPARENCY,
@@ -101,6 +101,8 @@ export class CombatController {
 	private stageFolder: Folder | undefined;
 	private poolContainer: Folder | undefined;
 	private sideIds: readonly [string, string] = ["", ""];
+	private physicalSideIds: readonly [string, string] = ["", ""];
+	private activeArenaInstanceId: string | undefined;
 	private currentAttackToken = 0;
 	private activePendingHits = 0;
 	private activeAttack: ActiveAttackState | undefined;
@@ -114,6 +116,7 @@ export class CombatController {
 		private readonly vfxController?: VFXController,
 		private readonly assetsRoot: Instance = ReplicatedStorage,
 		arenaSearchRoot: Instance = Workspace,
+		private readonly arenaReplicationTimeoutSeconds?: number,
 	) {
 		this.arenaAnchors = new CombatArenaAnchorResolver(arenaSearchRoot);
 		this.damagePool = new CombatDamagePool({
@@ -228,6 +231,21 @@ export class CombatController {
 		return this.arenaAnchors.getResolvedAnchors();
 	}
 
+	/** Retorna a instância física de arena resolvida em `ActiveArenas` para a batalha atual, se houver. */
+	public getActiveArenaInstance(): Model | undefined {
+		return this.arenaAnchors.getActiveArenaInstance();
+	}
+
+	/** Retorna o `instanceId` da arena reservada da batalha atual, se houver. */
+	public getActiveArenaInstanceId(): string | undefined {
+		return this.activeArenaInstanceId;
+	}
+
+	/** Retorna os lados físicos canônicos `[Time A, Time B]` da batalha atual. */
+	public getPhysicalSideIds(): readonly [string, string] {
+		return this.physicalSideIds;
+	}
+
 	/** Retorna os diagnósticos da última resolução de `Arena_bases`. */
 	public getArenaAnchorDiagnostics(): readonly string[] {
 		return this.arenaAnchors.getLastDiagnostics();
@@ -278,28 +296,57 @@ export class CombatController {
 	private onBattleStarted(payload: BattleStartedPayload): void {
 		const generation = this.cleanupStage();
 		if (generation !== this.battleVfxGeneration) return;
+		const physicalSides = payload.arena?.physicalSides ?? payload.sides;
 		this.sideIds = payload.sides;
+		this.physicalSideIds = physicalSides;
+		this.activeArenaInstanceId = payload.arena?.instanceId;
 		this.currentAttackToken += 1;
 		this.activeAttack = undefined;
 		this.deferredAttack = undefined;
 		this.followUpCancelledForCurrentAttack = false;
 		this.hitQueue.clear();
 		this.attackFinalizer.clear();
-
-		const anchorResolution = this.arenaAnchors.resolveForBattle();
-		if (!anchorResolution.ok) {
-			return;
-		}
 		this.battleEnded = false;
 
+		const anchorResolution =
+			payload.arena !== undefined
+				? this.arenaAnchors.resolveForReservedArena(
+						payload.arena,
+						() => this.isCurrentBattle(generation),
+						this.arenaReplicationTimeoutSeconds,
+					)
+				: this.arenaAnchors.resolveForBattle();
+		if (!this.isCurrentBattle(generation)) {
+			return;
+		}
+		if (!anchorResolution.ok) {
+			this.battleEnded = true;
+			this.activeArenaInstanceId = undefined;
+			return;
+		}
+
 		const folder = new Instance("Folder");
-		folder.Name = WORKSPACE_BATTLE_FOLDER_NAME;
+		folder.Name =
+			payload.arena !== undefined
+				? `${WORKSPACE_BATTLE_FOLDER_NAME}_${payload.arena.instanceId}`
+				: WORKSPACE_BATTLE_FOLDER_NAME;
+		if (payload.arena !== undefined) {
+			folder.SetAttribute(ARENA_INSTANCE_ID_ATTRIBUTE, payload.arena.instanceId);
+		}
 		this.stageFolder = folder;
 
 		const waitingSlotCounterBySide: [number, number] = [0, 0];
 
 		for (const snapshot of payload.fighters) {
-			const sideIndex: 0 | 1 = snapshot.sideId === payload.sides[0] ? 0 : 1;
+			let sideIndex: 0 | 1;
+			if (snapshot.sideId === physicalSides[0]) {
+				sideIndex = 0;
+			} else if (snapshot.sideId === physicalSides[1]) {
+				sideIndex = 1;
+			} else {
+				warn(`[CombatController] sideId "${snapshot.sideId}" não pertence aos lados físicos da arena.`);
+				continue;
+			}
 			const benchSlot = snapshot.active ? 0 : waitingSlotCounterBySide[sideIndex];
 			if (!snapshot.active) {
 				waitingSlotCounterBySide[sideIndex] += 1;
@@ -933,6 +980,8 @@ export class CombatController {
 		this.stageFolder = undefined;
 		this.fightersByTargetId.clear();
 		this.arenaAnchors.clear();
+		this.activeArenaInstanceId = undefined;
+		this.physicalSideIds = ["", ""];
 		this.attackFinalizer.clear();
 		this.vfxBridge.clearWorkingCopies();
 		this.vfxBridge.clearActiveVfx();

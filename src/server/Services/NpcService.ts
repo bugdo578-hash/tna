@@ -132,9 +132,13 @@ export class NpcService {
 			return this.sessions.attachSideAI(player, 1, this.rng) !== undefined;
 		});
 		if (!ok || !created) {
+			const failureReason = ok ? this.sessions.getLastCreateFailureReason() : undefined;
 			this.sessions.destroySessionForPlayer(player);
 			release();
 			if (!ok) warn(`[NpcService] erro ao iniciar batalha: ${tostring(created)}`);
+			if (failureReason === "no_arena_available") {
+				return this.reject(player, "arena_indisponivel");
+			}
 			return this.reject(player, "erro");
 		}
 		return true;

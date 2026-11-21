@@ -22,6 +22,7 @@ export const UITheme = {
 			carregando: "Aguarde seus dados carregarem.",
 			distancia: "Chegue mais perto do NPC.",
 			time_invalido: "Equipe ao menos um lutador disponível.",
+			arena_indisponivel: "Nenhuma arena disponível no momento.",
 			erro: "Não foi possível iniciar a batalha.",
 		} as Readonly<Record<NpcBattleNoticeReason, string>>,
 		FormatRematchCooldown: (seconds: number) => `Aguarde ${seconds}s para reenfrentar este NPC.`,
