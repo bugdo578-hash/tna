@@ -393,8 +393,16 @@ function validatePvpRandomPhysicalSidesWithArena(root: Folder): void {
 		() => currentRoll,
 	);
 
-	// Sequência [0.1, 0.2, 0.8, 0.9] comprova 50/50 (A/B) e repetição permitida (A->A e B->B)
-	for (const roll of [0.1, 0.2, 0.8, 0.9]) {
+	// Sequência comprova sorteio inicial 50/50 (A), repetição permitida (A->A e B->B com roll >= 0.9) e alternância 90% (A->B e B->A)
+	const sequence: readonly { readonly roll: number; readonly p1IsSideA: boolean }[] = [
+		{ roll: 0.1, p1IsSideA: true },
+		{ roll: 0.95, p1IsSideA: true },
+		{ roll: 0.2, p1IsSideA: false },
+		{ roll: 0.95, p1IsSideA: false },
+		{ roll: 0.2, p1IsSideA: true },
+	];
+	for (const step of sequence) {
+		const roll = step.roll;
 		currentRoll = roll;
 		starts.clear();
 		now += PVP_INVITE_INTERVAL_SECONDS + 1;
@@ -410,7 +418,7 @@ function validatePvpRandomPhysicalSidesWithArena(root: Folder): void {
 				s1.arena!.physicalSides[1] === s2.arena!.physicalSides[1],
 			`physicalSides idênticos roll=${roll}`,
 		);
-		const p1IsSideA = roll < 0.5;
+		const p1IsSideA = step.p1IsSideA;
 		const expectedP1Side = p1IsSideA ? s1.arena!.physicalSides[0] : s1.arena!.physicalSides[1];
 		const expectedP2Side = p1IsSideA ? s1.arena!.physicalSides[1] : s1.arena!.physicalSides[0];
 		assertInvariant(s1.sides[0] === expectedP1Side && s2.sides[0] === expectedP2Side, `sides relativos batem com sorteio físico roll=${roll}`);

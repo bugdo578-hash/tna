@@ -15,3 +15,8 @@ export const PVP_DAILY_TINYES_CAP = 2000;
 export const PVP_DAILY_XP_CAP = 2000;
 export const PVP_MAX_PAIR_ENTRIES = 200;
 export const PVP_DAY_SECONDS = 86400;
+
+/** Probabilidade neutra (50/50) usada sem histórico ou em conflito de mesmo lado no PvP. */
+export const PVP_SIDE_FAIR_CHANCE = 0.5;
+/** Preferência (90%) de alternar o lado físico A/B em relação ao último PvP do jogador. */
+export const PVP_SIDE_ALTERNATION_CHANCE = 0.9;

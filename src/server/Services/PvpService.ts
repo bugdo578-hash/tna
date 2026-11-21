@@ -1,5 +1,15 @@
 import { HttpService, Players, RunService } from "@rbxts/services";
-import { MAX_ITEM_UUID_LENGTH, PVP_DECLINE_WAIT_SECONDS, PVP_INVITE_EXPIRY_SECONDS, PVP_INVITE_INTERVAL_SECONDS, PVP_PROMPT_MAX_DISTANCE, PVP_RESPONSE_BUCKET_CAPACITY, PVP_RESPONSE_REFILL_PER_SECOND } from "../../shared/Config";
+import {
+	MAX_ITEM_UUID_LENGTH,
+	PVP_DECLINE_WAIT_SECONDS,
+	PVP_INVITE_EXPIRY_SECONDS,
+	PVP_INVITE_INTERVAL_SECONDS,
+	PVP_PROMPT_MAX_DISTANCE,
+	PVP_RESPONSE_BUCKET_CAPACITY,
+	PVP_RESPONSE_REFILL_PER_SECOND,
+	PVP_SIDE_ALTERNATION_CHANCE,
+	PVP_SIDE_FAIR_CHANCE,
+} from "../../shared/Config";
 import type { ChallengeReceivedPayload, ChallengeStatus, ChallengeStatusPayload } from "../../shared/Remotes";
 import { freezeBattleMovement } from "./BattleMovement";
 import { createPlayerInventorySide } from "./BattleTeamFactory";
@@ -7,11 +17,15 @@ import type { BattleSessionService } from "./BattleSessionService";
 import type { PlayerDataService } from "./PlayerDataService";
 import type { ProgressionService } from "./ProgressionService";
 
+export type PvpPhysicalSide = "A" | "B";
+
 interface Invite { id: string; challenger: Player; target: Player; expiresAt: number; }
 interface Bucket { tokens: number; time: number; }
 
 export class PvpService {
 	private readonly pending = new Map<Player, Invite>();
+	private readonly starting = new Set<Player>();
+	private readonly lastPhysicalSide = new Map<Player, PvpPhysicalSide>();
 	private readonly nextInvite = new Map<Player, number>();
 	private readonly declined = new Map<Player, Map<Player, number>>();
 	private readonly buckets = new Map<Player, Map<string, Bucket>>();
@@ -57,7 +71,39 @@ export class PvpService {
 	}
 
 	private available(player: Player): boolean {
-		return player.Parent === Players && this.data.isSessionLoaded(player) && !this.sessions.hasActiveSession(player);
+		return player.Parent === Players && this.data.isSessionLoaded(player) && !this.sessions.hasActiveSession(player) && !this.starting.has(player);
+	}
+
+	/** Retorna o último lado físico PvP ("A" ou "B") registrado em memória para o jogador neste servidor. */
+	public getLastPhysicalSide(player: Player): PvpPhysicalSide | undefined {
+		return this.lastPhysicalSide.get(player);
+	}
+
+	/**
+	 * Resolve o lado físico preferido para o desafiante buscando alternância de 90% em relação ao último PvP.
+	 * - Ambos sem histórico: retorna `undefined` (sorteio justo 50/50).
+	 * - Apenas um jogador com histórico: prefere colocá-lo no lado oposto.
+	 * - Históricos em lados opostos: uma única inversão atende ambos simultaneamente.
+	 * - Exceção de conflito (ambos no mesmo lado): é impossível alternar ambos ao mesmo tempo;
+	 *   retorna `undefined` para aplicar sorteio justo 50/50 sem favorecer desafiante ou desafiado.
+	 */
+	private resolvePreferredChallengerSide(challenger: Player, target: Player): PvpPhysicalSide | undefined {
+		const lastChallenger = this.lastPhysicalSide.get(challenger);
+		const lastTarget = this.lastPhysicalSide.get(target);
+		if (lastChallenger === undefined && lastTarget === undefined) return undefined;
+		if (lastChallenger !== undefined && lastTarget !== undefined) {
+			if (lastChallenger === lastTarget) return undefined;
+			return lastChallenger === "A" ? "B" : "A";
+		}
+		if (lastChallenger !== undefined) return lastChallenger === "A" ? "B" : "A";
+		return lastTarget === "A" ? "A" : "B";
+	}
+
+	private shouldPlaceChallengerOnSideA(challenger: Player, target: Player): boolean {
+		const preferred = this.resolvePreferredChallengerSide(challenger, target);
+		if (preferred === undefined) return this.rng() < PVP_SIDE_FAIR_CHANCE;
+		const followPreference = this.rng() < PVP_SIDE_ALTERNATION_CHANCE;
+		return followPreference ? preferred === "A" : preferred === "B";
 	}
 
 	private humanoid(player: Player): Humanoid | undefined {
@@ -123,14 +169,22 @@ export class PvpService {
 		if (first === undefined || second === undefined || ah === undefined || bh === undefined) { this.close(invite, "indisponivel"); return false; }
 		const releases: (() => void)[] = [];
 		const release = () => { for (const restore of releases) restore(); };
+		let challengerOnSideA = true;
+		this.starting.add(a);
+		this.starting.add(b);
 		const [ok, created] = pcall(() => {
 			releases.push(freezeBattleMovement(a, ah, () => this.sessions.destroySessionForPlayer(a)));
 			releases.push(freezeBattleMovement(b, bh, () => this.sessions.destroySessionForPlayer(b)));
-			return this.rng() < 0.5
+			challengerOnSideA = this.shouldPlaceChallengerOnSideA(a, b);
+			return challengerOnSideA
 				? this.sessions.createSession(a, b, first, second, this.rng, "PVP", release)
 				: this.sessions.createSession(b, a, second, first, this.rng, "PVP", release);
 		});
+		this.starting.delete(a);
+		this.starting.delete(b);
 		if (!ok || !created) { release(); this.close(invite, "indisponivel"); return false; }
+		if (a.Parent === Players) this.lastPhysicalSide.set(a, challengerOnSideA ? "A" : "B");
+		if (b.Parent === Players) this.lastPhysicalSide.set(b, challengerOnSideA ? "B" : "A");
 		this.close(invite, "aceito");
 		return true;
 	}
@@ -181,6 +235,8 @@ export class PvpService {
 		this.prompts.get(player)?.Destroy();
 		this.prompts.delete(player);
 		this.nextInvite.delete(player);
+		this.starting.delete(player);
+		this.lastPhysicalSide.delete(player);
 		this.declined.delete(player);
 		for (const [, targets] of this.declined) targets.delete(player);
 		this.buckets.delete(player);

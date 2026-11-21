@@ -284,9 +284,10 @@ export function validatePvpBattles(): void {
 						now += PVP_INVITE_INTERVAL_SECONDS;
 						assertInvariant(pvp.challenge(a.player, b.player) && pvp.respond(b.player, { inviteId: invite!.inviteId, accept: true }), "revanche permitida mesmo sem premio");
 						const rematch = (sessions as unknown as { activeSessions: { battle: BattleService; sides: [BattleSide, BattleSide]; resolvedHits: number }[] }).activeSessions[0];
+						const rematchPlayerSessions = (sessions as unknown as { playerSessions: Map<Player, { side: BattleSide }> }).playerSessions;
 						// Fixture da duracao: hits reais ja foram exercitados acima.
 						rematch.resolvedHits = 3;
-						rematch.battle.events.battleEnd.fire(rematch.sides[win === 4 ? bi : ai]);
+						rematch.battle.events.battleEnd.fire(rematchPlayerSessions.get(win === 4 ? b.player : a.player)!.side);
 						sessions.step(0);
 						if (win === 2) assertInvariant(ends.get(a.player)?.tinyesReward === expected, "segunda vitoria paga");
 						if (win === 3) assertInvariant(ends.get(a.player)?.tinyesReward === 0 && ends.get(a.player)?.rewardBlockedReason === "limite_par" && ends.get(a.player)?.xpRewards === undefined, "terceira vitoria bloqueada no BattleEnded");

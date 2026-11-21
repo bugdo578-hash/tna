@@ -40,6 +40,7 @@ import {
 	validateXpCurveAndTeamDistribution,
 } from "./tests/progressionTests";
 import { validatePvpBattles, validatePvpDailyXpAndMinimumFight, validatePvpPairAntiFarmWithTinyesCap } from "./tests/pvpTests";
+import { validatePvpSideAlternationL21 } from "./tests/pvpSideAlternationTests";
 import {
 	validatePurchaseAndAllocationResults,
 	validateShop,
@@ -58,6 +59,7 @@ export { validateDayNightCycle } from "./tests/coreTests";
 export { validateNpcBattles, validateNpcRematchCooldown } from "./tests/npcTests";
 export { validatePostBattleXp, validateTinyesEconomy } from "./tests/progressionTests";
 export { validatePvpBattles, validatePvpDailyXpAndMinimumFight, validatePvpPairAntiFarmWithTinyesCap } from "./tests/pvpTests";
+export { validatePvpSideAlternationL21 } from "./tests/pvpSideAlternationTests";
 export { validatePurchaseAndAllocationResults, validateShop } from "./tests/shopTests";
 export { validateBattleTeardownLifecycle } from "./tests/teardownTests";
 export { validateQuitRequestRateLimit } from "./tests/teardownTests";
@@ -108,4 +110,5 @@ export function runSimulation(): void {
 	validateJotaroAndAnubis();
 	validateArenaRegistry();
 	validateArenaSelectionL16();
+	validatePvpSideAlternationL21();
 }

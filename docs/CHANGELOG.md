@@ -2,6 +2,20 @@
 
 Registro conciso de mudanças a partir de `2026-11-14` (ordem cronológica reversa). Histórico anterior a `2026-11-14` (base inicial T1–T5, T7.1, T7.2 e primeira correção de DataStore/autosave): [CHANGELOG_ARCHIVE.md](CHANGELOG_ARCHIVE.md). Estado operacional atual: [HANDOFF.md](HANDOFF.md).
 
+## 2026-11-21 — Lote L2.1: Alternância Inteligente de Lados Físicos no PvP (90/10)
+
+- **Configuração compartilhada (`src/shared/configs/Pvp.ts`):** adicionadas `PVP_SIDE_FAIR_CHANCE = 0.5` e `PVP_SIDE_ALTERNATION_CHANCE = 0.9` (re-exportadas por `src/shared/Config.ts`).
+- **Histórico em memória e sorteio autoritativo no servidor (`src/server/Services/PvpService.ts`):**
+  - Adicionado `lastPhysicalSide: Map<Player, PvpPhysicalSide>` (`"A" | "B"`) mantido exclusivamente em memória no servidor (sem DataStore), populado somente após a criação bem-sucedida da sessão em `respond()` (e somente enquanto o jogador permanecer em `Players`) e limpo em `forgetPlayer(player)` (conectado a `Players.PlayerRemoving`). Exposto getter somente leitura `getLastPhysicalSide(player)`.
+  - Adicionada guarda `starting: Set<Player>` verificada em `available()` e limpa em `forgetPlayer()` para evitar race conditions / reentrância durante a criação da sessão.
+  - Política de sorteio (`resolvePreferredChallengerSide` + `shouldPlaceChallengerOnSideA`), preservando `rng` injetável e decisão exclusiva no servidor:
+    - Ambos sem histórico: sorteio justo 50/50 (`PVP_SIDE_FAIR_CHANCE`).
+    - Apenas um jogador com histórico: 90% de preferência (`PVP_SIDE_ALTERNATION_CHANCE`) por alternar o lado físico desse jogador (10% de repetição permitida), independentemente de ser desafiante ou desafiado.
+    - Históricos em lados opostos: uma única inversão atende ambos simultaneamente (90% alternância / 10% repetição).
+    - **Exceção de conflito (ambos no mesmo lado):** como é impossível alternar ambos simultaneamente (os dois jogadores nunca compartilham o mesmo lado físico), aplica sorteio justo 50/50 sem favorecer permanentemente desafiante nem desafiado.
+  - Falhas na criação da sessão, indisponibilidade de arena, recusas, expirações e validações reprovadas não alteram o histórico. PvE, Boss, `BattleSessionService`, câmera, HUD, combate, `ArenaRegistry`, probabilidades de mapa (L1.6) e `ArenaAmbientVFX` permanecem inalterados.
+- **QA e validação:** criado `src/server/Dev/tests/pvpSideAlternationTests.ts` (`validatePvpSideAlternationL21`, registrado em `src/server/Dev/BattleSimulator.ts`) cobrindo os 12 cenários obrigatórios (determinísticos e estatísticos), e ajustadas as asserções de revanche de `validatePvpBattles()` (`src/server/Dev/tests/pvpTests.ts`) e `validatePvpRandomPhysicalSidesWithArena()` (`src/server/Dev/tests/arenaSelectionTests.ts`) para refletir a alternância 90/10 com repetição permitida. Validado em Play no Studio: `PVP_SIDE_ALTERNATION_L2_1_PASSED`, `PVP_BATTLES_PASSED`, `PVP_INVITES_AND_PERSISTENCE_PASSED`, `PVP_DAILY_XP_AND_MINIMUM_FIGHT_PASSED`, `PVP_PAIR_ANTIFARM_TINYES_CAP_PASSED`, `SIMULATION_ALL_PASSED` (37 marcadores `_PASSED`, 0 erros; dummy `49.7% / 298.98275s`, Jotaro vs Anubis `68% / 67.5943s`, inclui `ARENA_SELECTION_L1_6_PASSED` e `ARENA_REGISTRY_L1_5_PASSED`), `L2_CAMERA_TESTS_ALL_PASSED` (0 erros), validação client de alinhamento câmera/lutadores/Time A↔B + contrato `ArenaAmbientVFX` (`PVP_SIDE_ALTERNATION_L2_1_CLIENT_ALIGN_PASSED`, 12/12 checks), `npx.cmd rbxtsc` (0 erros), `git diff --check` e `tools/check-structure.ps1`.
+
 ## 2026-11-20 — Lote L1.6: Seleção Aleatória e Reutilização de Arenas
 
 - **Catálogo universal, slots físicos e seleção aleatória (`src/shared/configs/Arena.ts`, `src/server/Services/ArenaCatalog.ts`, `src/server/Services/ArenaRegistry.ts`):**
