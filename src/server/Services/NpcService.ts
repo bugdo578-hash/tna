@@ -136,7 +136,7 @@ export class NpcService {
 			this.sessions.destroySessionForPlayer(player);
 			release();
 			if (!ok) warn(`[NpcService] erro ao iniciar batalha: ${tostring(created)}`);
-			if (failureReason === "no_arena_available") {
+			if (failureReason === "no_arena_available" || failureReason === "no_slot_available") {
 				return this.reject(player, "arena_indisponivel");
 			}
 			return this.reject(player, "erro");

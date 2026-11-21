@@ -1,4 +1,4 @@
-// Testes L1.5: ArenaRegistry, isolamento de categorias (PVE/BOSS/PVP), rollback, lifecycle e PvP canônico.
+// Testes L1.5 (migrados ao contrato L1.6): ArenaRegistry, catálogo universal, slots físicos, rollback, lifecycle e PvP canônico.
 import { CollectionService, Players, Workspace } from "@rbxts/services";
 import {
 	ACTIVE_ARENAS_FOLDER_NAME,
@@ -6,12 +6,12 @@ import {
 	ARENA_ID_ATTRIBUTE,
 	ARENA_INSTANCE_ID_ATTRIBUTE,
 	ARENA_SESSION_ID_ATTRIBUTE,
+	ARENA_SLOT_ID_ATTRIBUTE,
 	ARENA_TYPE_ATTRIBUTE,
 	BATTLE_INACTIVITY_TIMEOUT_SECONDS,
 	BATTLE_NPC_TAG,
 	BATTLE_STALL_TIMEOUT_SECONDS,
 	NPC_BATTLE_ACTIVE_ATTRIBUTE,
-	type ArenaType,
 } from "../../../shared/Config";
 import type {
 	BattleEndedPayload,
@@ -41,18 +41,18 @@ function makeAnchorPart(name: string, parent: Instance, cf: CFrame): Part {
 	return part;
 }
 
-function buildArenaTemplate(
+export function buildTestArenaTemplate(
 	parent: Instance,
 	modelName: string,
 	arenaId: unknown,
-	arenaType: unknown,
 	origin: CFrame,
 	includeOptionalAnchors = true,
+	legacyArenaType?: unknown,
 ): Model {
 	const model = new Instance("Model");
 	model.Name = modelName;
 	if (arenaId !== undefined) model.SetAttribute(ARENA_ID_ATTRIBUTE, arenaId as AttributeValue);
-	if (arenaType !== undefined) model.SetAttribute(ARENA_TYPE_ATTRIBUTE, arenaType as AttributeValue);
+	if (legacyArenaType !== undefined) model.SetAttribute(ARENA_TYPE_ATTRIBUTE, legacyArenaType as AttributeValue);
 
 	const bases = new Instance("Part");
 	bases.Name = ARENA_BASES_CONTAINER_NAME;
@@ -91,7 +91,19 @@ function buildArenaTemplate(
 	return model;
 }
 
-function makeMockPlayer(userId: number, name: string, pos = new Vector3(0, 0, 0)) {
+export function buildTestSlotPart(parent: Instance, name: string, cf: CFrame, slotIdAttr?: unknown): Part {
+	const part = new Instance("Part");
+	part.Name = name;
+	part.Size = new Vector3(4, 0.5, 4);
+	part.Anchored = true;
+	part.CanCollide = false;
+	part.CFrame = cf;
+	if (slotIdAttr !== undefined) part.SetAttribute(ARENA_SLOT_ID_ATTRIBUTE, slotIdAttr as AttributeValue);
+	part.Parent = parent;
+	return part;
+}
+
+export function makeArenaMockPlayer(userId: number, name: string, pos = new Vector3(0, 0, 0)) {
 	const character = new Instance("Model");
 	const root = new Instance("Part");
 	root.Name = "HumanoidRootPart";
@@ -106,26 +118,12 @@ function makeMockPlayer(userId: number, name: string, pos = new Vector3(0, 0, 0)
 	const removing = new Instance("BindableEvent");
 	const attributes = new Map<string, AttributeValue>();
 	const mock = {
-		Parent: Players as Players | undefined,
-		Name: name,
-		UserId: userId,
-		Character: character,
-		CharacterRemoving: removing.Event,
-		SetAttribute(attr: string, value: AttributeValue): void {
-			attributes.set(attr, value);
-		},
+		Parent: Players as Players | undefined, Name: name, UserId: userId, Character: character, CharacterRemoving: removing.Event,
+		SetAttribute(attr: string, value: AttributeValue): void { attributes.set(attr, value); },
 	};
 	return {
-		player: mock as unknown as Player,
-		mock,
-		character,
-		humanoid,
-		removing,
-		attributes,
-		cleanup(): void {
-			removing.Destroy();
-			character.Destroy();
-		},
+		player: mock as unknown as Player, mock, character, humanoid, removing, attributes,
+		cleanup(): void { removing.Destroy(); character.Destroy(); },
 	};
 }
 
@@ -133,67 +131,78 @@ function validateTemplateDiscoveryAndIds(root: Folder): void {
 	const templates = new Instance("Folder");
 	templates.Name = "TemplatesValidation";
 	templates.Parent = root;
+	const slots = new Instance("Folder");
+	slots.Name = "SlotsValidation";
+	slots.Parent = root;
+	buildTestSlotPart(slots, "Slot_01", new CFrame(0, 0, 0));
 
-	const pveSubfolder = new Instance("Folder");
-	pveSubfolder.Name = "PVE";
-	pveSubfolder.Parent = templates;
+	const subfolder = new Instance("Folder");
+	subfolder.Name = "SubCatalog";
+	subfolder.Parent = templates;
 
-	buildArenaTemplate(pveSubfolder, "ValidPve1", "pve_arena_1", "PVE", new CFrame(0, 0, 0), false);
-	buildArenaTemplate(templates, "ValidPvp1", "pvp_arena_1", "PVP", new CFrame(100, 0, 0), true);
+	// Válidos: sem ArenaType e com ArenaType legado (não é requisito nem filtro)
+	buildTestArenaTemplate(subfolder, "Arena_01", "arena_beach", new CFrame(0, 0, 0), false);
+	buildTestArenaTemplate(templates, "Arena_02", "arena_ruins", new CFrame(100, 0, 0), true, "PVP");
 	// Duplicados (ambos devem ser rejeitados por ambiguidade)
-	buildArenaTemplate(templates, "DupA", "dup_id", "PVE", new CFrame(200, 0, 0));
-	buildArenaTemplate(templates, "DupB", "dup_id", "PVE", new CFrame(300, 0, 0));
-	// IDs e categorias inválidos
-	buildArenaTemplate(templates, "EmptyId", "", "PVE", new CFrame(400, 0, 0));
-	buildArenaTemplate(templates, "SpaceId", "bad id", "PVE", new CFrame(450, 0, 0));
-	buildArenaTemplate(templates, "BossCategory", "boss_cat", "BOSS", new CFrame(500, 0, 0));
-	buildArenaTemplate(templates, "LowerType", "lower_type", "pve", new CFrame(550, 0, 0));
-	const nonArchivable = buildArenaTemplate(templates, "NoArchive", "no_archive", "PVE", new CFrame(600, 0, 0));
+	buildTestArenaTemplate(templates, "DupA", "dup_id", new CFrame(200, 0, 0));
+	buildTestArenaTemplate(templates, "DupB", "dup_id", new CFrame(300, 0, 0));
+	// IDs inválidos, Archivable=false e estrutura quebrada
+	buildTestArenaTemplate(templates, "EmptyId", "", new CFrame(400, 0, 0));
+	buildTestArenaTemplate(templates, "SpaceId", "bad id", new CFrame(450, 0, 0));
+	const nonArchivable = buildTestArenaTemplate(templates, "NoArchive", "no_archive", new CFrame(600, 0, 0));
 	nonArchivable.Archivable = false;
-	const broken = buildArenaTemplate(templates, "Broken", "broken_arena", "PVE", new CFrame(650, 0, 0));
+	const broken = buildTestArenaTemplate(templates, "Broken", "broken_arena", new CFrame(650, 0, 0));
 	broken.FindFirstChild(ARENA_BASES_CONTAINER_NAME)?.FindFirstChild("Time B")?.Destroy();
 
 	const warnings: string[] = [];
 	const registry = new ArenaRegistry({
 		templatesContainer: templates,
+		slotsContainer: slots,
 		activeArenasParent: root,
 		warnFn: (msg) => warnings.push(msg),
 	});
 	const valid = registry.discoverTemplates();
 	assertInvariant(valid.size() === 2, `esperado 2 templates válidos, encontrado ${valid.size()}`);
 	assertInvariant(
-		valid.some((t) => t.arenaId === "pve_arena_1" && t.arenaType === "PVE"),
-		"pve_arena_1 sem anchors AoE opcionais deve ser válido",
+		valid.some((t) => t.arenaId === "arena_beach"),
+		"arena_beach sem ArenaType e sem anchors AoE opcionais deve ser válida",
 	);
 	assertInvariant(
-		valid.some((t) => t.arenaId === "pvp_arena_1" && t.arenaType === "PVP"),
-		"pvp_arena_1 deve ser válido",
+		valid.some((t) => t.arenaId === "arena_ruins"),
+		"arena_ruins deve ser válida no catálogo universal",
 	);
 	assertInvariant(!valid.some((t) => t.arenaId === "dup_id"), "ArenaId duplicado deve ser rejeitado");
-	assertInvariant(!valid.some((t) => t.arenaId === "boss_cat"), "Categoria física BOSS deve ser rejeitada");
-	assertInvariant(warnings.size() >= 6, "diagnósticos de validação devem ser registrados");
+	assertInvariant(warnings.size() >= 5, "diagnósticos de validação devem ser registrados");
 
 	registry.destroy();
 	templates.Destroy();
+	slots.Destroy();
 }
 
-function validateCategoriesConcurrencyAndRollback(root: Folder): void {
+function validateConcurrencyRollbackAndStaleRelease(root: Folder): void {
 	const templates = new Instance("Folder");
-	templates.Name = "TemplatesCategories";
+	templates.Name = "TemplatesConcurrency";
 	templates.Parent = root;
+	const slots = new Instance("Folder");
+	slots.Name = "SlotsConcurrency";
+	slots.Parent = root;
 	const activeParent = new Instance("Folder");
-	activeParent.Name = "ActiveParentCategories";
+	activeParent.Name = "ActiveParentConcurrency";
 	activeParent.Parent = root;
 
-	buildArenaTemplate(templates, "PveA", "pve_1", "PVE", new CFrame(0, 0, 0));
-	buildArenaTemplate(templates, "PveB", "pve_2", "PVE", new CFrame(200, 0, 0));
-	buildArenaTemplate(templates, "PvpA", "pvp_1", "PVP", new CFrame(400, 0, 0));
+	buildTestArenaTemplate(templates, "Arena_01", "arena_1", new CFrame(0, 0, 0));
+	buildTestArenaTemplate(templates, "Arena_02", "arena_2", new CFrame(0, 0, 0));
+	buildTestSlotPart(slots, "Slot_01", new CFrame(0, 0, 0));
+	buildTestSlotPart(slots, "Slot_02", new CFrame(300, 0, 0));
+	buildTestSlotPart(slots, "Slot_03", new CFrame(600, 0, 0));
 
 	let releaseCallbackCount = 0;
 	let failNextClone = false;
 	const registry = new ArenaRegistry({
 		templatesContainer: templates,
+		slotsContainer: slots,
 		activeArenasParent: activeParent,
+		rng: () => 0.0,
 		cloneTemplate: (template) => {
 			if (failNextClone) {
 				failNextClone = false;
@@ -208,33 +217,35 @@ function validateCategoriesConcurrencyAndRollback(root: Folder): void {
 	});
 	registry.start();
 
-	// 1. Duas batalhas PvE simultâneas (PVE + BOSS compartilham categoria PVE) em arenas diferentes
+	// 1. PVE, BOSS e PVP compartilham catálogo universal em slots físicos distintos
 	const rPve = registry.reserveForSession("battle-10", "PVE");
 	const rBoss = registry.reserveForSession("battle-11", "BOSS");
+	const rPvp = registry.reserveForSession("battle-12", "PVP");
 	assertInvariant(rPve.ok && rPve.reservation !== undefined, "reserva PVE 1");
-	assertInvariant(rBoss.ok && rBoss.reservation !== undefined, "reserva BOSS em arena PVE");
-	assertInvariant(rPve.reservation!.arenaType === "PVE" && rBoss.reservation!.arenaType === "PVE", "PVE e BOSS usam arena PVE");
-	assertInvariant(rPve.reservation!.arenaId !== rBoss.reservation!.arenaId, "duas batalhas simultâneas em arenas diferentes");
-	assertInvariant(rPve.reservation!.instance !== rBoss.reservation!.instance, "clones distintos em ActiveArenas");
+	assertInvariant(rBoss.ok && rBoss.reservation !== undefined, "reserva BOSS");
+	assertInvariant(rPvp.ok && rPvp.reservation !== undefined, "reserva PVP");
+	assertInvariant(
+		rPve.reservation!.instance !== rBoss.reservation!.instance &&
+			rBoss.reservation!.instance !== rPvp.reservation!.instance,
+		"clones distintos em ActiveArenas",
+	);
+	assertInvariant(
+		rPve.reservation!.slotId !== rBoss.reservation!.slotId &&
+			rBoss.reservation!.slotId !== rPvp.reservation!.slotId &&
+			rPve.reservation!.slotId !== rPvp.reservation!.slotId,
+		"3 batalhas simultâneas em 3 slots físicos distintos",
+	);
 
 	// Reserva duplicada para mesma sessão rejeitada
 	const dupSession = registry.reserveForSession("battle-10", "PVE");
 	assertInvariant(!dupSession.ok && dupSession.reason === "duplicate_session", "impede reserva duplicada da sessão");
 
-	// Sem arena PVE livre: NÃO desvia para PVP!
-	const noPve = registry.reserveForSession("battle-12", "PVE");
-	const noBoss = registry.reserveForSession("battle-13", "BOSS");
-	assertInvariant(!noPve.ok && noPve.reason === "no_arena_available", "PVE indisponível não desvia para PVP");
-	assertInvariant(!noBoss.ok && noBoss.reason === "no_arena_available", "BOSS indisponível não desvia para PVP");
-	assertInvariant(registry.getAvailableCount("PVP") === 1, "arena PVP permanece livre");
+	// Capacidade física esgotada (3/3 slots ocupados)
+	const noSlot = registry.reserveForSession("battle-13", "PVE");
+	assertInvariant(!noSlot.ok && noSlot.reason === "no_slot_available", "recusa quando capacidade física esgotada");
+	assertInvariant(registry.getAvailableCount() === 0, "capacidade disponível zero quando slots cheios");
 
-	// PVP aloca exclusivamente arena PVP
-	const rPvp = registry.reserveForSession("battle-14", "PVP");
-	assertInvariant(rPvp.ok && rPvp.reservation?.arenaType === "PVP", "PVP reserva arena PVP");
-	const noPvp = registry.reserveForSession("battle-15", "PVP");
-	assertInvariant(!noPvp.ok && noPvp.reason === "no_arena_available", "PVP sem arena disponível");
-
-	// Destruir uma arena ativa NÃO altera a outra
+	// Destruir uma arena ativa NÃO altera as outras
 	const activeFolder = activeParent.FindFirstChild(ACTIVE_ARENAS_FOLDER_NAME) as Folder;
 	assertInvariant(activeFolder !== undefined && activeFolder.GetChildren().size() === 3, "3 clones ativos");
 	const bossInstance = rBoss.reservation!.instance;
@@ -246,35 +257,33 @@ function validateCategoriesConcurrencyAndRollback(root: Folder): void {
 	assertInvariant(rPve.reservation!.instance.Parent === undefined, "clone liberado foi destruído");
 	assertInvariant(bossInstance.Parent === activeFolder && bossBases?.Parent === bossInstance, "outra arena permanece intacta");
 
-	// PVP NUNCA aloca na arena PVE recém-liberada!
-	const pvpStillBlocked = registry.reserveForSession("battle-16", "PVP");
-	assertInvariant(!pvpStillBlocked.ok && pvpStillBlocked.reason === "no_arena_available", "PVP nunca alocado em arena PVE");
-
-	// Falha de clonagem faz rollback sem deixar clone órfão e mantendo arena livre
+	// Falha de clonagem faz rollback sem deixar clone órfão e mantendo slot físico livre
 	failNextClone = true;
 	const cloneFail = registry.reserveForSession("battle-17", "PVE");
 	assertInvariant(!cloneFail.ok && cloneFail.reason === "clone_failed", "falha de clone reportada");
 	assertInvariant(activeFolder.GetChildren().size() === 2, "rollback sem clone órfão");
-	assertInvariant(registry.getAvailableCount("PVE") === 1, "arena PVE continua disponível após rollback de clone");
+	assertInvariant(registry.getAvailableSlotCount() === 1, "slot físico continua disponível após rollback de clone");
 
-	// Nova reserva após liberação e rollback reutiliza a arena liberada com novo instanceId
+	// Nova reserva após liberação e rollback reutiliza o slot físico liberado com novo instanceId
 	const rReused = registry.reserveForSession("battle-18", "PVE");
 	assertInvariant(rReused.ok && rReused.reservation !== undefined, "nova reserva após liberação");
-	assertInvariant(rReused.reservation!.arenaId === rPve.reservation!.arenaId, "reutiliza ArenaId liberado");
+	assertInvariant(rReused.reservation!.slotId === rPve.reservation!.slotId, "reutiliza slot físico liberado");
 	assertInvariant(rReused.reservation!.instanceId !== rPve.reservation!.instanceId, "gera novo instanceId");
 	assertInvariant(
 		rReused.reservation!.instance.GetAttribute(ARENA_SESSION_ID_ATTRIBUTE) === "battle-18" &&
-			rReused.reservation!.instance.GetAttribute(ARENA_INSTANCE_ID_ATTRIBUTE) === rReused.reservation!.instanceId,
+			rReused.reservation!.instance.GetAttribute(ARENA_INSTANCE_ID_ATTRIBUTE) === rReused.reservation!.instanceId &&
+			rReused.reservation!.instance.GetAttribute(ARENA_SLOT_ID_ATTRIBUTE) === rReused.reservation!.slotId,
 		"atributos da nova instância corretos",
 	);
 
-	// Liberação antiga nunca afeta reserva nova do mesmo ArenaId
+	// Liberação antiga nunca afeta reserva nova no mesmo ArenaId ou slot físico
 	assertInvariant(!registry.releaseReservation(rPve.reservation!), "reserva antiga não libera reserva nova");
 	assertInvariant(rReused.reservation!.instance.Parent === activeFolder, "nova instância permanece ativa");
 
 	registry.destroy();
 	assertInvariant(activeFolder.GetChildren().size() === 0, "destroy limpa todos os clones");
 	templates.Destroy();
+	slots.Destroy();
 	activeParent.Destroy();
 }
 
@@ -282,16 +291,21 @@ function validateSessionLifecycleAndUnavailability(root: Folder): void {
 	const templates = new Instance("Folder");
 	templates.Name = "TemplatesLifecycle";
 	templates.Parent = root;
+	const slots = new Instance("Folder");
+	slots.Name = "SlotsLifecycle";
+	slots.Parent = root;
 	const activeParent = new Instance("Folder");
 	activeParent.Name = "ActiveParentLifecycle";
 	activeParent.Parent = root;
 
-	buildArenaTemplate(templates, "PveOnly", "life_pve", "PVE", new CFrame(0, 0, 0));
-	buildArenaTemplate(templates, "PvpOnly", "life_pvp", "PVP", new CFrame(300, 0, 0));
+	buildTestArenaTemplate(templates, "Arena_01", "life_arena_1", new CFrame(0, 0, 0));
+	buildTestSlotPart(slots, "Slot_01", new CFrame(0, 0, 0));
 
 	const registry = new ArenaRegistry({
 		templatesContainer: templates,
+		slotsContainer: slots,
 		activeArenasParent: activeParent,
+		rng: () => 0.25,
 		warnFn: () => {},
 	});
 	registry.start();
@@ -301,7 +315,7 @@ function validateSessionLifecycleAndUnavailability(root: Folder): void {
 	let userId = 998100;
 
 	for (const outcome of outcomes) {
-		const p = makeMockPlayer(userId++, `ArenaLife_${outcome}`);
+		const p = makeArenaMockPlayer(userId++, `ArenaLife_${outcome}`);
 		let startedPayload: BattleStartedPayload | undefined;
 		const endedPayloads: BattleEndedPayload[] = [];
 		const adapter = createSurgicalMockAdapter({
@@ -323,8 +337,8 @@ function validateSessionLifecycleAndUnavailability(root: Folder): void {
 		} else {
 			assertInvariant(created && startedPayload?.arena !== undefined, `${outcome}: sessão com arena reservada`);
 			assertInvariant(
-				registry.getActiveReservations().size() === 1 && registry.getAvailableCount("PVE") === 0,
-				`${outcome}: arena ocupada durante a sessão`,
+				registry.getActiveReservations().size() === 1 && registry.getAvailableSlotCount() === 0,
+				`${outcome}: slot físico ocupado durante a sessão`,
 			);
 			const active = (sessions as unknown as { activeSessions: { battle: BattleService }[] }).activeSessions[0];
 			if (outcome === "victory") {
@@ -350,13 +364,12 @@ function validateSessionLifecycleAndUnavailability(root: Folder): void {
 			}
 			expectedReleases += 1;
 			assertInvariant(!sessions.hasActiveSession(p.player), `${outcome}: sessão encerrada`);
-			// Chamadas redundantes não duplicam liberação
 			sessions.destroySessionForPlayer(p.player);
 			sessions.requestQuit(p.player);
 		}
 
 		assertInvariant(registry.getActiveReservations().size() === 0, `${outcome}: 0 reservas ativas após fim`);
-		assertInvariant(registry.getAvailableCount("PVE") === 1, `${outcome}: arena PVE voltou a ficar livre`);
+		assertInvariant(registry.getAvailableSlotCount() === 1, `${outcome}: slot físico voltou a ficar livre`);
 		assertInvariant(registry.getReleaseCount() === expectedReleases, `${outcome}: liberada exatamente uma vez (${registry.getReleaseCount()}/${expectedReleases})`);
 		const folder = registry.getActiveArenasFolder();
 		assertInvariant(folder !== undefined && folder.GetChildren().size() === 0, `${outcome}: sem clones órfãos`);
@@ -364,10 +377,10 @@ function validateSessionLifecycleAndUnavailability(root: Folder): void {
 	}
 
 	// PvP: dois jogadores recebem a MESMA instância física e lados físicos canônicos [A, B]
-	const p1 = makeMockPlayer(userId++, "PvpArena1", new Vector3(0, 0, 0));
-	const p2 = makeMockPlayer(userId++, "PvpArena2", new Vector3(2, 0, 0));
-	const p3 = makeMockPlayer(userId++, "PvpArena3", new Vector3(4, 0, 0));
-	const p4 = makeMockPlayer(userId++, "PvpArena4", new Vector3(6, 0, 0));
+	const p1 = makeArenaMockPlayer(userId++, "PvpArena1", new Vector3(0, 0, 0));
+	const p2 = makeArenaMockPlayer(userId++, "PvpArena2", new Vector3(2, 0, 0));
+	const p3 = makeArenaMockPlayer(userId++, "PvpArena3", new Vector3(4, 0, 0));
+	const p4 = makeArenaMockPlayer(userId++, "PvpArena4", new Vector3(6, 0, 0));
 	const pvpStarted = new Map<Player, BattleStartedPayload>();
 	const sessions = new BattleSessionService(
 		createSurgicalMockAdapter({
@@ -383,7 +396,8 @@ function validateSessionLifecycleAndUnavailability(root: Folder): void {
 	const s2 = pvpStarted.get(p2.player);
 	assertInvariant(s1?.arena !== undefined && s2?.arena !== undefined, "ambos clientes PVP recebem payload.arena");
 	assertInvariant(s1!.arena!.instanceId === s2!.arena!.instanceId, "ambos clientes PVP usam a mesma instância física");
-	assertInvariant(s1!.arena!.arenaId === "life_pvp" && s1!.arena!.arenaType === "PVP", "PVP usa arena PVP");
+	assertInvariant(s1!.arena!.arenaId === "life_arena_1", "PVP usa catálogo universal");
+	assertInvariant(s1!.arena!.arenaType === undefined, "payload L1.6 não exige nem envia arenaType");
 	assertInvariant(
 		s1!.sides[0] === s1!.arena!.physicalSides[0] &&
 			s2!.sides[0] === s1!.arena!.physicalSides[1] &&
@@ -392,7 +406,7 @@ function validateSessionLifecycleAndUnavailability(root: Folder): void {
 		"lados físicos canônicos idênticos entre clientes PVP sem inverter Time A/Time B",
 	);
 
-	// Fluxo real PvpService quando todas arenas PVP estão ocupadas -> ChallengeStatus "indisponivel"
+	// Fluxo real PvpService quando capacidade física está esgotada -> ChallengeStatus "indisponivel"
 	const progression = new ProgressionService();
 	const data = new PlayerDataService(progression, {
 		dataStore: new InMemoryDataStore(),
@@ -415,21 +429,17 @@ function validateSessionLifecycleAndUnavailability(root: Folder): void {
 		() => 0.5,
 	);
 	assertInvariant(pvpService.challenge(p3.player, p4.player), "convite PVP enviado");
-	assertInvariant(!pvpService.respond(p4.player, { inviteId, accept: true }), "aceite PVP falha sem arena PVP livre");
+	assertInvariant(!pvpService.respond(p4.player, { inviteId, accept: true }), "aceite PVP falha sem slot físico livre");
 	assertInvariant(
 		statuses.some((entry) => entry.inviteId === inviteId && entry.status === "indisponivel"),
-		"PvpService envia ChallengeStatus indisponivel sem desviar para arena PVE",
+		"PvpService envia ChallengeStatus indisponivel quando capacidade física está esgotada",
 	);
 	assertInvariant(
 		p3.attributes.get(NPC_BATTLE_ACTIVE_ATTRIBUTE) === false && p4.attributes.get(NPC_BATTLE_ACTIVE_ATTRIBUTE) === false,
-		"movimento restaurado após recusa PVP por falta de arena",
+		"movimento restaurado após recusa PVP por falta de capacidade física",
 	);
-	assertInvariant(registry.getAvailableCount("PVE") === 1, "arena PVE livre não foi tocada pelo PVP");
 
-	// Fluxo real NpcService quando todas arenas PVE estão ocupadas -> NpcBattleNotice "arena_indisponivel"
-	const npcPlayerBusy = makeMockPlayer(userId++, "NpcHolder");
-	assertInvariant(sessions.createSession(npcPlayerBusy.player, undefined, createDummySide(rng), createDummySide(rng), rng, "PVE", undefined, "BOSS"), "BOSS ocupa única arena PVE");
-	assertInvariant(registry.getAvailableCount("PVE") === 0, "arena PVE ocupada por BOSS");
+	// Fluxo real NpcService quando capacidade física está esgotada -> NpcBattleNotice "arena_indisponivel"
 	const npc = new Instance("Model");
 	npc.Name = "ArenaBusyNpc";
 	const npcPart = new Instance("Part");
@@ -443,12 +453,11 @@ function validateSessionLifecycleAndUnavailability(root: Folder): void {
 	const notices: NpcBattleNoticePayload[] = [];
 	const npcService = new NpcService(sessions, data, progression, (_, payload) => notices.push(payload), () => 20, () => 0.5);
 	npcService.bindNpc(npc);
-	assertInvariant(!npcService.trigger(p3.player, npc), "NPC recusa sem arena PVE disponível");
+	assertInvariant(!npcService.trigger(p3.player, npc), "NPC recusa sem slot físico disponível");
 	assertInvariant(notices.size() > 0 && notices[notices.size() - 1].reason === "arena_indisponivel", "NpcService informa arena_indisponivel");
-	assertInvariant(p3.attributes.get(NPC_BATTLE_ACTIVE_ATTRIBUTE) === false, "movimento restaurado após recusa NPC por falta de arena");
+	assertInvariant(p3.attributes.get(NPC_BATTLE_ACTIVE_ATTRIBUTE) === false, "movimento restaurado após recusa NPC por falta de capacidade");
 
 	sessions.requestQuit(p1.player);
-	sessions.requestQuit(npcPlayerBusy.player);
 	npcService.destroy();
 	npc.Destroy();
 	pvpService.forgetPlayer(p3.player);
@@ -457,9 +466,9 @@ function validateSessionLifecycleAndUnavailability(root: Folder): void {
 	p2.cleanup();
 	p3.cleanup();
 	p4.cleanup();
-	npcPlayerBusy.cleanup();
 	registry.destroy();
 	templates.Destroy();
+	slots.Destroy();
 	activeParent.Destroy();
 }
 
@@ -469,7 +478,7 @@ export function validateArenaRegistry(): void {
 	root.Parent = Workspace;
 	const [ok, failure] = pcall(() => {
 		validateTemplateDiscoveryAndIds(root);
-		validateCategoriesConcurrencyAndRollback(root);
+		validateConcurrencyRollbackAndStaleRelease(root);
 		validateSessionLifecycleAndUnavailability(root);
 	});
 	root.Destroy();

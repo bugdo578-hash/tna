@@ -100,14 +100,14 @@ export interface BattleFighterSnapshot {
 }
 
 export interface BattleArenaPayload {
-	/** Identificador estável do template reservado pelo servidor. */
+	/** Identificador estável do template selecionado pelo servidor. */
 	readonly arenaId: string;
-	/** Categoria física da arena reservada ("PVE" ou "PVP"). */
-	readonly arenaType: ArenaType;
 	/** Identificador inequívoco da instância clonada em Workspace/ActiveArenas. */
 	readonly instanceId: string;
 	/** Ordem física canônica `[sideIdNoTimeA, sideIdNoTimeB]` para consistência entre clientes em PvP. */
 	readonly physicalSides: readonly [string, string];
+	/** @deprecated Legado L1.5 opcional; L1.6 usa catálogo universal sem requisito de ArenaType. */
+	readonly arenaType?: ArenaType;
 }
 
 export interface BattleStartedPayload {

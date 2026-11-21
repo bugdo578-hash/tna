@@ -159,20 +159,28 @@ function lookupReservedArenaInstance(searchRoot: Instance, arena: BattleArenaPay
 
 	const instanceIdAttr = instance.GetAttribute(ARENA_INSTANCE_ID_ATTRIBUTE);
 	const arenaIdAttr = instance.GetAttribute(ARENA_ID_ATTRIBUTE);
-	const arenaTypeAttr = instance.GetAttribute(ARENA_TYPE_ATTRIBUTE);
-	if (instanceIdAttr === undefined || arenaIdAttr === undefined || arenaTypeAttr === undefined) {
+	if (instanceIdAttr === undefined || arenaIdAttr === undefined) {
 		return {
 			waiting: `[CombatArenaAnchors] Atributos da instância reservada "${arena.instanceId}" ainda não replicados.`,
 		};
 	}
-	if (
-		instanceIdAttr !== arena.instanceId ||
-		arenaIdAttr !== arena.arenaId ||
-		arenaTypeAttr !== arena.arenaType
-	) {
+	if (instanceIdAttr !== arena.instanceId || arenaIdAttr !== arena.arenaId) {
 		return {
-			fatal: `[CombatArenaAnchors] Divergência na instância "${instance.GetFullName()}": esperado (${arena.instanceId}, ${arena.arenaId}, ${arena.arenaType}), encontrado (${tostring(instanceIdAttr)}, ${tostring(arenaIdAttr)}, ${tostring(arenaTypeAttr)}).`,
+			fatal: `[CombatArenaAnchors] Divergência na instância "${instance.GetFullName()}": esperado (${arena.instanceId}, ${arena.arenaId}), encontrado (${tostring(instanceIdAttr)}, ${tostring(arenaIdAttr)}).`,
 		};
+	}
+	if (arena.arenaType !== undefined) {
+		const arenaTypeAttr = instance.GetAttribute(ARENA_TYPE_ATTRIBUTE);
+		if (arenaTypeAttr === undefined) {
+			return {
+				waiting: `[CombatArenaAnchors] Atributo legado ${ARENA_TYPE_ATTRIBUTE} da instância "${arena.instanceId}" ainda não replicado.`,
+			};
+		}
+		if (arenaTypeAttr !== arena.arenaType) {
+			return {
+				fatal: `[CombatArenaAnchors] Divergência de ${ARENA_TYPE_ATTRIBUTE} na instância "${instance.GetFullName()}": esperado ${arena.arenaType}, encontrado ${tostring(arenaTypeAttr)}.`,
+			};
+		}
 	}
 
 	return { instance };
@@ -252,7 +260,7 @@ export class CombatArenaAnchorResolver {
 		if (!isValidArenaId(arena.arenaId)) {
 			validationErrors.push(`[CombatArenaAnchors] Payload de arena inválido: arenaId (${tostring(arena.arenaId)}).`);
 		}
-		if (!isValidArenaType(arena.arenaType)) {
+		if (arena.arenaType !== undefined && !isValidArenaType(arena.arenaType)) {
 			validationErrors.push(`[CombatArenaAnchors] Payload de arena inválido: arenaType (${tostring(arena.arenaType)}).`);
 		}
 		if (validationErrors.size() > 0) {
@@ -324,8 +332,9 @@ export class CombatArenaAnchorResolver {
 			return { ok: false, diagnostics: [] };
 		}
 
+		const arenaLabel = arena.arenaType !== undefined ? `${arena.arenaId}/${arena.arenaType}` : arena.arenaId;
 		const finalDiagnostics: string[] = [
-			`[CombatArenaAnchors] Timeout (${clampedTimeout}s) aguardando replicação da arena reservada "${arena.instanceId}" (${arena.arenaId}/${arena.arenaType}).`,
+			`[CombatArenaAnchors] Timeout (${clampedTimeout}s) aguardando replicação da arena reservada "${arena.instanceId}" (${arenaLabel}).`,
 		];
 		for (const detail of lastDiagnostics) {
 			finalDiagnostics.push(detail);

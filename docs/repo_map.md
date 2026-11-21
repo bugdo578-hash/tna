@@ -9,7 +9,8 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `src/client/main.client.ts`: entrypoint client; instancia e inicia controllers e UI na ordem de assinatura dos snapshots.
 ### Server (`src/server/`)
 - `Services/AIService.ts`: IA Bronze PVE (reação, erro 30%, S3 bloqueado < Lv5, trocas por HP/tempo; só envia intenções).
-- `Services/ArenaRegistry.ts`: descoberta/validação de templates em `ServerStorage/ArenaTemplates`, reserva exclusiva (`PVE`/`BOSS` -> `"PVE"`, `PVP` -> `"PVP"`), clonagem para `Workspace/ActiveArenas`, rollback e liberação idempotente por sessão.
+- `Services/ArenaCatalog.ts`: descoberta/validação do catálogo universal em `ServerStorage/ArenaTemplates` (sem requisito de `ArenaType`), descoberta de marcadores físicos `BasePart`/`Attachment` em `Workspace/ArenaSlots` e seleção aleatória evitando repetição imediata por participante.
+- `Services/ArenaRegistry.ts`: seleção aleatória, reserva atômica por `BattleSessionId`/`ArenaInstanceId`/`ArenaSlotId`, clonagem simultânea do mesmo template com posicionamento via `PivotTo` em `Workspace/ActiveArenas`, histórico por participante, rollback e liberação idempotente.
 - `Services/ATBService.ts`: avança barra ATB (`0–10`) em `IDLE` quando ativo está vivo e `NORMAL`.
 - `Services/BattleMovement.ts`: congela/restaura `WalkSpeed`/`JumpPower`/`JumpHeight`/`UseJumpPower` e `NpcBattleActive` (NPC/PVP).
 - `Services/BattleRewardService.ts`: decisão e cálculo de recompensas ao fim da sessão (PVE Bronze/PVP, Tinyes, XP, tetos diários, `RewardBlockedReason`), com `pcall`/`warn` por participante; `settleParticipant` e `awardSessionXp` (`session.rewardPaid` continua sendo marcado como guarda anti-pagamento duplicado).
@@ -39,7 +40,8 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `Dev/tests/persistenceTests.ts`: testes de persistência no DataStore, locks de sessão, tokens, backups de corrupção, saída durante load e orçamento de shutdown.
 - `Dev/tests/dataStoreIntegrityTests.ts`: testes de integridade do DataStore (esgotamento de confirmação no load com kick único e round-trip JSON de floats/economia).
 - `Dev/tests/teardownTests.ts`: testes de ciclo de vida de teardown de sessão de batalha, exigência de `Players.Parent` e isolamento de erros entre sessões.
-- `Dev/tests/arenaRegistryTests.ts`: testes L1.5 de descoberta/validação de templates, categorias `PVE`/`BOSS`/`PVP`, rollback, indisponibilidade, lifecycle completo e consistência PvP.
+- `Dev/tests/arenaRegistryTests.ts`: testes L1.5 (migrados ao contrato L1.6) de descoberta/validação de templates, slots físicos, rollback, indisponibilidade, lifecycle completo e consistência PvP.
+- `Dev/tests/arenaSelectionTests.ts`: testes L1.6 de catálogo universal, independência de `ArenaId`/`Name`, seleção aleatória, não repetição imediata, reutilização simultânea do mesmo template e separação física por slots.
 - `Dev/DummyBattleSession.ts`: cria sessões dev (`createDummyBattleSession`, `createJotaroVsAnubisBattleSession`).
 - `Dev/DummyFighters.ts`: cria times dummy/fixos dev (`createDummySide`, `createDevOpponentSide`) e re-exporta factory.
 ### Client (`src/client/`)

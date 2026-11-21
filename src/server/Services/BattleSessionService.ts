@@ -78,6 +78,10 @@ interface PlayerBattleSession {
 	readonly side: BattleSide;
 }
 
+function getArenaParticipantKey(player: Player): string {
+	return player.UserId !== undefined ? `u:${player.UserId}` : `n:${player.Name}`;
+}
+
 export class BattleSessionService {
 	private readonly playerSessions = new Map<Player, PlayerBattleSession>();
 	private activeSessions: BattleSessionRecord[] = [];
@@ -131,7 +135,13 @@ export class BattleSessionService {
 		let arenaReservation: ArenaReservation | undefined;
 		if (this.arenaRegistry !== undefined) {
 			const arenaKind: BattleEncounterKind = mode === "PVP" ? "PVP" : (encounterKind ?? "PVE");
-			const reserveResult = this.arenaRegistry.reserveForSession(sessionKey, arenaKind);
+			const participantKeys: string[] = [getArenaParticipantKey(firstPlayer)];
+			if (secondPlayer !== undefined) {
+				participantKeys.push(getArenaParticipantKey(secondPlayer));
+			}
+			const reserveResult = this.arenaRegistry.reserveForSession(sessionKey, arenaKind, {
+				participantKeys,
+			});
 			if (!reserveResult.ok || reserveResult.reservation === undefined) {
 				this.lastCreateFailureReason = reserveResult.reason;
 				return false;
@@ -348,7 +358,10 @@ export class BattleSessionService {
 	public quit(player: Player, disconnected = false): void {
 		const playerSession = this.playerSessions.get(player);
 		if (playerSession === undefined) {
-			if (disconnected) this.remoteService.forgetPlayer(player);
+			if (disconnected) {
+				this.remoteService.forgetPlayer(player);
+				this.arenaRegistry?.forgetParticipant(getArenaParticipantKey(player));
+			}
 			return;
 		}
 
@@ -358,7 +371,10 @@ export class BattleSessionService {
 		const [ok, failure] = pcall(() => this.finishSession(session, winnerSide, disconnected ? "disconnect" : "quit"));
 		this.destroySession(session);
 		if (!ok) warn(`[BattleSessionService] erro ao sair: ${tostring(failure)}`);
-		if (disconnected) this.remoteService.forgetPlayer(player);
+		if (disconnected) {
+			this.remoteService.forgetPlayer(player);
+			this.arenaRegistry?.forgetParticipant(getArenaParticipantKey(player));
+		}
 	}
 
 	public step(dt: number): void {
@@ -571,7 +587,6 @@ export class BattleSessionService {
 			? undefined
 			: {
 				arenaId: session.arenaReservation.arenaId,
-				arenaType: session.arenaReservation.arenaType,
 				instanceId: session.arenaReservation.instanceId,
 				physicalSides: session.sideIds,
 			};
