@@ -66,3 +66,29 @@ export const COMBAT_FEEDBACK_COLORS = {
 } as const;
 
 export const BATTLE_END_CLEANUP_DELAY_SECONDS = 2.0;
+
+// Enquadramento adaptativo da câmera de batalha (L2.2).
+export const CAMERA_MIN_VALID_VIEWPORT_PX = 16;
+export const CAMERA_VIEWPORT_CHANGE_MIN_PIXELS = 2;
+export const CAMERA_ASPECT_CHANGE_EPSILON = 0.005;
+export const CAMERA_BASE_FOV_MIN = 40;
+export const CAMERA_BASE_FOV_MAX = 90;
+// Provisório: limites de FOV para evitar recuo excessivo em retrato (9:16) e distorção olho-de-peixe em telas largas.
+export const CAMERA_MAX_VERTICAL_FOV = 92;
+export const CAMERA_MAX_HORIZONTAL_FOV = 104;
+export const CAMERA_MIN_NEAR_DEPTH_STUDS = 1.5;
+export const CAMERA_MAX_PULLBACK_STUDS = 40;
+export const CAMERA_FRAME_PADDING_HORIZONTAL = 0.06;
+export const CAMERA_FRAME_PADDING_TOP = 0.10;
+export const CAMERA_FRAME_PADDING_BOTTOM = 0.10;
+export const CAMERA_NOMINAL_FIGHTER_MIN_LOCAL = new Vector3(-0.9, 0, -1.0);
+export const CAMERA_NOMINAL_FIGHTER_MAX_LOCAL = new Vector3(0.9, 3.0, 1.2);
+export const CAMERA_ACTIVE_ANIMATION_MARGIN_SIDE_STUDS = 0.4;
+export const CAMERA_ACTIVE_ANIMATION_MARGIN_TOP_STUDS = 0.45;
+export const CAMERA_ACTIVE_ANIMATION_MARGIN_FRONT_STUDS = 0.35;
+export const CAMERA_ACTIVE_DODGE_MARGIN_FRACTION = 0.4;
+export const CAMERA_ACTIVE_KNOCKBACK_CRIT_MULTIPLIER = 1.4;
+export const CAMERA_BENCH_ANIMATION_MARGIN_SIDE_STUDS = 0.25;
+export const CAMERA_BENCH_ANIMATION_MARGIN_TOP_STUDS = 0.3;
+export const CAMERA_OCCLUSION_TRANSPARENCY_THRESHOLD = 0.95;
+export const CAMERA_OCCLUSION_MAX_RAY_STEPS = 10;

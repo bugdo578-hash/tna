@@ -29,6 +29,7 @@ import { ANUBIS_SKILL_DATA, JOTARO_SKILL_DATA, type SkillData } from "../../shar
 import type { SkillSlot, StatusEffect } from "../../shared/TypeDefs";
 import { battleCleanupStep } from "./BattleCleanup";
 import { CombatCameraController, resolveSideCameraAnchor } from "./CombatCameraController";
+import type { AdaptiveCameraFrame, CameraFramingContext, FighterFramingSample } from "./CombatCameraFraming";
 import { BattleRemotes } from "./BattleRemotes";
 import { CombatArenaAnchorResolver, type ResolvedArenaAnchors } from "./CombatArenaAnchors";
 import { CombatAttackFinalizer, type PendingDeathRecord } from "./CombatAttackFinalizer";
@@ -120,9 +121,10 @@ export class CombatController {
 		arenaSearchRoot: Instance = Workspace,
 		private readonly arenaReplicationTimeoutSeconds?: number,
 		getCamera?: () => Camera | undefined,
+		getViewportSize?: () => Vector2,
 	) {
 		this.arenaAnchors = new CombatArenaAnchorResolver(arenaSearchRoot);
-		this.cameraController = new CombatCameraController(getCamera);
+		this.cameraController = new CombatCameraController(getCamera, getViewportSize);
 		this.damagePool = new CombatDamagePool({
 			createBattleTween: (object, info, goal) => this.createBattleTween(object, info, goal),
 			delayBattle: (seconds, callback) => this.delayBattle(seconds, callback),
@@ -265,6 +267,16 @@ export class CombatController {
 		return this.cameraController.getLastDiagnostics();
 	}
 
+	/** Retorna o último enquadramento adaptativo aplicado à câmera de batalha, se houver. */
+	public getLastAppliedCameraFrame(): AdaptiveCameraFrame | undefined {
+		return this.cameraController.getLastAppliedFrame();
+	}
+
+	/** Recalcula o enquadramento adaptativo da câmera para o ViewportSize atual. */
+	public refreshCameraFraming(force = false): boolean {
+		return this.cameraController.refreshFraming(force);
+	}
+
 	/** Registra callback disparado quando o HP visual é atualizado após consumir hit/tick/KO. */
 	public onFighterHpVisualChanged(listener: (targetId: string, hp: number, hpMax: number) => void): () => void {
 		this.hpVisualListeners.add(listener);
@@ -348,6 +360,7 @@ export class CombatController {
 		} else {
 			warn(`[CombatController] sideId do jogador "${playerSideId}" não pertence aos lados físicos da arena.`);
 		}
+		const framingContext = this.buildCameraFramingContext();
 		if (playerPhysicalSideIndex !== undefined) {
 			const sideIndex = playerPhysicalSideIndex;
 			const sideFolder = this.arenaAnchors.getSideFolder(sideIndex);
@@ -356,7 +369,7 @@ export class CombatController {
 				const isCurrent = () => this.isCurrentBattle(generation);
 				const initialCheck = resolveSideCameraAnchor(sideFolder, sideIndex);
 				if (initialCheck.ok && initialCheck.camera !== undefined && isInActiveRoot(initialCheck.camera)) {
-					this.cameraController.activateForArenaPart(initialCheck.camera, generation, isCurrent);
+					this.cameraController.activateForArenaPart(initialCheck.camera, generation, isCurrent, framingContext);
 				} else if (payload.arena !== undefined && !initialCheck.fatal) {
 					const timeout = this.arenaReplicationTimeoutSeconds ?? ARENA_CLIENT_REPLICATION_TIMEOUT_SECONDS;
 					this.spawnBattle(() => {
@@ -367,6 +380,8 @@ export class CombatController {
 							generation,
 							isCurrent,
 							timeout,
+							undefined,
+							framingContext,
 						);
 					});
 				} else {
@@ -377,6 +392,8 @@ export class CombatController {
 						generation,
 						isCurrent,
 						0,
+						undefined,
+						framingContext,
 					);
 				}
 			}
@@ -479,7 +496,31 @@ export class CombatController {
 		}
 
 		this.preloadBattleVfx(payload, generation);
-		if (this.isCurrentBattle(generation)) folder.Parent = Workspace;
+		if (this.isCurrentBattle(generation)) {
+			folder.Parent = Workspace;
+			this.cameraController.refreshFraming(true);
+		}
+	}
+
+	private buildCameraFramingContext(): CameraFramingContext | undefined {
+		const anchors = this.arenaAnchors.getResolvedAnchors();
+		if (anchors === undefined) return undefined;
+		return {
+			anchors,
+			getFighterSamples: () => {
+				const samples: FighterFramingSample[] = [];
+				for (const [, entry] of this.fightersByTargetId) {
+					const anchor = entry.active
+						? this.arenaAnchors.getActiveAnchorPart(entry.sideIndex)
+						: this.arenaAnchors.getBenchAnchorPart(entry.sideIndex, entry.benchIndex);
+					if (anchor !== undefined) {
+						samples.push({ model: entry.model, anchor, isActive: entry.active });
+					}
+				}
+				return samples;
+			},
+			getStageFolder: () => this.stageFolder,
+		};
 	}
 
 	private isCurrentBattle(generation: number): boolean {

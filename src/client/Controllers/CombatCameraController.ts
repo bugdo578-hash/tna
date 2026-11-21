@@ -1,11 +1,21 @@
 import { Players, Workspace } from "@rbxts/services";
 import { ARENA_CLIENT_REPLICATION_POLL_SECONDS } from "../../shared/Config";
 import { ARENA_SIDE_ANCHOR_NAMES } from "../UI/CombatVisualConfig";
+import { battleCleanupStep } from "./BattleCleanup";
+import {
+	computeAdaptiveCameraFrame,
+	hasRelevantViewportChange,
+	isValidViewportSize,
+	type AdaptiveCameraFrame,
+	type CameraFramingContext,
+} from "./CombatCameraFraming";
 
 interface SavedCameraState {
 	readonly cameraType: Enum.CameraType;
 	readonly cframe: CFrame;
 	readonly cameraSubject?: BasePart | Humanoid;
+	readonly fieldOfView: number;
+	readonly fieldOfViewMode: Enum.FieldOfViewMode;
 }
 
 export interface ArenaCameraResolutionResult {
@@ -54,22 +64,96 @@ export function resolveSideCameraAnchor(folder: Instance, sideIndex: 0 | 1): Are
 
 /**
  * Gerencia o ciclo de vida da câmera de batalha no client:
- * valida Camera_A/Camera_B na arena exclusiva, salva o estado anterior,
- * ativa Scriptable com o CFrame completo da Part e restaura no encerramento.
+ * valida Camera_A/Camera_B na arena exclusiva, salva o estado anterior (incluindo FOV e FieldOfViewMode),
+ * ativa Scriptable com enquadramento adaptativo referenciado na Part e restaura tudo no encerramento.
  */
 export class CombatCameraController {
 	private savedState?: SavedCameraState;
 	private activeCameraPart?: BasePart;
 	private activeGeneration?: number;
+	private activeIsCurrentBattle?: () => boolean;
+	private framingContext?: CameraFramingContext;
+	private lastAppliedViewportSize?: Vector2;
+	private lastAppliedFrame?: AdaptiveCameraFrame;
 	private cameraTypeGuard?: RBXScriptConnection;
+	private viewportSizeConnection?: RBXScriptConnection;
 	private lastDiagnostics: readonly string[] = [];
 
-	public constructor(private readonly getCamera: () => Camera | undefined = () => Workspace.CurrentCamera) {}
+	public constructor(
+		private readonly getCamera: () => Camera | undefined = () => Workspace.CurrentCamera,
+		private readonly getViewportSize?: () => Vector2,
+	) {}
+
+	private disconnectGuards(): void {
+		if (this.cameraTypeGuard !== undefined) {
+			const conn = this.cameraTypeGuard;
+			this.cameraTypeGuard = undefined;
+			battleCleanupStep("camera type guard disconnect", () => conn.Disconnect());
+		}
+		if (this.viewportSizeConnection !== undefined) {
+			const conn = this.viewportSizeConnection;
+			this.viewportSizeConnection = undefined;
+			battleCleanupStep("camera viewport listener disconnect", () => conn.Disconnect());
+		}
+	}
+
+	private readViewportSize(camera: Camera): Vector2 {
+		return this.getViewportSize !== undefined ? this.getViewportSize() : camera.ViewportSize;
+	}
+
+	private applyFramingToCamera(camera: Camera, cameraPart: BasePart, force: boolean): void {
+		const saved = this.savedState;
+		if (saved === undefined || cameraPart.Parent === undefined) return;
+
+		const viewportSize = this.readViewportSize(camera);
+		if (!force && !hasRelevantViewportChange(this.lastAppliedViewportSize, viewportSize)) {
+			return;
+		}
+
+		const validViewport = isValidViewportSize(viewportSize);
+		const frame = computeAdaptiveCameraFrame(
+			cameraPart.CFrame,
+			viewportSize,
+			saved.fieldOfView,
+			this.framingContext,
+		);
+
+		this.lastAppliedFrame = frame;
+		this.lastAppliedViewportSize = validViewport ? viewportSize : undefined;
+
+		if (validViewport && this.framingContext !== undefined) {
+			if (camera.FieldOfViewMode !== frame.fieldOfViewMode) {
+				camera.FieldOfViewMode = frame.fieldOfViewMode;
+			}
+			camera.FieldOfView = frame.fieldOfView;
+		}
+		camera.CFrame = frame.cframe;
+	}
+
+	public setFramingContext(context?: CameraFramingContext): void {
+		this.framingContext = context;
+	}
+
+	public refreshFraming(force = true): boolean {
+		const part = this.activeCameraPart;
+		const isCurrent = this.activeIsCurrentBattle;
+		if (this.savedState === undefined || part === undefined || part.Parent === undefined) {
+			return false;
+		}
+		if (isCurrent !== undefined && !isCurrent()) {
+			return false;
+		}
+		const camera = this.getCamera();
+		if (camera === undefined) return false;
+		this.applyFramingToCamera(camera, part, force);
+		return true;
+	}
 
 	public activateForArenaPart(
 		cameraPart: BasePart,
 		generation: number,
 		isCurrentBattle: () => boolean,
+		framingContext?: CameraFramingContext,
 	): boolean {
 		if (!isCurrentBattle()) return false;
 		if (cameraPart.Parent === undefined) return false;
@@ -77,22 +161,29 @@ export class CombatCameraController {
 		const camera = this.getCamera();
 		if (camera === undefined) return false;
 
-		this.cameraTypeGuard?.Disconnect();
-		this.cameraTypeGuard = undefined;
+		this.disconnectGuards();
 
 		if (this.savedState === undefined) {
 			this.savedState = {
 				cameraType: camera.CameraType,
 				cframe: camera.CFrame,
 				cameraSubject: camera.CameraSubject,
+				fieldOfView: camera.FieldOfView,
+				fieldOfViewMode: camera.FieldOfViewMode,
 			};
+		}
+
+		if (framingContext !== undefined) {
+			this.framingContext = framingContext;
 		}
 
 		this.activeCameraPart = cameraPart;
 		this.activeGeneration = generation;
+		this.activeIsCurrentBattle = isCurrentBattle;
+		this.lastAppliedViewportSize = undefined;
 		this.lastDiagnostics = [];
 		camera.CameraType = Enum.CameraType.Scriptable;
-		camera.CFrame = cameraPart.CFrame;
+		this.applyFramingToCamera(camera, cameraPart, true);
 
 		this.cameraTypeGuard = camera.GetPropertyChangedSignal("CameraType").Connect(() => {
 			if (this.savedState === undefined || this.activeGeneration !== generation || !isCurrentBattle()) {
@@ -103,7 +194,16 @@ export class CombatCameraController {
 			if (camera.CameraType !== Enum.CameraType.Scriptable) {
 				camera.CameraType = Enum.CameraType.Scriptable;
 			}
-			camera.CFrame = part.CFrame;
+			this.applyFramingToCamera(camera, part, true);
+		});
+
+		this.viewportSizeConnection = camera.GetPropertyChangedSignal("ViewportSize").Connect(() => {
+			if (this.savedState === undefined || this.activeGeneration !== generation || !isCurrentBattle()) {
+				return;
+			}
+			const part = this.activeCameraPart;
+			if (part === undefined || part.Parent === undefined) return;
+			this.applyFramingToCamera(camera, part, false);
 		});
 		return true;
 	}
@@ -116,7 +216,11 @@ export class CombatCameraController {
 		isCurrentBattle: () => boolean,
 		timeoutSeconds = 0,
 		pollSeconds = ARENA_CLIENT_REPLICATION_POLL_SECONDS,
+		framingContext?: CameraFramingContext,
 	): ArenaCameraResolutionResult {
+		if (framingContext !== undefined) {
+			this.framingContext = framingContext;
+		}
 		const clampedTimeout = math.max(timeoutSeconds, 0);
 		const clampedPoll = math.max(pollSeconds, 0.01);
 		const deadline = os.clock() + clampedTimeout;
@@ -139,7 +243,12 @@ export class CombatCameraController {
 				if (!isCurrentBattle()) {
 					return { ok: false, fatal: false, diagnostics: [] };
 				}
-				const activated = this.activateForArenaPart(lastResult.camera, generation, isCurrentBattle);
+				const activated = this.activateForArenaPart(
+					lastResult.camera,
+					generation,
+					isCurrentBattle,
+					this.framingContext,
+				);
 				if (activated) {
 					return lastResult;
 				}
@@ -165,13 +274,16 @@ export class CombatCameraController {
 	}
 
 	public restore(): void {
-		this.cameraTypeGuard?.Disconnect();
-		this.cameraTypeGuard = undefined;
+		this.disconnectGuards();
 
 		const saved = this.savedState;
 		this.savedState = undefined;
 		this.activeCameraPart = undefined;
 		this.activeGeneration = undefined;
+		this.activeIsCurrentBattle = undefined;
+		this.framingContext = undefined;
+		this.lastAppliedViewportSize = undefined;
+		this.lastAppliedFrame = undefined;
 
 		if (saved === undefined) return;
 
@@ -188,6 +300,8 @@ export class CombatCameraController {
 				camera.CameraSubject = humanoid;
 			}
 		}
+		camera.FieldOfViewMode = saved.fieldOfViewMode;
+		camera.FieldOfView = saved.fieldOfView;
 		camera.CFrame = saved.cframe;
 	}
 
@@ -201,6 +315,10 @@ export class CombatCameraController {
 
 	public getActiveGeneration(): number | undefined {
 		return this.activeGeneration;
+	}
+
+	public getLastAppliedFrame(): AdaptiveCameraFrame | undefined {
+		return this.lastAppliedFrame;
 	}
 
 	public getLastDiagnostics(): readonly string[] {
