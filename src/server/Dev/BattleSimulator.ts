@@ -1,4 +1,5 @@
 // Ponto de entrada da suíte de testes e simulação do servidor (re-exporta validações públicas e executa runSimulation).
+import { validateArenaPlayerTransportL3 } from "./tests/arenaPlayerTransportTests";
 import { validateArenaRegistry } from "./tests/arenaRegistryTests";
 import { validateArenaSelectionL16 } from "./tests/arenaSelectionTests";
 import {
@@ -53,6 +54,7 @@ import {
 	validateSessionErrorIsolation,
 } from "./tests/teardownTests";
 
+export { validateArenaPlayerTransportL3 } from "./tests/arenaPlayerTransportTests";
 export { validateArenaRegistry } from "./tests/arenaRegistryTests";
 export { validateArenaSelectionL16 } from "./tests/arenaSelectionTests";
 export { validateDayNightCycle } from "./tests/coreTests";
@@ -111,4 +113,5 @@ export function runSimulation(): void {
 	validateArenaRegistry();
 	validateArenaSelectionL16();
 	validatePvpSideAlternationL21();
+	validateArenaPlayerTransportL3();
 }

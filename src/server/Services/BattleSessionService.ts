@@ -31,6 +31,10 @@ import type { ProgressionService } from "./ProgressionService";
 import { BattleSide, type FighterIndex } from "../Components/BattleSide";
 import type { Fighter } from "../Components/Fighter";
 import { AIService } from "./AIService";
+import {
+	ArenaPlayerTransportService,
+	type ArenaSessionTransportResult,
+} from "./ArenaPlayerTransport";
 import type { ArenaRegistry, ArenaReservation, ArenaReserveFailureReason } from "./ArenaRegistry";
 import { BattleRewardService } from "./BattleRewardService";
 import { BattleService } from "./BattleService";
@@ -55,6 +59,7 @@ interface BattleSessionRecord {
 	readonly battle: BattleService;
 	readonly mode: SessionMode;
 	arenaReservation?: ArenaReservation;
+	transportGeneration?: number;
 	readonly sides: readonly [BattleSide, BattleSide];
 	readonly participants: readonly SessionParticipant[];
 	readonly sideIds: readonly [string, string];
@@ -88,15 +93,19 @@ export class BattleSessionService {
 	private nextSessionId = 0;
 	private started = false;
 	private lastCreateFailureReason?: ArenaReserveFailureReason;
+	private lastTransportResult?: ArenaSessionTransportResult;
 	private readonly rewardService: BattleRewardService;
+	private readonly playerTransport: ArenaPlayerTransportService;
 
 	public constructor(
 		private readonly remoteService: BattleRemoteAdapter,
 		private readonly tinyesService?: TinyesService,
 		private readonly progressionService?: ProgressionService,
 		private readonly arenaRegistry?: ArenaRegistry,
+		playerTransport?: ArenaPlayerTransportService,
 	) {
 		this.rewardService = new BattleRewardService(tinyesService, progressionService);
+		this.playerTransport = playerTransport ?? new ArenaPlayerTransportService();
 	}
 
 	public start(): void {
@@ -123,6 +132,7 @@ export class BattleSessionService {
 		encounterKind?: BattleEncounterKind,
 	): boolean {
 		this.lastCreateFailureReason = undefined;
+		this.lastTransportResult = undefined;
 		if (firstPlayer.Parent !== Players) return false;
 		if (secondPlayer !== undefined && secondPlayer.Parent !== Players) return false;
 		if (this.playerSessions.has(firstPlayer)) return false;
@@ -178,6 +188,28 @@ export class BattleSessionService {
 			return false;
 		}
 
+		let transportGeneration: number | undefined;
+		if (arenaReservation !== undefined) {
+			const transportResult = this.playerTransport.transportSessionParticipants(
+				sessionKey,
+				arenaReservation,
+				participants.map((p) => ({
+					player: p.player,
+					physicalSideIndex: p.side === firstSide ? 0 : 1,
+				})),
+			);
+			this.lastTransportResult = transportResult;
+			if (!transportResult.ok && !transportResult.cageMissing) {
+				if (this.arenaRegistry !== undefined) {
+					this.cleanupSessionStep("arena rollback", () => this.arenaRegistry?.releaseReservation(arenaReservation));
+				}
+				return false;
+			}
+			if (transportResult.ok) {
+				transportGeneration = transportResult.generation;
+			}
+		}
+
 		const session: BattleSessionRecord = {
 			resolvedHits: 0,
 			averageLevels: [calcAverageLevel(firstSide.fighters.map(f => f.level)), calcAverageLevel(secondSide.fighters.map(f => f.level))],
@@ -189,6 +221,7 @@ export class BattleSessionService {
 			battle,
 			mode,
 			arenaReservation,
+			transportGeneration,
 			sides: [firstSide, secondSide],
 			participants,
 			sideIds,
@@ -276,6 +309,14 @@ export class BattleSessionService {
 		return this.playerSessions.get(player)?.session.arenaReservation;
 	}
 
+	public getPlayerTransportService(): ArenaPlayerTransportService {
+		return this.playerTransport;
+	}
+
+	public getLastTransportResult(): ArenaSessionTransportResult | undefined {
+		return this.lastTransportResult;
+	}
+
 	/**
 	 * Gatilho de ação de um lado da sessão (usado pelo loop dev/IA sem depender de RemoteEvent do client).
 	 */
@@ -359,6 +400,7 @@ export class BattleSessionService {
 		const playerSession = this.playerSessions.get(player);
 		if (playerSession === undefined) {
 			if (disconnected) {
+				this.playerTransport.forgetPlayer(player);
 				this.remoteService.forgetPlayer(player);
 				this.arenaRegistry?.forgetParticipant(getArenaParticipantKey(player));
 			}
@@ -366,12 +408,16 @@ export class BattleSessionService {
 		}
 
 		const session = playerSession.session;
+		if (disconnected) {
+			this.playerTransport.forgetPlayer(player);
+		}
 		const losingSide = playerSession.side;
 		const winnerSide = session.sides[0] === losingSide ? session.sides[1] : session.sides[0];
 		const [ok, failure] = pcall(() => this.finishSession(session, winnerSide, disconnected ? "disconnect" : "quit"));
 		this.destroySession(session);
 		if (!ok) warn(`[BattleSessionService] erro ao sair: ${tostring(failure)}`);
 		if (disconnected) {
+			this.playerTransport.forgetPlayer(player);
 			this.remoteService.forgetPlayer(player);
 			this.arenaRegistry?.forgetParticipant(getArenaParticipantKey(player));
 		}
@@ -430,6 +476,7 @@ export class BattleSessionService {
 			this.finishSession(session, undefined, "timeout");
 		}
 		if (session.ended) return true;
+		this.playerTransport.enforceContainment(`battle-${session.id}`);
 		this.syncAtb(session, remainingDt);
 		return false;
 	}
@@ -539,6 +586,7 @@ export class BattleSessionService {
 		if (session.ended || session.closed) return;
 		session.ended = true;
 		session.reason = reason;
+		this.restoreTransport(session);
 		this.releaseSession(session, reason === "victory" && winnerSide === session.sides[0]);
 		for (const participant of session.participants) {
 			const player = participant.player;
@@ -631,6 +679,7 @@ export class BattleSessionService {
 	private destroySession(session: BattleSessionRecord): void {
 		if (session.closed) return;
 		session.closed = true;
+		this.restoreTransport(session);
 		this.releaseSession(session);
 		this.releaseArena(session);
 		session.paused = false;
@@ -661,6 +710,14 @@ export class BattleSessionService {
 			const [ok, failure] = pcall(() => release(firstSideWon));
 			if (!ok) warn(`[BattleSessionService] erro de limpeza: ${tostring(failure)}`);
 		}
+	}
+
+	private restoreTransport(session: BattleSessionRecord): void {
+		const sessionKey = `battle-${session.id}`;
+		const generation = session.transportGeneration;
+		this.cleanupSessionStep("transporte", () => {
+			this.playerTransport.restoreSession(sessionKey, generation);
+		});
 	}
 
 	private releaseArena(session: BattleSessionRecord): void {

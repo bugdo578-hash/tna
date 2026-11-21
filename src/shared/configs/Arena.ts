@@ -8,6 +8,11 @@ export const ARENA_TEMPLATES_FOLDER_NAME = "ArenaTemplates";
 export const ARENA_SLOTS_FOLDER_NAME = "ArenaSlots";
 export const ACTIVE_ARENAS_FOLDER_NAME = "ActiveArenas";
 export const ARENA_BASES_CONTAINER_NAME = "Arena_bases";
+export const ARENA_PLAYER_CAGE_FOLDER_NAME = "Gaiola dos players";
+export const ARENA_PLAYER_SPAWN_A_NAME = "PlayerSpawn_A";
+export const ARENA_PLAYER_SPAWN_B_NAME = "PlayerSpawn_B";
+export const ARENA_PLAYER_SPAWN_NAMES = [ARENA_PLAYER_SPAWN_A_NAME, ARENA_PLAYER_SPAWN_B_NAME] as const;
+export const ARENA_PLAYER_CAGE_MAX_DRIFT_STUDS = 8; // provisório: tolerância máxima de contenção física na gaiola
 
 export const ARENA_ID_ATTRIBUTE = "ArenaId";
 /** @deprecated Legado L1.5 opcional; não utilizado para filtrar elegibilidade de arenas. */
