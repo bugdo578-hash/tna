@@ -47,6 +47,7 @@ import {
 	validateShop,
 	validateShopSynchronization,
 } from "./tests/shopTests";
+import { validateStarFinger } from "./tests/starFingerTests";
 import {
 	validateBattleTeardownLifecycle,
 	validateQuitRequestRateLimit,
@@ -63,12 +64,14 @@ export { validatePostBattleXp, validateTinyesEconomy } from "./tests/progression
 export { validatePvpBattles, validatePvpDailyXpAndMinimumFight, validatePvpPairAntiFarmWithTinyesCap } from "./tests/pvpTests";
 export { validatePvpSideAlternationL21 } from "./tests/pvpSideAlternationTests";
 export { validatePurchaseAndAllocationResults, validateShop } from "./tests/shopTests";
+export { validateStarFinger } from "./tests/starFingerTests";
 export { validateBattleTeardownLifecycle } from "./tests/teardownTests";
 export { validateQuitRequestRateLimit } from "./tests/teardownTests";
 export { validateSlowAutosaveLogoutRetry } from "./tests/persistenceTests";
 export { validateJsonRoundTripPersistence, validateLoadExhaustionKick } from "./tests/dataStoreIntegrityTests";
 
 export function runSimulation(): void {
+	validateStarFinger();
 	validateMultiHitDeath();
 	validateBattleTeardownLifecycle();
 	validateQuitRequestRateLimit();

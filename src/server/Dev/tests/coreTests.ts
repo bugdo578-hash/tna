@@ -384,14 +384,19 @@ export function validateJotaroAndAnubis(): void {
 			anubisDef.rarity === "Épica",
 		"definição de Anubis incorreta",
 	);
+	const starFinger = jotaroDef.skills[0];
+	const barrage = jotaroDef.skills[1];
+	// SkillData no Studio usa nomes de exibição. O fonte ainda usa as grafias legadas.
 	assertInvariant(
-		jotaroDef.skills[0].name === "star_Finger" && jotaroDef.skills[0].hits.size() === 1,
-		"Jotaro S1 star_Finger deve ter 1 hit",
+		starFinger.name === "Star Finger" || starFinger.name === "star_Finger",
+		`Jotaro S1 deve ser Star Finger (nome recebido: ${starFinger.name})`,
 	);
+	assertInvariant(starFinger.hits.size() === 1, `Jotaro S1 deve ter 1 hit (recebidos: ${starFinger.hits.size()})`);
 	assertInvariant(
-		jotaroDef.skills[1].name === "Barragem_estelar" && jotaroDef.skills[1].hits.size() === 5,
-		"Jotaro S2 Barragem_estelar deve ter 5 hits",
+		barrage.name === "Barragem Estelar" || barrage.name === "Barragem_estelar",
+		`Jotaro S2 deve ser Barragem Estelar (nome recebido: ${barrage.name})`,
 	);
+	assertInvariant(barrage.hits.size() === 5, `Jotaro S2 deve ter 5 hits (recebidos: ${barrage.hits.size()})`);
 	let oraShareSum = 0;
 	for (const hit of jotaroDef.skills[1].hits) {
 		assertInvariant(math.abs(hit.damageShare - 0.2) <= FLOAT_TOLERANCE, "ORA ORA deve ter damageShare igual (0.2)");

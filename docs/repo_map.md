@@ -34,6 +34,7 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `Dev/BattleSimulator.ts`: ponto de entrada enxuto da suíte de testes/simulação no Studio (`runSimulation` e re-exports das `validate*` públicas).
 - `Dev/tests/testHelpers.ts`: constantes de simulação, `createSeededRng`, asserts (`assertInvariant`, `assertStoredEqual`), `runBattleWithSides`/`runBattle`, `createSurgicalMockAdapter` e `SpyProgressionService`.
 - `Dev/tests/coreTests.ts`: testes do núcleo de batalha, IA Bronze, efeitos, pause/quit, crítico, multi-hit, dia/noite, rate limit, `runDummy1000Battles` e `validateJotaroAndAnubis`.
+- `Dev/tests/starFingerTests.ts`: regressão isolada do S1 de Jotaro, com uma emissão de `HitResolved` e aplicação de dano.
 - `Dev/tests/progressionTests.ts`: testes de progressão, curva/distribuição de XP, snapshots, desbloqueio de S3, inventário e economia de Tinyes.
 - `Dev/tests/pvpTests.ts`: testes de duelos PVP 1v1, convites, persistência v4, tetos diários de Tinyes/XP e regra de luta mínima.
 - `Dev/tests/npcTests.ts`: testes de batalhas contra NPCs do mundo, validação de proximidade/prompts e cooldown de reencontro pós-vitória.
