@@ -35,6 +35,7 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `Dev/tests/testHelpers.ts`: constantes de simulação, `createSeededRng`, asserts (`assertInvariant`, `assertStoredEqual`), `runBattleWithSides`/`runBattle`, `createSurgicalMockAdapter` e `SpyProgressionService`.
 - `Dev/tests/coreTests.ts`: testes do núcleo de batalha, IA Bronze, efeitos, pause/quit, crítico, multi-hit, dia/noite, rate limit, `runDummy1000Battles` e `validateJotaroAndAnubis`.
 - `Dev/tests/starFingerTests.ts`: regressão isolada do S1 de Jotaro, com uma emissão de `HitResolved` e aplicação de dano.
+- `Dev/tests/skillRegistryTests.ts`: compara os seis slots de Jotaro e Anubis à configuração anterior à modularização e verifica que o catálogo e os imports antigos compartilham as mesmas tuplas.
 - `Dev/tests/progressionTests.ts`: testes de progressão, curva/distribuição de XP, snapshots, desbloqueio de S3, inventário e economia de Tinyes.
 - `Dev/tests/pvpTests.ts`: testes de duelos PVP 1v1, convites, persistência v4, tetos diários de Tinyes/XP e regra de luta mínima.
 - `Dev/tests/npcTests.ts`: testes de batalhas contra NPCs do mundo, validação de proximidade/prompts e cooldown de reencontro pós-vitória.
@@ -87,7 +88,10 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `Config.ts`: re-exporta os 11 módulos de `configs/` (`AI`, `Animation`, `Arena`, `Combat`, `Dev`, `Economy`, `Network`, `Persistence`, `Progression`, `Pvp`, `World`).
 - `ClassData.ts`: ranges de `baseStats` das 5 classes e triângulo de counter (`×1.175`).
 - `FighterData.ts`: catálogo `FIGHTER_DATA` (`jotaro`, `anubis`) e `rollClassBaseStats`.
-- `SkillData.ts`: timelines provisórias de skills (`JOTARO_SKILL_DATA`, `ANUBIS_SKILL_DATA`).
+- `SkillData.ts`: fachada de compatibilidade para os tipos e os exports `JOTARO_SKILL_DATA` e `ANUBIS_SKILL_DATA`.
+- `skills/SkillTypes.ts`: tipos das timelines e tupla readonly de skills na ordem S1, S2, S3.
+- `skills/SkillRegistry.ts`: associa cada ID de personagem à sua tupla e define `RealFighterId` pelas chaves do registro.
+- `skills/fighters/JotaroSkills.ts` e `skills/fighters/AnubisSkills.ts`: timelines por personagem. Para adicionar um personagem, crie um módulo com uma tupla `SkillDataSlots`, importe-a no registro e use a entrada correspondente em `FIGHTER_DATA`.
 - `NpcData.ts`: definições PVE (`bronze_trainer`: Jotaro Lv1 + Anubis Lv2, seed `20261115`, `rematchCooldownSeconds = 300`).
 - `TypeDefs.ts`: tipos compartilhados (`ClassName`, `Rarity`, estados, `FighterInventoryItem`, `PlayerSaveData`, `DuoState`).
 - `MathUtils.ts`: fórmulas puras de custo, mult, dano, cura, counter, crit, preço e alocação (`BuffMulti`/`WeakMulti` sem uso).

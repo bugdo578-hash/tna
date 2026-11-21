@@ -1,9 +1,10 @@
 import { CLASS_DATA } from "./ClassData";
 import { clamp, lerp } from "./MathUtils";
-import { ANUBIS_SKILL_DATA, JOTARO_SKILL_DATA, type SkillDataSlots } from "./SkillData";
+import { SKILL_REGISTRY, type RealFighterId } from "./skills/SkillRegistry";
+import type { SkillDataSlots } from "./skills/SkillTypes";
 import type { ClassName, NumericRange, Rarity, StatBlock } from "./TypeDefs";
 
-export type RealFighterId = "jotaro" | "anubis";
+export type { RealFighterId } from "./skills/SkillRegistry";
 
 export interface FighterDefinition {
 	readonly fighterId: RealFighterId;
@@ -19,14 +20,14 @@ export const FIGHTER_DATA: Readonly<Record<RealFighterId, FighterDefinition>> = 
 		name: "Jotaro",
 		className: "Fury",
 		rarity: "Lendária",
-		skills: JOTARO_SKILL_DATA,
+		skills: SKILL_REGISTRY.jotaro,
 	},
 	anubis: {
 		fighterId: "anubis",
 		name: "Anubis",
 		className: "Menace",
 		rarity: "Épica",
-		skills: ANUBIS_SKILL_DATA,
+		skills: SKILL_REGISTRY.anubis,
 	},
 };
 

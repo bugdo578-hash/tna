@@ -47,6 +47,7 @@ import {
 	validateShop,
 	validateShopSynchronization,
 } from "./tests/shopTests";
+import { validateSkillRegistry } from "./tests/skillRegistryTests";
 import { validateStarFinger } from "./tests/starFingerTests";
 import {
 	validateBattleTeardownLifecycle,
@@ -71,6 +72,7 @@ export { validateSlowAutosaveLogoutRetry } from "./tests/persistenceTests";
 export { validateJsonRoundTripPersistence, validateLoadExhaustionKick } from "./tests/dataStoreIntegrityTests";
 
 export function runSimulation(): void {
+	validateSkillRegistry();
 	validateStarFinger();
 	validateMultiHitDeath();
 	validateBattleTeardownLifecycle();
