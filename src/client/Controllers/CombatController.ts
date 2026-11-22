@@ -39,6 +39,7 @@ import {
 	type CombatCutsceneRegistry,
 } from "./CombatCutsceneRegistry";
 import type { CombatCameraMode } from "./CombatCutsceneTypes";
+import { BattleFighterMaterialization } from "./BattleFighterMaterialization";
 import { BattleIntroController } from "./BattleIntroController";
 import { BattleRemotes } from "./BattleRemotes";
 import { CombatArenaAnchorResolver, type ResolvedArenaAnchors } from "./CombatArenaAnchors";
@@ -420,6 +421,7 @@ export class CombatController {
 
 	private onBattleEnded(ended: BattleEndedPayload): void {
 		if (ended.transitionId === undefined || this.activeTransitionId === ended.transitionId) {
+			this.introduction.cancelMaterialization(ended.transitionId);
 			this.cutsceneController.cancel("battle_end");
 			this.ambientVfxState.deactivateForBattleEnd(ended.transitionId);
 		}
@@ -453,6 +455,7 @@ export class CombatController {
 
 	private buildBattleStage(payload: BattleStartedPayload, generation: number): void {
 		if (generation !== this.battleVfxGeneration) return;
+		const character = Players.LocalPlayer.Character;
 		const physicalSides = payload.arena?.physicalSides ?? payload.sides;
 		this.sideIds = payload.sides;
 		this.physicalSideIds = physicalSides;
@@ -591,12 +594,28 @@ export class CombatController {
 		}
 
 		if (!this.isCurrentBattle(generation)) return;
+		const transitionId = payload.transitionId;
+		const battleId = this.activeBattleId;
+		const isCurrent = () => this.isCurrentBattle(generation) && !this.battleEnded &&
+			this.activeBattleId === battleId && this.activeArenaInstanceId === payload.arena?.instanceId &&
+			(transitionId === undefined || this.introduction.owns(transitionId));
+		if (transitionId !== undefined && anchorResolution.anchors !== undefined) {
+			const materialization = BattleFighterMaterialization.prepare(
+				this.fightersByTargetId, payload.sides[0], physicalSides, anchorResolution.anchors, folder,
+				() => isCurrent() && Players.LocalPlayer.Character === character,
+			);
+			this.introduction.setMaterialization(transitionId, materialization);
+			if (materialization !== undefined && isCurrent()) {
+				this.trackBattleConnection(Players.LocalPlayer.CharacterRemoving.Connect(() => {
+					this.introduction.cancelMaterialization(transitionId);
+				}));
+			}
+		}
+		if (!isCurrent()) return;
 		folder.Parent = Workspace;
 		const fightersReady = areRequiredFightersReady(payload.fighters, this.fightersByTargetId, folder, physicalSides);
 		this.ambientVfxState.markFightersReady(generation, this.activeBattleId, fightersReady);
 
-		const transitionId = payload.transitionId;
-		const isCurrent = () => this.isCurrentBattle(generation) && (transitionId === undefined || this.introduction.owns(transitionId));
 		const prepare = () => {
 			const [ok, cameraReady] = pcall(() => this.resolveBattleCamera(
 				payload.sides[0], generation, isCurrent, payload.arena !== undefined, transitionId !== undefined,

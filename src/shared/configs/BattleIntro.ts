@@ -4,3 +4,4 @@ export const BATTLE_INTRO_LEAD_SECONDS = 1.5;
 export const BATTLE_CAMERA_ARC_SECONDS = 2.6;
 export const BATTLE_COUNTDOWN_SECONDS = 3;
 export const BATTLE_EXIT_COVER_TIMEOUT_SECONDS = 1;
+export const BATTLE_SPAWN_VFX_TEMPLATE_NAME = "spawnvfx";

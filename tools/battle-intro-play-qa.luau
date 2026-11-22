@@ -1,15 +1,17 @@
 -- StudioTestService QA. Install this source in a temporary Script in ServerScriptService
 -- and a temporary LocalScript in StarterPlayerScripts. Disable the original
--- StarterPlayerScripts.TS.main during this test so the probe can start these controllers.
+-- StarterPlayerScripts.TS.main and ServerScriptService.TS.NetworkBootstrap
+-- so the probe can start its own controllers and battle service.
 -- Run Server & Clients with two players, or call
--- StudioTestService:ExecuteMultiplayerTestAsync(2, "L4.1.2 QA") from Edit.
--- Remove both scripts and restore the original main's Enabled value afterward.
+-- StudioTestService:ExecuteMultiplayerTestAsync(2, "L5.1 QA") from Edit.
+-- Remove both scripts and restore the original Enabled values afterward.
 local run = game:GetService("RunService")
 local test = game:GetService("StudioTestService")
 if not run:IsStudio() then return end
 local players = game:GetService("Players")
 local storage = game:GetService("ReplicatedStorage")
 local protocol = require(storage.TS.Remotes)
+local remote = if run:IsServer() then require(game.ServerScriptService.TS.Services.RemoteService).RemoteService.new() else nil
 local remotes = storage:WaitForChild(protocol.REMOTES_FOLDER_NAME)
 local transition = remotes:WaitForChild(protocol.REMOTE_NAMES.BattleTransition)
 local started = remotes:WaitForChild(protocol.REMOTE_NAMES.BattleStarted)
@@ -23,6 +25,8 @@ if run:IsClient() then
 	local camera = workspace.CurrentCamera
 	local controllers = player.PlayerScripts:WaitForChild("TS"):WaitForChild("Controllers")
 	local combat = require(controllers.CombatController).CombatController
+	local grounding = require(controllers.CombatFighterGrounding)
+	local partIcles = require(storage.Part_Icles)
 	local hudClass = require(controllers.BattleHUD).BattleHUD
 	local frames = run.PreRender
 	local combatController = combat.new()
@@ -32,6 +36,76 @@ if run:IsClient() then
 	local state
 	local seen
 	local rendered = 0
+	local function sampleSpawns(state, now)
+		local stage = workspace:FindFirstChild("ClientBattleStage_" .. state.instanceId)
+		local arena = workspace.ActiveArenas:FindFirstChild(state.instanceId)
+		if not stage or not arena then return end
+		local sideLetter = if state.side == 1 then "A" else "B"
+		local side = arena.Arena_bases["Time " .. sideLetter]
+		local function checkFrame(actual, anchor)
+			local frame = grounding.computeAnchorTopSurfaceCFrame(anchor)
+			return frame:ToObjectSpace(actual):FuzzyEq(CFrame.identity, 0.005)
+		end
+		for _, row in state.spawns do
+			local model = stage:FindFirstChild(row.name)
+			if not model then continue end
+			local body = row.body
+			if not body then
+				for _, part in model:GetDescendants() do
+					if part:IsA("BasePart") and part.Transparency < 0.95 then body = part; break end
+				end
+				assert(body, "missing visible body: " .. row.name)
+				row.body = body
+				row.original = body.Transparency
+				local root = model.PrimaryPart
+				row.offset = grounding.resolveFighterGroundContact(model, root, model:FindFirstChild("Stand")).offset
+			end
+			local modifier = body.LocalTransparencyModifier
+			row.baseChanged = row.baseChanged or body.Transparency ~= row.original
+			local holder = model:FindFirstChild("BattleSpawnHighlight")
+			local highlight = holder and holder:FindFirstChildOfClass("Highlight")
+			if not row.own then
+				row.opposingChanged = row.opposingChanged or modifier ~= 0 or holder ~= nil
+				continue
+			end
+			if modifier == 1 then row.hidden = true end
+			if highlight then
+				row.startAt = row.startAt or now
+				row.correctAdornee = (row.correctAdornee ~= false) and highlight.Adornee == model and highlight.Enabled
+				row.minFill = math.min(row.minFill or 1, highlight.FillTransparency)
+				row.maxFill = math.max(row.maxFill or 0, highlight.FillTransparency)
+				row.faded = row.faded or modifier > 0 and modifier < 1
+				local anchorName = if row.slot == 0 then "Current_Fighter_" .. sideLetter else "AoE_Target_" .. sideLetter .. "_" .. row.slot
+				local anchor = side[anchorName]
+				local foot = model.PrimaryPart.CFrame * CFrame.new(row.offset)
+				row.feetAligned = (row.feetAligned ~= false) and checkFrame(foot, anchor)
+				for _, container in stage:GetChildren() do
+					local clone = container.Name == "BattleSpawnVfx" and container:FindFirstChild("spawnvfx")
+					local source = clone and clone:FindFirstChild("Highligthspawn")
+					local adornee = source and source:FindFirstChild("Adornee")
+					if adornee and adornee.Value == model then
+						row.vfxAligned = (row.vfxAligned ~= false) and checkFrame(clone:GetPivot(), anchor)
+						row.placeholderSeen = row.placeholderSeen or clone:FindFirstChild("Fighter_placeHolder") ~= nil
+						row.retainedTarget = clone.gelu.modevents.HOMING_TARGET.Value == clone.coloquenotorsodosfigthers
+							and clone.gelu.AccelTarget.Value == clone.coloquenotorsodosfigthers
+							and clone.gelu.modevents.EFEITO_IMPACTO.Value == clone.b1["sange bloco"]
+						row.emitters = row.emitters or {}
+						for _, emitted in partIcles.ActiveEmits do
+							local emitter = emitted._sourceItem
+							if emitter and emitter:IsDescendantOf(clone) and emitted.VisualPart and emitted.VisualPart.Parent then
+								row.emitters[emitter.Name] = true
+							end
+						end
+					end
+				end
+			elseif row.startAt and modifier == 0 and not row.endAt then
+				row.endAt = now
+				local anchorName = if row.slot == 0 then "Current_Fighter_" .. sideLetter
+					elseif row.slot == 1 then "Waiting_Fighter_" .. sideLetter else "Waiting_Fighter_" .. sideLetter .. "_2"
+				row.home = checkFrame(model.PrimaryPart.CFrame * CFrame.new(row.offset), side[anchorName])
+			end
+		end
+	end
 	local function atPose(pose)
 		return pose:ToObjectSpace(camera.CFrame):FuzzyEq(CFrame.identity, 0.001)
 	end
@@ -112,6 +186,17 @@ if run:IsClient() then
 		if state and state.id == payload.transitionId then
 			state.side = table.find(payload.arena.physicalSides, payload.sides[1])
 			state.instanceId = payload.arena.instanceId
+			state.spawns = {}
+			local bench = 0
+			for _, fighter in payload.fighters do
+				local own = fighter.sideId == payload.sides[1]
+				if own and not fighter.active then bench += 1 end
+				table.insert(state.spawns, {
+					name = fighter.targetId .. "_" .. fighter.fighterId,
+					own = own,
+					slot = if fighter.active then 0 else bench,
+				})
+			end
 		end
 	end)
 	for _, name in {protocol.REMOTE_NAMES.AtbSync, protocol.REMOTE_NAMES.AttackStarted} do
@@ -125,6 +210,7 @@ if run:IsClient() then
 		rendered += 1
 		if not state then return end
 		local now = workspace:GetServerTimeNow()
+		if state.spawns then sampleSpawns(state, now) end
 		local overlay = gui:FindFirstChild("BattleIntroOverlay")
 		local covered = overlay and overlay.Enabled and overlay.Curtain.Visible and overlay.Curtain.BackgroundTransparency == 0
 		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
@@ -157,12 +243,23 @@ if run:IsClient() then
 		end
 		local restored = expectedSubject ~= nil and camera.CameraType == previous.cameraType and camera.CameraSubject == expectedSubject
 			and camera.FieldOfView == previous.fov and camera.FieldOfViewMode == previous.fovMode
+		local stageGone = not previous.instanceId or not workspace:FindFirstChild("ClientBattleStage_" .. previous.instanceId)
+		local spawnResidue = false
+		for _, emit in partIcles.ActiveEmits do
+			local source = emit._sourceItem
+			if source and (source.Name == "Highligthspawn" or source.Name == "growing wind" or source.Name == "gelu") then
+				spawnResidue = true
+				break
+			end
+		end
+		for _, row in previous.spawns or {} do row.body = nil; row.offset = nil end
 		report:FireServer("end", previous.id, {
 			reason = payload.reason, restored = restored, overlayGone = gui:FindFirstChild("BattleIntroOverlay") == nil,
 			hudGone = not hud.Enabled, covered = previous.coveredAtTeleport, flash = previous.flash, early = previous.earlyCombat,
 			side = previous.side, anchor = previous.anchor, opposingStart = previous.opposingStart, arcAt = previous.arcAt,
 			goAt = previous.goAt, midArc = previous.midArc, settled = previous.settled, labels = labels,
 			movedAtGo = previous.movedAtGo,
+			spawns = previous.spawns, stageGone = stageGone, spawnResidue = spawnResidue,
 		})
 		if state == previous then state = nil end
 	end)
@@ -213,12 +310,11 @@ local ok, result = xpcall(function()
 		local joined = players:GetPlayers()
 		return #joined == 2 and listening[joined[1]] and listening[joined[2]]
 			and joined[1].Character and joined[2].Character
-	end, "two clients did not initialize", 30)
+	end, "two clients did not initialize", 60)
 	local a, b = table.unpack(players:GetPlayers())
 	local services = game.ServerScriptService.TS.Services
 	local registry = require(services.ArenaRegistry).ArenaRegistry.new()
 	registry:start()
-	local remote = require(services.RemoteService).RemoteService.new()
 	game:GetService("LogService").MessageOut:Connect(function(message, level)
 		if (level == Enum.MessageType.MessageWarning or level == Enum.MessageType.MessageError) and #trace < 40 then
 			table.insert(trace, message)
@@ -262,6 +358,7 @@ local ok, result = xpcall(function()
 		assert(row.reason == reason and row.restored and row.hudGone and row.overlayGone and not row.flash and not row.early,
 			"bad teardown: " .. game:GetService("HttpService"):JSONEncode(row))
 		assert(row.covered, "cage teleport not covered")
+		assert(row.stageGone and not row.spawnResidue, "spawn resources survived teardown")
 		return row
 	end
 
@@ -282,6 +379,23 @@ local ok, result = xpcall(function()
 		assert(row.arcAt == rowA.arcAt and math.abs(row.goAt - row.arcAt - 3) < 0.001, "countdown clock mismatch")
 		assert(row.midArc and row.settled and row.settled < row.goAt, "camera did not move with 2 and settle during 1")
 		assert(not row.movedAtGo, "camera moved at GO")
+		local own = {}
+		for _, fighter in row.spawns do
+			assert(not fighter.baseChanged and not fighter.opposingChanged, "opposing fighter or base appearance changed")
+			if not fighter.own then continue end
+			assert(fighter.hidden and fighter.faded and fighter.correctAdornee and fighter.minFill < 0.08 and fighter.maxFill > 0.8,
+				"missing local fade or animated Qwinkle Highlight: " .. game:GetService("HttpService"):JSONEncode(fighter))
+			assert(fighter.vfxAligned and fighter.feetAligned and fighter.home and not fighter.placeholderSeen,
+				"incorrect VFX, feet or bench placement: " .. game:GetService("HttpService"):JSONEncode(fighter))
+			local emitters = fighter.emitters or {}
+			assert(fighter.retainedTarget and emitters["growing wind"] and emitters.b1 and emitters.gelu and emitters.Part,
+				"incomplete authored VFX: " .. game:GetService("HttpService"):JSONEncode(fighter))
+			assert(math.abs(fighter.endAt - fighter.startAt - 1.5) <= 0.12 and fighter.endAt <= row.goAt - 0.15, "materialization timing")
+			own[fighter.slot] = fighter
+		end
+		assert(own[0] and own[1] and own[2], "missing local fighter slots")
+		assert(math.abs(own[1].startAt - own[0].startAt - 0.75) < 0.12 and math.abs(own[2].startAt - own[1].startAt - 0.35) < 0.12,
+			"incorrect stagger")
 		local previous = row.arcAt
 		for _, label in {"3", "2", "1", "GO!"} do
 			local observed = row.labels[label]
@@ -334,7 +448,7 @@ local ok, result = xpcall(function()
 	checkEnd(5, a, "disconnect")
 	assert(not goFrames[5] and not service:hasActiveSession(a) and #workspace.ActiveArenas:GetChildren() == 0,
 		"respawn left battle running")
-	return {result = "L4_1_2_MULTIPLAYER_QA_PASSED", skewSeconds = skew, first = rowA, second = rowB, trace = trace}
+	return {result = "L5_1_MULTIPLAYER_QA_PASSED", skewSeconds = skew, first = rowA, second = rowB, trace = trace}
 end, debug.traceback)
 if ok then print(result.result, result.skewSeconds) else warn(result) end
 test:EndTest(if ok then result else {error = result, trace = trace})

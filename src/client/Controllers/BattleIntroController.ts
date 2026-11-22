@@ -17,6 +17,7 @@ import {
 } from "../UI/CombatVisualConfig";
 import { battleCleanupStep } from "./BattleCleanup";
 import { BattleRemotes } from "./BattleRemotes";
+import type { BattleFighterMaterialization } from "./BattleFighterMaterialization";
 
 type Schedule = Extract<BattleTransitionPayload, { phase: "schedule" }>;
 type Exit = Extract<BattleTransitionPayload, { phase: "exit" }>;
@@ -28,6 +29,7 @@ interface IntroState {
 	covered: boolean;
 	coverFramePending: boolean;
 	ready: boolean;
+	materialization?: BattleFighterMaterialization;
 	cancelled: boolean;
 	released: boolean;
 	cameraFinal: boolean;
@@ -82,16 +84,36 @@ export class BattleIntroController {
 		this.send(id, "ready");
 	}
 
+	public setMaterialization(id: number, materialization?: BattleFighterMaterialization): void {
+		const state = this.current;
+		if (state?.id !== id || !this.owns(id)) {
+			materialization?.cancel();
+			return;
+		}
+		this.cancelMaterialization(id);
+		state.materialization = materialization;
+	}
+
+	public cancelMaterialization(id?: number): void {
+		const state = this.current;
+		if (state === undefined || (id !== undefined && state.id !== id)) return;
+		const materialization = state.materialization;
+		state.materialization = undefined;
+		materialization?.cancel();
+	}
+
 	public failed(id: number): void {
 		const state = this.current;
 		if (state?.id !== id || !this.owns(id)) return;
 		state.cancelled = true;
+		this.cancelMaterialization(id);
 		state.overlay.cover(false);
 		this.onCancelled?.(id);
 		this.send(id, "failed");
 	}
 
 	public release(id: number): void {
+		this.cancelMaterialization(id);
 		if (this.current?.id === id) this.current.released = true;
 	}
 
@@ -116,6 +138,7 @@ export class BattleIntroController {
 	}
 
 	public reset(): void {
+		this.cancelMaterialization();
 		this.render?.Disconnect();
 		this.render = undefined;
 		const overlay = this.current?.overlay;
@@ -136,6 +159,7 @@ export class BattleIntroController {
 			const state = this.current;
 			if (state?.id !== id || !this.owns(id)) return;
 			state.cancelled = true;
+			this.cancelMaterialization(id);
 			overlay.cover(false);
 			this.onCancelled?.(id);
 			this.send(id, "cancel");
@@ -215,6 +239,14 @@ export class BattleIntroController {
 			state.cameraFinal = progress === 1;
 		}
 		const remaining = schedule.goAt - now;
+		const materialization = state.materialization;
+		if (materialization !== undefined) {
+			const [ok, done] = pcall(() => materialization.step(now, schedule.goAt));
+			if (!ok) {
+				this.cancelMaterialization(state.id);
+				warn(`[BattleIntro] Materialização: ${tostring(done)}`);
+			} else if (done) state.materialization = undefined;
+		}
 		if (remaining > 0 && remaining <= BATTLE_COUNTDOWN_SECONDS) {
 			const number = math.ceil(remaining);
 			state.overlay.showCountdown(tostring(number), number - remaining);
@@ -233,6 +265,7 @@ export class BattleIntroController {
 	}
 
 	private coverExit(state: IntroState, payload: Exit): void {
+		this.cancelMaterialization(state.id);
 		state.exit = payload;
 		state.coverFramePending = true;
 		state.overlay.gui.Enabled = true;
