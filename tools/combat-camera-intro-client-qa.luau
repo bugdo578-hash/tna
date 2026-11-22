@@ -1,9 +1,10 @@
--- Studio Play, Client. Exercises L2/L2.2 and the short L4.1.2 intro on cloned fixtures.
+-- Studio Play, Client. Exercises L2/L2.2 and the L4.1.3 opposing-side semicircular intro on cloned fixtures.
 local run = game:GetService("RunService")
 assert(run:IsStudio() and run:IsClient(), "Studio Client required")
 
 local ts = game.Players.LocalPlayer.PlayerScripts.TS
 local Combat = require(ts.Controllers.CombatController).CombatController
+local intro = require(ts.Controllers.CombatCameraIntro)
 local framing = require(ts.Controllers.CombatCameraFramingTests)
 local fixtures = framing.cameraFramingTestFixtures
 local config = require(game.ReplicatedStorage.TS.Config)
@@ -63,6 +64,7 @@ end
 
 local function start(client, arena, mode, ownSide)
 	client.anchor = if ownSide == 1 then arena.cameraA else arena.cameraB
+	client.opposingAnchor = if ownSide == 1 then arena.cameraB else arena.cameraA
 	client.progress = 1
 	client.own = if ownSide == 1 then arena.activeA else arena.activeB
 	client.enemy = if ownSide == 1 then arena.activeB else arena.activeA
@@ -81,13 +83,20 @@ local function start(client, arena, mode, ownSide)
 	client.progress = 0
 	inspect(client)
 	client.startPosition = client.camera.CFrame.Position
-	local offset = final.cframe:PointToObjectSpace(client.camera.CFrame.Position)
 	local center = client.own.Position:Lerp(client.enemy.Position, 0.5)
-	assert(math.abs(offset.X) > 0.1 and offset.Y > 0.1, "intro needs lateral sweep and height")
-	assert((client.camera.CFrame.Position - center).Magnitude > (final.cframe.Position - center).Magnitude,
-		"opening must be farther from the fighters")
-	local forward = (client.enemy.Position - client.own.Position).Unit
-	assert((client.camera.CFrame.Position - client.own.Position):Dot(forward) < -1, "opening in front of own team")
+	local up = client.own.CFrame.UpVector
+	local function horizDir(pos)
+		local delta = pos - center
+		return (delta - up * delta:Dot(up)).Unit
+	end
+	local startDir = horizDir(client.startPosition)
+	local finalDir = horizDir(final.cframe.Position)
+	local opposingDir = horizDir(client.opposingAnchor.Position)
+	assert(startDir:Dot(opposingDir) > 0.9, "opening must start on opposing side")
+	assert(startDir:Dot(finalDir) < -0.9, "opening must be opposite own camera")
+	client.startHeight = (client.startPosition - center):Dot(up)
+	client.peakHeight = client.startHeight
+	client.endHeight = (final.cframe.Position - center):Dot(up)
 	client.sweep = 0
 	return final
 end
@@ -95,6 +104,17 @@ end
 local ok, failure = xpcall(function()
 	assert(require(ts.Controllers.CombatCameraTests).runL2CameraTests(), "L2")
 	assert(framing.runL2_2AdaptiveCameraTests(), "L2.2")
+	-- Verify continuous subtle dash easing (L4.1.3 Section 3.1): faster early launch, monotonic, exact endpoints.
+	assert(intro.evaluateIntroArcRemaining(0) == 1 and intro.evaluateIntroArcRemaining(1) == 0, "easing endpoints broken")
+	local pureSineAtDash = 0.5 + 0.5 * math.cos(math.pi * 0.15)
+	local dashAtEarly = intro.evaluateIntroArcRemaining(0.15)
+	assert(dashAtEarly < pureSineAtDash - 0.02 and dashAtEarly > pureSineAtDash - 0.15, "dash impulse missing or excessive")
+	local prevRem = 1
+	for i = 1, 60 do
+		local rem = intro.evaluateIntroArcRemaining(i / 60)
+		assert(rem < prevRem, "easing must decrease monotonically")
+		prevRem = rem
+	end
 	local arena1 = fixtures.makeOpen3v3Arena(activeArenas, "L411_rotated", CFrame.new(180, 12, -90) * CFrame.Angles(0, math.rad(37), 0), 6)
 	local arena2 = fixtures.makeOpen3v3Arena(activeArenas, "L411_other", CFrame.new(-200, 25, 120) * CFrame.Angles(0, math.rad(-80), 0), 6)
 	local pve, pvpA, pvpB = makeClient(landscape), makeClient(square), makeClient(portrait)
@@ -109,6 +129,10 @@ local ok, failure = xpcall(function()
 			assert(client.controller.cameraController:setIntroProgress(tick / 60), "active camera lost")
 			client.progress = tick / 60
 			inspect(client)
+			local center = (client.own.Position + client.enemy.Position) / 2
+			local up = client.own.CFrame.UpVector
+			local h = (client.camera.CFrame.Position - center):Dot(up)
+			if h > client.peakHeight then client.peakHeight = h end
 			if tick == 30 and client ~= pve then
 				local finish = client.controller:getLastAppliedCameraFrame().cframe.Position
 				local chord = client.startPosition - finish
@@ -117,14 +141,12 @@ local ok, failure = xpcall(function()
 			end
 			local from, to = prior[client], client.camera.CFrame
 			assert((from.LookVector - to.LookVector).Magnitude < 0.12, "abrupt orientation change")
-			local center = (client.own.Position + client.enemy.Position) / 2
-			local up = client.own.CFrame.UpVector
 			local function bearing(pos)
 				local delta = pos - center
 				return (delta - up * delta:Dot(up)).Unit
 			end
 			client.sweep += bearing(from.Position):Angle(bearing(to.Position))
-			assert(client.sweep < math.rad(89), "large orbit around the arena")
+			assert(client.sweep < math.rad(190), "arc exceeded semicircle")
 			prior[client] = to
 		end
 		if tick == 23 then
@@ -140,6 +162,12 @@ local ok, failure = xpcall(function()
 		assertPose(client.camera.CFrame, final)
 		assert(client.controller.cameraController:setIntroProgress(1))
 		assertPose(client.camera.CFrame, final)
+		assert(client.peakHeight > client.startHeight + 1.0 and client.peakHeight > client.endHeight + 1.0,
+			"intro must rise and descend smoothly")
+		if client ~= pve then
+			assert(client.sweep > math.rad(160) and client.sweep < math.rad(185),
+				"expected ~180 deg semicircle, got " .. math.deg(client.sweep))
+		end
 	end
 
 	-- Put a solid obstacle across the last part of the outward camera travel.

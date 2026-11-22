@@ -88,8 +88,19 @@ if run:IsClient() then
 			assert(bases["Time A"].Current_Fighter_A.Current_Figther_A_vfx_green
 				and bases["Time B"].Current_Fighter_B.Current_Figther_B_vfx_red
 				and storage.Part_Icles and player.PlayerScripts.ArenaAmbientVFX)
-			local own = anchor.Parent:FindFirstChild(if state.side == 1 then "Current_Fighter_A" else "Current_Fighter_B")
-			state.behind = own.CFrame:PointToObjectSpace(camera.CFrame.Position).Z > 0
+			local opposingFolder = bases[if state.side == 1 then "Time B" else "Time A"]
+			local opposingCamera = opposingFolder:FindFirstChild(if state.side == 1 then "Camera_B" else "Camera_A")
+			local fighterA = bases["Time A"].Current_Fighter_A
+			local fighterB = bases["Time B"].Current_Fighter_B
+			local center = fighterA.Position:Lerp(fighterB.Position, 0.5)
+			local up = fighterA.CFrame.UpVector
+			local function horizDir(pos)
+				local delta = pos - center
+				return (delta - up * delta:Dot(up)).Unit
+			end
+			state.opposingStart = opposingCamera ~= nil
+				and horizDir(camera.CFrame.Position):Dot(horizDir(opposingCamera.Position)) > 0.85
+				and horizDir(camera.CFrame.Position):Dot(horizDir(state.destination.Position)) < -0.85
 		end
 	end)
 	report.OnClientEvent:Connect(function(action)
@@ -149,7 +160,7 @@ if run:IsClient() then
 		report:FireServer("end", previous.id, {
 			reason = payload.reason, restored = restored, overlayGone = gui:FindFirstChild("BattleIntroOverlay") == nil,
 			hudGone = not hud.Enabled, covered = previous.coveredAtTeleport, flash = previous.flash, early = previous.earlyCombat,
-			side = previous.side, anchor = previous.anchor, behind = previous.behind, arcAt = previous.arcAt,
+			side = previous.side, anchor = previous.anchor, opposingStart = previous.opposingStart, arcAt = previous.arcAt,
 			goAt = previous.goAt, midArc = previous.midArc, settled = previous.settled, labels = labels,
 			movedAtGo = previous.movedAtGo,
 		})
@@ -267,7 +278,7 @@ local ok, result = xpcall(function()
 	local rowA, rowB = checkEnd(0, a, "quit"), checkEnd(0, b, "quit")
 	assert(rowA.side == 1 and rowB.side == 2 and rowA.goAt == rowB.goAt, "PvP side or timestamp mismatch")
 	for _, row in {rowA, rowB} do
-		assert(row.anchor == (if row.side == 1 then "Camera_A" else "Camera_B") and row.behind, "wrong opening camera")
+		assert(row.anchor == (if row.side == 1 then "Camera_A" else "Camera_B") and row.opposingStart, "wrong opening camera")
 		assert(row.arcAt == rowA.arcAt and math.abs(row.goAt - row.arcAt - 3) < 0.001, "countdown clock mismatch")
 		assert(row.midArc and row.settled and row.settled < row.goAt, "camera did not move with 2 and settle during 1")
 		assert(not row.movedAtGo, "camera moved at GO")
