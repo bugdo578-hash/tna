@@ -5,6 +5,7 @@ import {
 } from "../../shared/Config";
 import type { BattleFighterSnapshot, BattleStartedPayload } from "../../shared/Remotes";
 import {
+	CAMERA_INTRO_DURATION_SECONDS,
 	CAMERA_MAX_HORIZONTAL_FOV,
 	CAMERA_MAX_VERTICAL_FOV,
 	PLACEHOLDER_HIT_KNOCKBACK_STUDS,
@@ -203,6 +204,14 @@ function dispatchBattleStarted(controller: CombatController, payload: BattleStar
 	(controller as unknown as { onBattleStarted(p: BattleStartedPayload): void }).onBattleStarted(payload);
 }
 
+export const cameraFramingTestFixtures = {
+	makeAssetsWithStandAndWeapon,
+	makeOpen3v3Arena,
+	make3v3Fighters,
+	projectModel,
+	assertPreservesReferenceAxis,
+};
+
 /**
  * Executa a suíte QA L2.2 para enquadramento adaptativo da câmera em múltiplas resoluções:
  * PC 16:9, janela estreita, 4:3, celular 9:16 e tela larga, além de PvP, resize e teardown de FOV/FieldOfViewMode.
@@ -331,6 +340,7 @@ export function runL2_2AdaptiveCameraTests(): boolean {
 		const mobileCF = camA.CFrame;
 		const mobileFov = camA.FieldOfView;
 		camA.CameraType = Enum.CameraType.Custom;
+		task.wait();
 		assert((camA.CameraType as Enum.CameraType) === Enum.CameraType.Scriptable, "Guarda mantém Scriptable");
 		assert(camA.CFrame.Position.sub(mobileCF.Position).Magnitude < 1e-3, "Guarda preserva CFrame adaptativo");
 		assert(math.abs(camA.FieldOfView - mobileFov) < 1e-3, "Guarda preserva FOV adaptativo");
@@ -358,6 +368,7 @@ export function runL2_2AdaptiveCameraTests(): boolean {
 		});
 		const wideFrame = ctrlA.getLastAppliedCameraFrame();
 		assert(wideFrame !== undefined && !wideFrame.adjusted && wideFrame.pullbackStuds === 0, "Tela larga sem recuo desnecessário");
+		task.wait(CAMERA_INTRO_DURATION_SECONDS + 0.05);
 		assert(
 			camA.CFrame.Position.sub(arenaWideRef.cameraA.CFrame.Position).Magnitude < 1e-3,
 			"Sem recuo mantém posição exata da Part de referência",

@@ -351,54 +351,6 @@ export class CombatController {
 			return;
 		}
 
-		const playerSideId = payload.sides[0];
-		let playerPhysicalSideIndex: 0 | 1 | undefined;
-		if (playerSideId === physicalSides[0]) {
-			playerPhysicalSideIndex = 0;
-		} else if (playerSideId === physicalSides[1]) {
-			playerPhysicalSideIndex = 1;
-		} else {
-			warn(`[CombatController] sideId do jogador "${playerSideId}" não pertence aos lados físicos da arena.`);
-		}
-		const framingContext = this.buildCameraFramingContext();
-		if (playerPhysicalSideIndex !== undefined) {
-			const sideIndex = playerPhysicalSideIndex;
-			const sideFolder = this.arenaAnchors.getSideFolder(sideIndex);
-			if (sideFolder !== undefined) {
-				const isInActiveRoot = (inst: Instance) => this.arenaAnchors.isDescendantInActiveRoot(inst);
-				const isCurrent = () => this.isCurrentBattle(generation);
-				const initialCheck = resolveSideCameraAnchor(sideFolder, sideIndex);
-				if (initialCheck.ok && initialCheck.camera !== undefined && isInActiveRoot(initialCheck.camera)) {
-					this.cameraController.activateForArenaPart(initialCheck.camera, generation, isCurrent, framingContext);
-				} else if (payload.arena !== undefined && !initialCheck.fatal) {
-					const timeout = this.arenaReplicationTimeoutSeconds ?? ARENA_CLIENT_REPLICATION_TIMEOUT_SECONDS;
-					this.spawnBattle(() => {
-						this.cameraController.resolveAndActivateForSide(
-							sideFolder,
-							isInActiveRoot,
-							sideIndex,
-							generation,
-							isCurrent,
-							timeout,
-							undefined,
-							framingContext,
-						);
-					});
-				} else {
-					this.cameraController.resolveAndActivateForSide(
-						sideFolder,
-						isInActiveRoot,
-						sideIndex,
-						generation,
-						isCurrent,
-						0,
-						undefined,
-						framingContext,
-					);
-				}
-			}
-		}
-
 		const folder = new Instance("Folder");
 		folder.Name =
 			payload.arena !== undefined
@@ -495,11 +447,57 @@ export class CombatController {
 			this.applyActiveVisualState(entry);
 		}
 
-		this.preloadBattleVfx(payload, generation);
-		if (this.isCurrentBattle(generation)) {
-			folder.Parent = Workspace;
-			this.cameraController.refreshFraming(true);
+		if (!this.isCurrentBattle(generation)) return;
+		folder.Parent = Workspace;
+
+		const playerSideId = payload.sides[0];
+		let playerPhysicalSideIndex: 0 | 1 | undefined;
+		if (playerSideId === physicalSides[0]) {
+			playerPhysicalSideIndex = 0;
+		} else if (playerSideId === physicalSides[1]) {
+			playerPhysicalSideIndex = 1;
+		} else {
+			warn(`[CombatController] sideId do jogador "${playerSideId}" não pertence aos lados físicos da arena.`);
 		}
+		const framingContext = this.buildCameraFramingContext();
+		if (playerPhysicalSideIndex !== undefined) {
+			const sideIndex = playerPhysicalSideIndex;
+			const sideFolder = this.arenaAnchors.getSideFolder(sideIndex);
+			if (sideFolder !== undefined) {
+				const isInActiveRoot = (inst: Instance) => this.arenaAnchors.isDescendantInActiveRoot(inst);
+				const isCurrent = () => this.isCurrentBattle(generation);
+				const initialCheck = resolveSideCameraAnchor(sideFolder, sideIndex);
+				if (initialCheck.ok && initialCheck.camera !== undefined && isInActiveRoot(initialCheck.camera)) {
+					this.cameraController.activateForArenaPart(initialCheck.camera, generation, isCurrent, framingContext);
+				} else if (payload.arena !== undefined && !initialCheck.fatal) {
+					const timeout = this.arenaReplicationTimeoutSeconds ?? ARENA_CLIENT_REPLICATION_TIMEOUT_SECONDS;
+					this.spawnBattle(() => {
+						this.cameraController.resolveAndActivateForSide(
+							sideFolder,
+							isInActiveRoot,
+							sideIndex,
+							generation,
+							isCurrent,
+							timeout,
+							undefined,
+							framingContext,
+						);
+					});
+				} else {
+					this.cameraController.resolveAndActivateForSide(
+						sideFolder,
+						isInActiveRoot,
+						sideIndex,
+						generation,
+						isCurrent,
+						0,
+						undefined,
+						framingContext,
+					);
+				}
+			}
+		}
+		this.preloadBattleVfx(payload, generation);
 	}
 
 	private buildCameraFramingContext(): CameraFramingContext | undefined {
