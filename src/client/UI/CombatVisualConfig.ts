@@ -108,3 +108,18 @@ export const BATTLE_INTRO_EXIT_REPLICATION_SECONDS = 1.5;
 export const CAMERA_CUTSCENE_DEFAULT_BLEND_OUT_SECONDS = 0.25;
 export const CAMERA_CUTSCENE_MIN_FOV = 20;
 export const CAMERA_CUTSCENE_MAX_FOV = 120;
+
+// Estado cliente-local de prontidão e lado físico para VFX ambientais de arena (L4.1.4).
+export const AMBIENT_VFX_STATE_NODE_NAME = "BattleAmbientVfxState";
+export const AMBIENT_VFX_ATTRIBUTES = {
+	active: "Active",
+	battleId: "BattleId",
+	generation: "Generation",
+	transitionId: "TransitionId",
+	arenaInstanceId: "ArenaInstanceId",
+	localSide: "LocalSide",
+	localSideIndex: "LocalSideIndex",
+	fightersReady: "FightersReady",
+	goOccurred: "GoOccurred",
+	revision: "Revision",
+} as const;

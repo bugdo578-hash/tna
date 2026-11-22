@@ -1,4 +1,4 @@
-import { ReplicatedStorage, TweenService, Workspace } from "@rbxts/services";
+import { Players, ReplicatedStorage, TweenService, Workspace } from "@rbxts/services";
 import { ARENA_CLIENT_REPLICATION_TIMEOUT_SECONDS, ARENA_INSTANCE_ID_ATTRIBUTE, MIN_DAMAGE } from "../../shared/Config";
 import {
 	ASSETS_FOLDER_NAME,
@@ -42,6 +42,11 @@ import type { CombatCameraMode } from "./CombatCutsceneTypes";
 import { BattleIntroController } from "./BattleIntroController";
 import { BattleRemotes } from "./BattleRemotes";
 import { CombatArenaAnchorResolver, type ResolvedArenaAnchors } from "./CombatArenaAnchors";
+import {
+	areRequiredFightersReady,
+	CombatAmbientVfxState,
+	type AmbientVfxStateSnapshot,
+} from "./CombatAmbientVfxState";
 import { CombatAttackFinalizer, type PendingDeathRecord } from "./CombatAttackFinalizer";
 import { CombatDamagePool, type BillboardPoolItem } from "./CombatDamagePool";
 import { resolveFighterGroundContact } from "./CombatFighterGrounding";
@@ -90,6 +95,7 @@ interface ActiveAttackState {
 export class CombatController {
 	private readonly fightersByTargetId = new Map<string, FighterVisualEntry>();
 	private readonly arenaAnchors: CombatArenaAnchorResolver;
+	private readonly ambientVfxState: CombatAmbientVfxState;
 	private readonly cameraController: CombatCameraController;
 	private readonly cutsceneController: CombatCutsceneController;
 	public readonly introduction: BattleIntroController;
@@ -138,8 +144,11 @@ export class CombatController {
 		getCamera?: () => Camera | undefined,
 		getViewportSize?: () => Vector2,
 		cutsceneRegistry: CombatCutsceneRegistry = defaultCombatCutsceneRegistry,
+		ambientVfxHost?: Instance,
 	) {
 		this.arenaAnchors = new CombatArenaAnchorResolver(arenaSearchRoot);
+		const resolvedAmbientHost = ambientVfxHost ?? (arenaSearchRoot === Workspace ? Players.LocalPlayer : undefined);
+		this.ambientVfxState = new CombatAmbientVfxState(resolvedAmbientHost);
 		this.cameraController = new CombatCameraController(getCamera, getViewportSize);
 		this.cutsceneController = new CombatCutsceneController(cutsceneRegistry, {
 			isCurrentBattle: (generation, battleId) =>
@@ -164,6 +173,11 @@ export class CombatController {
 			() => {
 				if (this.recoverIntroHud !== undefined) this.recoverIntroHud();
 				else this.cleanupStage();
+			},
+			(id) => {
+				if (this.activeTransitionId === undefined || this.activeTransitionId === id) {
+					this.ambientVfxState.deactivateForBattleEnd(id);
+				}
 			},
 		);
 		this.damagePool = new CombatDamagePool({
@@ -231,17 +245,10 @@ export class CombatController {
 		this.initBillboardPool();
 
 		BattleRemotes.battleTransition.OnClientEvent.Connect((payload) => {
-			const transition = payload as BattleTransitionPayload;
-			if (transition.phase === "exit" && (this.activeTransitionId === undefined || this.activeTransitionId === transition.id)) {
-				this.cutsceneController.cancel("battle_end");
-			}
-			this.introduction.receive(transition);
+			this.onBattleTransition(payload as BattleTransitionPayload);
 		});
 		BattleRemotes.battleEnded.OnClientEvent.Connect((payload) => {
-			const ended = payload as BattleEndedPayload;
-			if (ended.transitionId === undefined || this.activeTransitionId === ended.transitionId) {
-				this.cutsceneController.cancel("battle_end");
-			}
+			this.onBattleEnded(payload as BattleEndedPayload);
 		});
 		BattleRemotes.battleStarted.OnClientEvent.Connect((payload) => {
 			this.onBattleStarted(payload as BattleStartedPayload);
@@ -268,7 +275,7 @@ export class CombatController {
 			this.onSwitchPerformed(payload as SwitchPerformedPayload);
 		});
 		BattleRemotes.stateChanged.OnClientEvent.Connect((payload: StateChangedPayload) => {
-			if (payload.battleReleased !== undefined) this.introduction.release(payload.battleReleased);
+			this.onStateChanged(payload);
 		});
 	}
 
@@ -304,6 +311,21 @@ export class CombatController {
 	/** Retorna o `instanceId` da arena reservada da batalha atual, se houver. */
 	public getActiveArenaInstanceId(): string | undefined {
 		return this.activeArenaInstanceId;
+	}
+
+	/** Retorna o identificador composto (`generation:arena:sides`) da batalha atual no client. */
+	public getActiveBattleId(): string {
+		return this.activeBattleId;
+	}
+
+	/** Retorna o snapshot atual do estado cliente-local dos VFX ambientais de arena (L4.1.4). */
+	public getAmbientVfxSnapshot(): AmbientVfxStateSnapshot {
+		return this.ambientVfxState.getSnapshot();
+	}
+
+	/** Retorna o nó `Configuration` cliente-local observado pelo script manual `ArenaAmbientVFX`. */
+	public getAmbientVfxStateInstance(): Configuration {
+		return this.ambientVfxState.getStateInstance();
 	}
 
 	/** Retorna os lados físicos canônicos `[Time A, Time B]` da batalha atual. */
@@ -388,6 +410,33 @@ export class CombatController {
 		this.damagePool.showFloatingText(adornee, text, color, size, duration);
 	}
 
+	private onBattleTransition(transition: BattleTransitionPayload): void {
+		if (transition.phase === "exit" && (this.activeTransitionId === undefined || this.activeTransitionId === transition.id)) {
+			this.cutsceneController.cancel("battle_end");
+			this.ambientVfxState.deactivateForBattleEnd(transition.id);
+		}
+		this.introduction.receive(transition);
+	}
+
+	private onBattleEnded(ended: BattleEndedPayload): void {
+		if (ended.transitionId === undefined || this.activeTransitionId === ended.transitionId) {
+			this.cutsceneController.cancel("battle_end");
+			this.ambientVfxState.deactivateForBattleEnd(ended.transitionId);
+		}
+	}
+
+	private onStateChanged(payload: StateChangedPayload): void {
+		if (payload.battleReleased === undefined) return;
+		this.introduction.release(payload.battleReleased);
+		if (
+			!this.battleEnded &&
+			this.activeTransitionId === payload.battleReleased &&
+			this.introduction.owns(payload.battleReleased)
+		) {
+			this.ambientVfxState.markGoOccurred(this.battleVfxGeneration, this.activeBattleId, payload.battleReleased);
+		}
+	}
+
 	private onBattleStarted(payload: BattleStartedPayload): void {
 		const transitionId = payload.transitionId;
 		if (transitionId === undefined) {
@@ -417,6 +466,14 @@ export class CombatController {
 		this.hitQueue.clear();
 		this.attackFinalizer.clear();
 		this.battleEnded = false;
+		this.ambientVfxState.beginBattle({
+			generation,
+			battleId: this.activeBattleId,
+			transitionId: payload.transitionId,
+			arenaInstanceId: payload.arena?.instanceId,
+			ownSideId: payload.sides[0],
+			physicalSides,
+		});
 
 		const anchorResolution =
 			payload.arena !== undefined
@@ -432,6 +489,7 @@ export class CombatController {
 		if (!anchorResolution.ok) {
 			this.battleEnded = true;
 			this.activeArenaInstanceId = undefined;
+			this.ambientVfxState.clear(generation);
 			if (payload.transitionId !== undefined) this.introduction.failed(payload.transitionId);
 			return;
 		}
@@ -534,6 +592,8 @@ export class CombatController {
 
 		if (!this.isCurrentBattle(generation)) return;
 		folder.Parent = Workspace;
+		const fightersReady = areRequiredFightersReady(payload.fighters, this.fightersByTargetId, folder, physicalSides);
+		this.ambientVfxState.markFightersReady(generation, this.activeBattleId, fightersReady);
 
 		const transitionId = payload.transitionId;
 		const isCurrent = () => this.isCurrentBattle(generation) && (transitionId === undefined || this.introduction.owns(transitionId));
@@ -542,8 +602,11 @@ export class CombatController {
 				payload.sides[0], generation, isCurrent, payload.arena !== undefined, transitionId !== undefined,
 			));
 			if (transitionId === undefined || !isCurrent()) return;
-			if (ok && cameraReady && this.fightersByTargetId.size() === payload.fighters.size()) this.introduction.ready(transitionId);
-			else this.introduction.failed(transitionId);
+			if (ok && cameraReady && fightersReady) this.introduction.ready(transitionId);
+			else {
+				this.ambientVfxState.clear(generation);
+				this.introduction.failed(transitionId);
+			}
 		};
 
 		if (transitionId !== undefined) {
@@ -551,6 +614,9 @@ export class CombatController {
 			this.spawnBattle(prepare);
 		} else {
 			prepare();
+			if (this.isCurrentBattle(generation) && !this.battleEnded && fightersReady) {
+				this.ambientVfxState.markGoOccurred(generation, this.activeBattleId);
+			}
 			this.preloadBattleVfx(payload, generation);
 		}
 	}
@@ -1159,6 +1225,7 @@ export class CombatController {
 		this.battleVfxGeneration = generation;
 		if (!keepIntro) this.introduction.reset();
 		this.battleEnded = true;
+		battleCleanupStep("ambient vfx state clear", () => this.ambientVfxState.clear(generation));
 		this.currentAttackToken += 1;
 		this.activeAttack = undefined;
 		this.deferredAttack = undefined;

@@ -48,6 +48,7 @@ export class BattleIntroController {
 		private readonly captureCamera: () => boolean,
 		private readonly moveCamera: (progress: number) => boolean,
 		private readonly recover: () => void,
+		private readonly onCancelled?: (id: number) => void,
 	) {}
 
 	public receive(payload: BattleTransitionPayload): void {
@@ -86,6 +87,7 @@ export class BattleIntroController {
 		if (state?.id !== id || !this.owns(id)) return;
 		state.cancelled = true;
 		state.overlay.cover(false);
+		this.onCancelled?.(id);
 		this.send(id, "failed");
 	}
 
@@ -135,6 +137,7 @@ export class BattleIntroController {
 			if (state?.id !== id || !this.owns(id)) return;
 			state.cancelled = true;
 			overlay.cover(false);
+			this.onCancelled?.(id);
 			this.send(id, "cancel");
 		});
 		const state: IntroState = {
