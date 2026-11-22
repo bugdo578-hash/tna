@@ -11,6 +11,7 @@ import {
 	type CameraFramingContext,
 } from "./CombatCameraFraming";
 import { buildCombatCameraArc } from "./CombatCameraIntro";
+import type { CameraCutscenePose, CombatCameraMode } from "./CombatCutsceneTypes";
 
 interface SavedCameraState {
 	readonly camera: Camera;
@@ -83,6 +84,7 @@ export class CombatCameraController {
 	private savedState?: SavedCameraState;
 	private activeCameraPart?: BasePart;
 	private activeGeneration?: number;
+	private activeBattleId?: string;
 	private activeIsCurrentBattle?: () => boolean;
 	private framingContext?: CameraFramingContext;
 	private lastAppliedViewportSize?: Vector2;
@@ -92,6 +94,8 @@ export class CombatCameraController {
 	private introSide?: 0 | 1;
 	private introProgress = 0;
 	private introArc?: (progress: number) => CFrame;
+	private cutsceneActive = false;
+	private lastCutscenePose?: CameraCutscenePose;
 	private lastDiagnostics: readonly string[] = [];
 
 	public constructor(
@@ -142,6 +146,15 @@ export class CombatCameraController {
 		this.lastAppliedFrame = frame;
 		this.lastAppliedViewportSize = validViewport ? viewportSize : undefined;
 
+		// Prioridade 2 (cutscene) impede o enquadramento adaptativo (prioridade 3) de sobrescrever a câmera,
+		// mantendo `lastAppliedFrame` atualizado caso o viewport mude durante a animação.
+		if (this.introSide === undefined && this.cutsceneActive) {
+			if (force && this.lastCutscenePose !== undefined) {
+				this.writePoseToCamera(camera, this.lastCutscenePose);
+			}
+			return;
+		}
+
 		if (validViewport && context !== undefined) {
 			if (camera.FieldOfViewMode !== frame.fieldOfViewMode) {
 				camera.FieldOfViewMode = frame.fieldOfViewMode;
@@ -182,9 +195,84 @@ export class CombatCameraController {
 
 	public prepareIntro(sideIndex: 0 | 1): boolean {
 		if (this.introSide === sideIndex && this.introArc !== undefined) return true;
+		// Prioridade 1 (intro) prevalece sobre qualquer cutscene ativa.
+		this.cutsceneActive = false;
+		this.lastCutscenePose = undefined;
 		this.introSide = sideIndex;
 		this.introProgress = 0;
 		return this.refreshFraming() && this.introArc !== undefined;
+	}
+
+	public isIntroActive(): boolean {
+		return this.introSide !== undefined || this.introArc !== undefined;
+	}
+
+	public getMode(): CombatCameraMode {
+		if (this.savedState === undefined || this.activeCameraPart === undefined) return "inactive";
+		if (this.isIntroActive()) return "intro";
+		if (this.cutsceneActive) return "cutscene";
+		return "adaptive";
+	}
+
+	private writePoseToCamera(camera: Camera, pose: CameraCutscenePose): void {
+		if (camera.FieldOfViewMode !== pose.fieldOfViewMode) {
+			camera.FieldOfViewMode = pose.fieldOfViewMode;
+		}
+		camera.FieldOfView = pose.fieldOfView;
+		camera.CFrame = pose.cframe;
+	}
+
+	public beginCutscene(generation: number, battleId: string): boolean {
+		const part = this.activeCameraPart;
+		const camera = this.savedState?.camera;
+		if (
+			part === undefined ||
+			camera === undefined ||
+			this.isIntroActive() ||
+			this.activeGeneration !== generation ||
+			this.activeBattleId !== battleId ||
+			!this.ownsCamera(camera, part)
+		) {
+			return false;
+		}
+		this.cutsceneActive = true;
+		this.lastCutscenePose = undefined;
+		return true;
+	}
+
+	public isCutsceneActiveFor(generation: number, battleId: string): boolean {
+		const part = this.activeCameraPart;
+		const camera = this.savedState?.camera;
+		return (
+			this.cutsceneActive &&
+			!this.isIntroActive() &&
+			part !== undefined &&
+			camera !== undefined &&
+			this.activeGeneration === generation &&
+			this.activeBattleId === battleId &&
+			this.ownsCamera(camera, part)
+		);
+	}
+
+	public applyCutscenePose(generation: number, battleId: string, pose: CameraCutscenePose): boolean {
+		if (!this.isCutsceneActiveFor(generation, battleId)) return false;
+		const camera = this.savedState?.camera;
+		if (camera === undefined) return false;
+		this.lastCutscenePose = pose;
+		this.writePoseToCamera(camera, pose);
+		return true;
+	}
+
+	public endCutscene(generation: number, battleId: string, restoreAdaptive: boolean): boolean {
+		if (!this.cutsceneActive || this.activeGeneration !== generation || this.activeBattleId !== battleId) {
+			return false;
+		}
+		this.cutsceneActive = false;
+		this.lastCutscenePose = undefined;
+		if (restoreAdaptive && !this.isIntroActive()) {
+			this.refreshFraming(true);
+		}
+		return true;
 	}
 
 	private applyIntroPose(camera: Camera, frame: AdaptiveCameraFrame, arc: (progress: number) => CFrame): void {
@@ -236,6 +324,7 @@ export class CombatCameraController {
 		isCurrentBattle: () => boolean,
 		framingContext?: CameraFramingContext,
 		introSide?: 0 | 1,
+		battleId?: string,
 	): boolean {
 		const context = framingContext ?? this.framingContext;
 		if (!isCurrentBattle()) return false;
@@ -253,11 +342,14 @@ export class CombatCameraController {
 		this.framingContext = context;
 		this.activeCameraPart = cameraPart;
 		this.activeGeneration = generation;
+		this.activeBattleId = battleId ?? tostring(generation);
 		this.activeIsCurrentBattle = isCurrentBattle;
 		this.lastAppliedViewportSize = undefined;
 		this.lastDiagnostics = [];
 		this.introSide = introSide;
 		this.introProgress = 0;
+		this.cutsceneActive = false;
+		this.lastCutscenePose = undefined;
 		camera.CameraType = Enum.CameraType.Scriptable;
 		this.applyFramingToCamera(camera, cameraPart, true);
 
@@ -285,6 +377,7 @@ export class CombatCameraController {
 		pollSeconds = ARENA_CLIENT_REPLICATION_POLL_SECONDS,
 		framingContext?: CameraFramingContext,
 		withIntro = false,
+		battleId?: string,
 	): ArenaCameraResolutionResult {
 		const clampedTimeout = math.max(timeoutSeconds, 0);
 		const clampedPoll = math.max(pollSeconds, 0.01);
@@ -314,6 +407,7 @@ export class CombatCameraController {
 					isCurrentBattle,
 					framingContext,
 					withIntro ? sideIndex : undefined,
+					battleId,
 				);
 				if (activated) {
 					return lastResult;
@@ -342,12 +436,15 @@ export class CombatCameraController {
 	public restore(): void {
 		this.introSide = undefined;
 		this.introArc = undefined;
+		this.cutsceneActive = false;
+		this.lastCutscenePose = undefined;
 		this.disconnectGuards();
 
 		const saved = this.savedState;
 		this.savedState = undefined;
 		this.activeCameraPart = undefined;
 		this.activeGeneration = undefined;
+		this.activeBattleId = undefined;
 		this.activeIsCurrentBattle = undefined;
 		this.framingContext = undefined;
 		this.lastAppliedViewportSize = undefined;

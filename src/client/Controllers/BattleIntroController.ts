@@ -93,6 +93,18 @@ export class BattleIntroController {
 		if (this.current?.id === id) this.current.released = true;
 	}
 
+	/**
+	 * Verdadeiro enquanto o carregamento, cobertura, arco cinematográfico ou countdown (3–2–1–GO)
+	 * ainda estiverem bloqueando a câmera de combate (prioridade 1 sobre cutscenes de habilidade).
+	 */
+	public isBlockingCutscenes(): boolean {
+		const state = this.current;
+		if (state === undefined) return false;
+		if (state.cancelled || state.exit !== undefined || !state.released || !state.cameraFinal) return true;
+		const schedule = this.schedule;
+		return schedule !== undefined && Workspace.GetServerTimeNow() < schedule.goAt;
+	}
+
 	public finish(id: number, finalize: () => void): void {
 		const state = this.current;
 		if (state?.id !== id) return;

@@ -16,6 +16,7 @@ import {
 import { FIGHTER_DATA, type RealFighterId } from "../../shared/FighterData";
 import type {
 	AttackStartedPayload,
+	BattleEndedPayload,
 	BattleFighterSnapshot,
 	BattleStartedPayload,
 	BattleTransitionPayload,
@@ -32,6 +33,12 @@ import type { SkillSlot, StatusEffect } from "../../shared/TypeDefs";
 import { battleCleanupStep } from "./BattleCleanup";
 import { CombatCameraController, resolveSideCameraAnchor } from "./CombatCameraController";
 import type { AdaptiveCameraFrame, CameraFramingContext, FighterFramingSample } from "./CombatCameraFraming";
+import { CombatCutsceneController } from "./CombatCutsceneController";
+import {
+	defaultCombatCutsceneRegistry,
+	type CombatCutsceneRegistry,
+} from "./CombatCutsceneRegistry";
+import type { CombatCameraMode } from "./CombatCutsceneTypes";
 import { BattleIntroController } from "./BattleIntroController";
 import { BattleRemotes } from "./BattleRemotes";
 import { CombatArenaAnchorResolver, type ResolvedArenaAnchors } from "./CombatArenaAnchors";
@@ -84,6 +91,7 @@ export class CombatController {
 	private readonly fightersByTargetId = new Map<string, FighterVisualEntry>();
 	private readonly arenaAnchors: CombatArenaAnchorResolver;
 	private readonly cameraController: CombatCameraController;
+	private readonly cutsceneController: CombatCutsceneController;
 	public readonly introduction: BattleIntroController;
 	private recoverIntroHud?: () => void;
 	private readonly hitQueue: CombatHitQueue;
@@ -111,6 +119,8 @@ export class CombatController {
 	private sideIds: readonly [string, string] = ["", ""];
 	private physicalSideIds: readonly [string, string] = ["", ""];
 	private activeArenaInstanceId: string | undefined;
+	private activeBattleId = "";
+	private activeTransitionId: number | undefined;
 	private currentAttackToken = 0;
 	private activePendingHits = 0;
 	private activeAttack: ActiveAttackState | undefined;
@@ -127,9 +137,24 @@ export class CombatController {
 		private readonly arenaReplicationTimeoutSeconds?: number,
 		getCamera?: () => Camera | undefined,
 		getViewportSize?: () => Vector2,
+		cutsceneRegistry: CombatCutsceneRegistry = defaultCombatCutsceneRegistry,
 	) {
 		this.arenaAnchors = new CombatArenaAnchorResolver(arenaSearchRoot);
 		this.cameraController = new CombatCameraController(getCamera, getViewportSize);
+		this.cutsceneController = new CombatCutsceneController(cutsceneRegistry, {
+			isCurrentBattle: (generation, battleId) =>
+				!this.battleEnded && this.isCurrentBattle(generation) && this.activeBattleId === battleId,
+			isIntroBlocking: () => this.introduction.isBlockingCutscenes(),
+			getCameraController: () => this.cameraController,
+			getArenaAnchors: () => this.arenaAnchors.getResolvedAnchors(),
+			isFighterValid: (fighter) => {
+				const entry = this.fightersByTargetId.get(fighter.targetId);
+				if (entry === undefined || entry.model !== fighter.model || entry.rootPart !== fighter.rootPart) return false;
+				if (entry.model.Parent === undefined || entry.rootPart.Parent === undefined) return false;
+				if (this.stageFolder !== undefined && !entry.model.IsDescendantOf(this.stageFolder)) return false;
+				return true;
+			},
+		});
 		this.introduction = new BattleIntroController(
 			() => {
 				this.cleanupStage(undefined, true);
@@ -206,7 +231,17 @@ export class CombatController {
 		this.initBillboardPool();
 
 		BattleRemotes.battleTransition.OnClientEvent.Connect((payload) => {
-			this.introduction.receive(payload as BattleTransitionPayload);
+			const transition = payload as BattleTransitionPayload;
+			if (transition.phase === "exit" && (this.activeTransitionId === undefined || this.activeTransitionId === transition.id)) {
+				this.cutsceneController.cancel("battle_end");
+			}
+			this.introduction.receive(transition);
+		});
+		BattleRemotes.battleEnded.OnClientEvent.Connect((payload) => {
+			const ended = payload as BattleEndedPayload;
+			if (ended.transitionId === undefined || this.activeTransitionId === ended.transitionId) {
+				this.cutsceneController.cancel("battle_end");
+			}
 		});
 		BattleRemotes.battleStarted.OnClientEvent.Connect((payload) => {
 			this.onBattleStarted(payload as BattleStartedPayload);
@@ -301,6 +336,16 @@ export class CombatController {
 		return this.cameraController.refreshFraming(force);
 	}
 
+	/** Retorna o controlador de cutscenes de câmera desta instância. */
+	public getCutsceneController(): CombatCutsceneController {
+		return this.cutsceneController;
+	}
+
+	/** Retorna o modo ativo da câmera de combate (`inactive`, `intro`, `cutscene` ou `adaptive`). */
+	public getCameraMode(): CombatCameraMode {
+		return this.cameraController.getMode();
+	}
+
 	/** Registra callback disparado quando o HP visual é atualizado após consumir hit/tick/KO. */
 	public onFighterHpVisualChanged(listener: (targetId: string, hp: number, hpMax: number) => void): () => void {
 		this.hpVisualListeners.add(listener);
@@ -363,6 +408,8 @@ export class CombatController {
 		this.sideIds = payload.sides;
 		this.physicalSideIds = physicalSides;
 		this.activeArenaInstanceId = payload.arena?.instanceId;
+		this.activeTransitionId = payload.transitionId;
+		this.activeBattleId = `${generation}:${payload.arena?.instanceId ?? "legacy"}:${payload.sides[0]}:${payload.sides[1]}`;
 		this.currentAttackToken += 1;
 		this.activeAttack = undefined;
 		this.deferredAttack = undefined;
@@ -519,7 +566,7 @@ export class CombatController {
 		const context = this.buildCameraFramingContext();
 		const timeout = reserved ? (this.arenaReplicationTimeoutSeconds ?? ARENA_CLIENT_REPLICATION_TIMEOUT_SECONDS) : 0;
 		const resolve = () => this.cameraController.resolveAndActivateForSide(
-			sideFolder, isInActiveRoot, sideIndex, generation, isCurrent, timeout, undefined, context, withIntro,
+			sideFolder, isInActiveRoot, sideIndex, generation, isCurrent, timeout, undefined, context, withIntro, this.activeBattleId,
 		);
 		if (!withIntro) {
 			const initial = resolveSideCameraAnchor(sideFolder, sideIndex);
@@ -707,6 +754,7 @@ export class CombatController {
 	}
 
 	private finalizeActiveAttackBeforeNext(): void {
+		this.cutsceneController.cancel("attack_replaced");
 		const previousAttack = this.activeAttack;
 		this.activeAttack = undefined;
 		this.deferredAttack = undefined;
@@ -781,6 +829,16 @@ export class CombatController {
 
 	private startAttackPresentation(attackState: ActiveAttackState): void {
 		const { attacker, target, timeline, token, slot } = attackState;
+		this.cutsceneController.tryStartForAttack({
+			generation: this.battleVfxGeneration,
+			battleId: this.activeBattleId,
+			attackToken: token,
+			fighterId: attacker.fighterId,
+			slot,
+			skillId: timeline.name,
+			attacker: { targetId: attacker.targetId, model: attacker.model, rootPart: attacker.rootPart },
+			target: { targetId: target.targetId, model: target.model, rootPart: target.rootPart },
+		});
 		this.positionStandForAttack(attacker, math.max(timeline.hits[0]?.time ?? 0.1, 0.05) * 0.8);
 
 		const track = this.tryPlaySlotAnimation(attacker, slot, timeline);
@@ -1023,6 +1081,9 @@ export class CombatController {
 	}
 
 	private onFighterDied(payload: FighterDiedPayload): void {
+		if (!this.battleEnded && this.fightersByTargetId.has(payload.fighterId)) {
+			this.cutsceneController.notifyKo(this.battleVfxGeneration, this.activeBattleId);
+		}
 		this.attackFinalizer.handleFighterDied(payload);
 	}
 
@@ -1031,6 +1092,13 @@ export class CombatController {
 	}
 
 	private onSwitchPerformed(payload: SwitchPerformedPayload): void {
+		if (
+			!this.battleEnded &&
+			(this.fightersByTargetId.has(payload.previousFighterId) ||
+				this.fightersByTargetId.has(payload.activeFighterId))
+		) {
+			this.cutsceneController.notifySwitch(this.battleVfxGeneration, this.activeBattleId);
+		}
 		this.attackFinalizer.handleSwitchPerformed(payload);
 	}
 
@@ -1111,12 +1179,15 @@ export class CombatController {
 			battleCleanupStep("fighter base", () => entry.model.PivotTo(entry.homeCFrame));
 		}
 		this.damagePool.clear();
+		battleCleanupStep("cutscene reset", () => this.cutsceneController.resetForBattle());
 		battleCleanupStep("camera restore", () => this.cameraController.restore());
 		battleCleanupStep("stage destroy", () => this.stageFolder?.Destroy());
 		this.stageFolder = undefined;
 		this.fightersByTargetId.clear();
 		this.arenaAnchors.clear();
 		this.activeArenaInstanceId = undefined;
+		this.activeBattleId = "";
+		this.activeTransitionId = undefined;
 		this.physicalSideIds = ["", ""];
 		this.attackFinalizer.clear();
 		this.vfxBridge.clearWorkingCopies();
