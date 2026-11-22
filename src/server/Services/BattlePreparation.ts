@@ -1,6 +1,5 @@
 import { Workspace } from "@rbxts/services";
 import {
-	BATTLE_CAMERA_ARC_SECONDS,
 	BATTLE_COUNTDOWN_SECONDS,
 	BATTLE_COVER_TIMEOUT_SECONDS,
 	BATTLE_EXIT_COVER_TIMEOUT_SECONDS,
@@ -62,7 +61,7 @@ export class BattlePreparation {
 			this.phase = "schedule";
 			const arcAt = now + BATTLE_INTRO_LEAD_SECONDS;
 			this.deadline = arcAt;
-			this.goAt = arcAt + BATTLE_CAMERA_ARC_SECONDS + BATTLE_COUNTDOWN_SECONDS;
+			this.goAt = arcAt + BATTLE_COUNTDOWN_SECONDS;
 			this.resetPending();
 			for (const player of this.players) {
 				this.channel.send(player, { id: this.id, phase: "schedule", arcAt, goAt: this.goAt });

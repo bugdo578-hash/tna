@@ -84,7 +84,9 @@ export function validateBattlePreparation(): void {
 	const a = pvp.schedules.get(first)!;
 	const b = pvp.schedules.get(second)!;
 	assertInvariant(a.arcAt === b.arcAt && a.goAt === b.goAt, "PvP usa o mesmo relógio nos dois clientes");
-	assertInvariant(math.abs(a.goAt - a.arcAt - BATTLE_CAMERA_ARC_SECONDS - BATTLE_COUNTDOWN_SECONDS) < 1e-6, "arco seguido por três segundos de countdown");
+	assertInvariant(math.abs(a.goAt - a.arcAt - BATTLE_COUNTDOWN_SECONDS) < 1e-6, "o 3 inicia o arco");
+	assertInvariant(a.arcAt + BATTLE_CAMERA_ARC_SECONDS > a.goAt - 1 &&
+		a.arcAt + BATTLE_CAMERA_ARC_SECONDS < a.goAt, "câmera estabiliza durante o 1");
 	pvp.ack(first, "scheduled");
 	pvp.ack(second, "scheduled");
 	pvp.at(a.goAt - 0.001);

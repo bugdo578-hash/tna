@@ -2,6 +2,14 @@
 
 Registro conciso de mudanças a partir de `2026-11-14` (ordem cronológica reversa). Histórico anterior a `2026-11-14` (base inicial T1–T5, T7.1, T7.2 e primeira correção de DataStore/autosave): [CHANGELOG_ARCHIVE.md](CHANGELOG_ARCHIVE.md). Estado operacional atual: [HANDOFF.md](HANDOFF.md).
 
+## 2026-11-22 — L4.1.2 · Abertura de batalha e countdown
+
+- A câmera abre atrás e acima do próprio time (`CAMERA_INTRO_ARC_DEGREES = 82`, `CAMERA_INTRO_HEIGHT_FRACTION = 0.58`, `CAMERA_INTRO_RADIUS_FRACTION = 0.58`), percorrendo um arco circular fluido e espelhado ao redor do centro da arena (eixo `UpVector` local) até a pose adaptativa L2.2 em `Camera_A` ou `Camera_B`. O raio inicial ajusta-se uma única vez para manter lutadores, Stands e armas enquadrados em 16:9, 4:3 e 9:16; o percurso encurta com segurança se a arena bloquear a passagem ou a linha de visão.
+- A tela preta revela a pose inicial nos `0,45 s` anteriores ao `3`. O servidor agenda o `3` e o início do movimento em `arcAt`, o `2` em `+1 s`, o `1` em `+2 s` e o `GO!` em `+3 s`. O arco dura `2,6 s` (`BATTLE_CAMERA_ARC_SECONDS = 2.6`), fecha o FOV em `1,25°` no último quarto até o FOV adaptativo do L2.2 e permanece estável por `~0,4 s` durante o `1` antes do `GO!` autoritativo.
+- **Sincronização PvP e correção de `GO!` perdido:** além do QA multiplayer aguardar frames reais com viewport válida nos dois clientes (evitando confirmação em viewport `1×1`), o `BattleIntroController` passou a registrar `goShownAt` ao atingir `schedule.goAt`, garantindo que o rótulo `GO!` nunca seja pulado por um hitch de frame > `0,45 s` em clientes lentos. Os prazos do protocolo de preparação foram preservados.
+- Na restauração da câmera, o cliente verifica se o personagem dono do `CameraSubject` salvo ainda é o personagem atual, cobrindo respawn durante a intro.
+- **Evidência no Studio:** `BattleSimulator.runSimulation()` retornou `SIMULATION_ALL_PASSED` (incluindo `validateBattlePreparation`, L2.1 e L3); `tools/combat-camera-intro-client-qa.luau` retornou `L4_1_2_CAMERA_QA_PASSED` (L2, L2.2, 16:9/4:3/9:16, resize, dois clones rotacionados, obstáculo e teardown); Play PvE ao vivo confirmou arco limpo, FOV `71,25° -> 70°` e contrato `ArenaAmbientVFX` preservado; `tools/battle-intro-play-qa.luau` com dois clientes reais retornou `L4_1_2_MULTIPLAYER_QA_PASSED` em duas rodadas consecutivas (`9,3 ms` e `20,4 ms` de skew no `GO!`, cobrindo PvP sincronizado com atraso, timeout, quit no fade/arco, desconexão e respawn).
+
 ## 2026-11-21 — Lote L3: Transporte Físico dos Jogadores para as Gaiolas das Arenas
 
 - **Configuração compartilhada (`src/shared/configs/Arena.ts`, re-exportado por `src/shared/Config.ts`):** adicionadas `ARENA_PLAYER_CAGE_FOLDER_NAME = "Gaiola dos players"`, `ARENA_PLAYER_SPAWN_A_NAME = "PlayerSpawn_A"`, `ARENA_PLAYER_SPAWN_B_NAME = "PlayerSpawn_B"`, `ARENA_PLAYER_SPAWN_NAMES = ["PlayerSpawn_A", "PlayerSpawn_B"]` e `ARENA_PLAYER_CAGE_MAX_DRIFT_STUDS = 8`.

@@ -32,6 +32,7 @@ interface IntroState {
 	released: boolean;
 	cameraFinal: boolean;
 	fadeFinished: boolean;
+	goShownAt?: number;
 	exit?: Exit;
 	exitCovered: boolean;
 	finish?: () => void;
@@ -182,7 +183,14 @@ export class BattleIntroController {
 			this.send(state.id, "covered");
 		}
 		const schedule = this.schedule;
-		if (schedule === undefined || now < schedule.arcAt) return;
+		if (schedule === undefined) return;
+		if (!state.fadeFinished) {
+			const fade = math.clamp(1 + (now - schedule.arcAt) / BATTLE_INTRO_FADE_SECONDS, 0, 1);
+			if (fade === 0) return;
+			state.overlay.reveal(fade * fade * (3 - 2 * fade));
+			state.fadeFinished = fade === 1;
+		}
+		if (now < schedule.arcAt) return;
 		const progress = math.clamp((now - schedule.arcAt) / BATTLE_CAMERA_ARC_SECONDS, 0, 1);
 		if (!state.cameraFinal) {
 			if (!this.moveCamera(progress)) {
@@ -191,21 +199,21 @@ export class BattleIntroController {
 			}
 			state.cameraFinal = progress === 1;
 		}
-		if (!state.fadeFinished) {
-			const fade = math.clamp((now - schedule.arcAt) / BATTLE_INTRO_FADE_SECONDS, 0, 1);
-			state.overlay.reveal(fade);
-			state.fadeFinished = fade === 1;
-		}
 		const remaining = schedule.goAt - now;
 		if (remaining > 0 && remaining <= BATTLE_COUNTDOWN_SECONDS) {
 			const number = math.ceil(remaining);
 			state.overlay.showCountdown(tostring(number), number - remaining);
-		} else if (remaining <= 0 && remaining > -BATTLE_INTRO_GO_HOLD_SECONDS) {
-			state.overlay.showCountdown("GO!", -remaining / BATTLE_INTRO_GO_HOLD_SECONDS);
-		} else if (remaining <= -BATTLE_INTRO_GO_HOLD_SECONDS && state.released) {
-			state.overlay.gui.Enabled = false;
-			this.render?.Disconnect();
-			this.render = undefined;
+		} else if (remaining <= 0) {
+			const goSince = state.goShownAt ?? now;
+			if (state.goShownAt === undefined) state.goShownAt = goSince;
+			const goAge = now - goSince;
+			if (goAge < BATTLE_INTRO_GO_HOLD_SECONDS) {
+				state.overlay.showCountdown("GO!", goAge / BATTLE_INTRO_GO_HOLD_SECONDS);
+			} else if (state.released) {
+				state.overlay.gui.Enabled = false;
+				this.render?.Disconnect();
+				this.render = undefined;
+			}
 		}
 	}
 

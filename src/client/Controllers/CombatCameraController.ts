@@ -1,6 +1,6 @@
 import { Players, Workspace } from "@rbxts/services";
 import { ARENA_CLIENT_REPLICATION_POLL_SECONDS } from "../../shared/Config";
-import { ARENA_SIDE_ANCHOR_NAMES } from "../UI/CombatVisualConfig";
+import { ARENA_SIDE_ANCHOR_NAMES, CAMERA_INTRO_SETTLE_FOV_DEGREES, CAMERA_INTRO_SETTLE_START } from "../UI/CombatVisualConfig";
 import { battleCleanupStep } from "./BattleCleanup";
 import {
 	collectFramingPointsInCameraSpace,
@@ -17,6 +17,7 @@ interface SavedCameraState {
 	readonly cameraType: Enum.CameraType;
 	readonly cframe: CFrame;
 	readonly cameraSubject?: BasePart | Humanoid;
+	readonly subjectCharacter?: Model;
 	readonly fieldOfView: number;
 	readonly fieldOfViewMode: Enum.FieldOfViewMode;
 }
@@ -124,6 +125,7 @@ export class CombatCameraController {
 		if (!viewportChanged && !force) return;
 
 		const validViewport = isValidViewportSize(viewportSize);
+		if (!validViewport && this.introArc !== undefined) return;
 		const context = this.framingContext;
 		const reference = cameraPart.CFrame;
 		const points = validViewport && context !== undefined && this.introSide !== undefined
@@ -148,7 +150,7 @@ export class CombatCameraController {
 			if (this.introSide !== undefined && points !== undefined) {
 				this.introArc = buildCombatCameraArc(frame, reference, context, this.introSide, viewportSize.X / viewportSize.Y, points);
 				if (this.introArc !== undefined) {
-					camera.CFrame = this.introArc(this.introProgress);
+					this.applyIntroPose(camera, frame, this.introArc);
 					return;
 				}
 			}
@@ -185,14 +187,22 @@ export class CombatCameraController {
 		return this.refreshFraming() && this.introArc !== undefined;
 	}
 
+	private applyIntroPose(camera: Camera, frame: AdaptiveCameraFrame, arc: (progress: number) => CFrame): void {
+		const t = math.clamp((this.introProgress - CAMERA_INTRO_SETTLE_START) / (1 - CAMERA_INTRO_SETTLE_START), 0, 1);
+		const extraFov = CAMERA_INTRO_SETTLE_FOV_DEGREES * (1 - t * t * (3 - 2 * t));
+		camera.FieldOfView = frame.fieldOfView + extraFov;
+		camera.CFrame = arc(this.introProgress);
+	}
+
 	public setIntroProgress(progress: number): boolean {
 		const part = this.activeCameraPart;
 		const camera = this.savedState?.camera;
 		if (part === undefined || camera === undefined || !this.ownsCamera(camera, part)) return false;
 		const arc = this.introArc;
-		if (arc !== undefined) {
+		const frame = this.lastAppliedFrame;
+		if (arc !== undefined && frame !== undefined) {
 			this.introProgress = progress;
-			camera.CFrame = arc(progress);
+			this.applyIntroPose(camera, frame, arc);
 			if (progress >= 1) {
 				this.introSide = undefined;
 				this.introArc = undefined;
@@ -206,11 +216,14 @@ export class CombatCameraController {
 		if (this.savedState !== undefined) return true;
 		const camera = this.getCamera();
 		if (camera === undefined) return false;
+		const character = Players.LocalPlayer?.Character;
+		const subject = camera.CameraSubject;
 		this.savedState = {
 			camera,
 			cameraType: camera.CameraType,
 			cframe: camera.CFrame,
-			cameraSubject: camera.CameraSubject,
+			cameraSubject: subject,
+			subjectCharacter: character !== undefined && subject?.IsDescendantOf(character) ? character : undefined,
 			fieldOfView: camera.FieldOfView,
 			fieldOfViewMode: camera.FieldOfViewMode,
 		};
@@ -345,10 +358,13 @@ export class CombatCameraController {
 		const camera = saved.camera;
 
 		camera.CameraType = saved.cameraType;
-		if (saved.cameraSubject !== undefined && saved.cameraSubject.Parent !== undefined) {
+		const character = Players.LocalPlayer?.Character;
+		const originalCharacterValid = saved.subjectCharacter === undefined ||
+			(saved.subjectCharacter === character && character.IsDescendantOf(Workspace));
+		if (originalCharacterValid && saved.cameraSubject !== undefined && saved.cameraSubject.Parent !== undefined) {
 			camera.CameraSubject = saved.cameraSubject;
 		} else if (camera === Workspace.CurrentCamera) {
-			const humanoid = Players.LocalPlayer?.Character?.FindFirstChildOfClass("Humanoid");
+			const humanoid = character?.FindFirstChildOfClass("Humanoid");
 			if (humanoid !== undefined) {
 				camera.CameraSubject = humanoid;
 			}
