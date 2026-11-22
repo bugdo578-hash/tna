@@ -1,20 +1,19 @@
--- Run on the Client in Studio Play after rbxtsc and Rojo sync.
+-- Studio Play, Client. Exercises L2/L2.2 and the L4.1.1 arc on cloned fixtures.
 local run = game:GetService("RunService")
 assert(run:IsStudio() and run:IsClient(), "Studio Client required")
 
 local ts = game.Players.LocalPlayer.PlayerScripts.TS
 local Combat = require(ts.Controllers.CombatController).CombatController
-local fixtures = require(ts.Controllers.CombatCameraFramingTests).cameraFramingTestFixtures
-local visuals = require(ts.UI.CombatVisualConfig)
-local duration = visuals.CAMERA_INTRO_DURATION_SECONDS
-local landscape, portrait = Vector2.new(1920, 1080), Vector2.new(414, 736)
+local framing = require(ts.Controllers.CombatCameraFramingTests)
+local fixtures = framing.cameraFramingTestFixtures
+local config = require(game.ReplicatedStorage.TS.Config)
+local landscape, square, portrait = Vector2.new(1920, 1080), Vector2.new(1024, 768), Vector2.new(414, 736)
 local root = Instance.new("Folder")
-local activeArenas = Instance.new("Folder")
-activeArenas.Name = require(game.ReplicatedStorage.TS.Config).ACTIVE_ARENAS_FOLDER_NAME
-activeArenas.Parent = root
+local activeArenas = Instance.new("Folder", root)
+activeArenas.Name = config.ACTIVE_ARENAS_FOLDER_NAME
 local subject = Instance.new("Part", root)
 local assets = fixtures.makeAssetsWithStandAndWeapon()
-local sessions = {}
+local clients = {}
 
 local function makeClient(viewport)
 	local camera = Instance.new("Camera")
@@ -23,10 +22,10 @@ local function makeClient(viewport)
 	camera.CFrame = CFrame.new(5, 12, -20) * CFrame.Angles(0, 1, 0)
 	camera.FieldOfViewMode = Enum.FieldOfViewMode.Diagonal
 	camera.FieldOfView = 74
-	local session = { camera = camera, original = camera.CFrame, viewport = viewport }
-	session.controller = Combat.new(nil, assets, root, 0.2, function() return session.camera end, function() return session.viewport end)
-	table.insert(sessions, session)
-	return session
+	local client = { camera = camera, original = camera.CFrame, viewport = viewport }
+	client.controller = Combat.new(nil, assets, root, 0.2, function() return camera end, function() return client.viewport end)
+	table.insert(clients, client)
+	return client
 end
 
 local function assertPose(actual, expected)
@@ -35,134 +34,97 @@ local function assertPose(actual, expected)
 	assert((actual.UpVector - expected.UpVector).Magnitude < 0.0001, "up axis mismatch")
 end
 
-local function assertRestored(session, camera)
-	camera = camera or session.camera
-	assert(camera.CameraType == Enum.CameraType.Custom, "camera stayed Scriptable")
-	assert(camera.CameraSubject == subject, "CameraSubject did not restore")
-	assert(camera.FieldOfViewMode == Enum.FieldOfViewMode.Diagonal, "FOV mode did not restore")
-	assert(math.abs(camera.FieldOfView - 74) < 0.001, "FOV did not restore")
-	assertPose(camera.CFrame, session.original)
-	assert(not session.controller:refreshCameraFraming(true), "teardown left camera active")
+local function assertRestored(client)
+	local camera = client.camera
+	assert(camera.CameraType == Enum.CameraType.Custom and camera.CameraSubject == subject, "camera ownership not restored")
+	assert(camera.FieldOfViewMode == Enum.FieldOfViewMode.Diagonal, "FOV mode not restored")
+	assert(math.abs(camera.FieldOfView - 74) < 0.001, "FOV not restored")
+	assertPose(camera.CFrame, client.original)
+	assert(not client.controller:refreshCameraFraming(true), "teardown left camera active")
 end
 
-local function inspect(session)
-	local camera = session.camera
-	local frame = assert(session.controller:getLastAppliedCameraFrame(), "missing adaptive frame")
-	assert(session.controller:getActiveCameraPart() == session.anchor, "wrong side or arena clone")
+local function inspect(client)
+	local camera = client.camera
+	local frame = assert(client.controller:getLastAppliedCameraFrame(), "missing adaptive frame")
+	assert(client.controller:getActiveCameraPart() == client.anchor, "wrong physical side or clone")
 	assert(camera.CameraType == Enum.CameraType.Scriptable, "battle lost Scriptable")
 	assert(camera.FieldOfViewMode == frame.fieldOfViewMode and math.abs(camera.FieldOfView - frame.fieldOfView) < 0.001, "adaptive FOV changed")
-	local offset = fixtures.assertPreservesReferenceAxis(camera.CFrame, frame.cframe, session.anchor.Name)
-	for _, fighter in session.fighters do
-		local model = assert(session.controller:getFighterModel(fighter.targetId), "fighter missing")
-		local bounds = fixtures.projectModel(model, camera.CFrame, camera.FieldOfView, session.viewport)
+	for _, fighter in client.fighters do
+		local model = assert(client.controller:getFighterModel(fighter.targetId), "fighter missing")
+		local bounds = fixtures.projectModel(model, camera.CFrame, camera.FieldOfView, client.viewport)
 		assert(bounds.minDepth > 0.5 and bounds.minU >= 0 and bounds.maxU <= 1 and bounds.minV >= 0 and bounds.maxV <= 1,
-			"fighter, Stand or sword clipped: " .. fighter.targetId)
+			"fighter, Stand or weapon clipped: " .. fighter.targetId)
 	end
-	return offset, frame
+	return frame
 end
 
-local function start(session, arena, mode, ownSide)
-	session.anchor = if ownSide == 1 then arena.cameraA else arena.cameraB
+local function start(client, arena, mode, ownSide)
+	client.anchor = if ownSide == 1 then arena.cameraA else arena.cameraB
 	local physical = { "physicalA", "physicalB" }
-	session.fighters = fixtures.make3v3Fighters(physical[1], physical[2])
-	session.controller:onBattleStarted({
+	client.fighters = fixtures.make3v3Fighters(physical[1], physical[2])
+	client.controller:onBattleStarted({
 		sides = { physical[ownSide], physical[3 - ownSide] },
-		fighters = session.fighters,
+		fighters = client.fighters,
 		mode = mode,
 		canPause = mode == "PVE",
 		arena = { instanceId = arena.model.Name, arenaId = "Arena_01", physicalSides = physical },
 	})
-	local offset, frame = inspect(session)
-	fixtures.assertPreservesReferenceAxis(frame.cframe, session.anchor.CFrame, "adaptive frame")
-	local center = arena.activeA.Position:Lerp(arena.activeB.Position, 0.5)
-	local expected = math.min(-frame.cframe:PointToObjectSpace(center).Z * visuals.CAMERA_INTRO_DEPTH_FRACTION,
-		visuals.CAMERA_INTRO_MAX_PULLBACK_STUDS)
-	assert(offset > 0.1 and math.abs(offset - expected) < 0.001, "intro did not start at its adaptive pullback")
-	return offset
+	local final = inspect(client)
+	assertPose(client.camera.CFrame, final.cframe)
+	assert(client.controller.cameraController:prepareIntro(ownSide - 1), "missing arc")
+	inspect(client)
+	local offset = final.cframe:PointToObjectSpace(client.camera.CFrame.Position)
+	assert(math.abs(offset.X) > 0.1 and offset.Y > 0.1 and offset.Z > 0.1, "intro needs lateral sweep, height and distance")
+	return final
 end
 
 local ok, failure = xpcall(function()
-	local arena1 = fixtures.makeOpen3v3Arena(activeArenas, "L41_rotated", CFrame.new(180, 12, -90) * CFrame.Angles(0, math.rad(37), 0), 6)
-	local arena2 = fixtures.makeOpen3v3Arena(activeArenas, "L41_other", CFrame.new(-200, 25, 120) * CFrame.Angles(0, math.rad(-80), 0), 6)
-	local pve, pvpA, pvpB = makeClient(landscape), makeClient(portrait), makeClient(landscape)
-	local firstPve = start(pve, arena1, "PVE", 1)
-	local firstA = start(pvpA, arena2, "PVP", 1)
-	local firstB = start(pvpB, arena2, "PVP", 2)
-	local startedAt = os.clock()
+	assert(require(ts.Controllers.CombatCameraTests).runL2CameraTests(), "L2")
+	assert(framing.runL2_2AdaptiveCameraTests(), "L2.2")
+	local arena1 = fixtures.makeOpen3v3Arena(activeArenas, "L411_rotated", CFrame.new(180, 12, -90) * CFrame.Angles(0, math.rad(37), 0), 6)
+	local arena2 = fixtures.makeOpen3v3Arena(activeArenas, "L411_other", CFrame.new(-200, 25, 120) * CFrame.Angles(0, math.rad(-80), 0), 6)
+	local pve, pvpA, pvpB = makeClient(landscape), makeClient(square), makeClient(portrait)
+	start(pve, arena1, "PVE", 1)
+	start(pvpA, arena2, "PVP", 1)
+	start(pvpB, arena2, "PVP", 2)
 
-	-- Observe the render loop in both aspect ratios while two different arena clones are active.
-	local prevPve, prevA, prevB = firstPve, firstA, firstB
-	repeat
-		run.RenderStepped:Wait()
-		local a, b, c = inspect(pve), inspect(pvpA), inspect(pvpB)
-		assert(a <= prevPve + 0.001 and b <= prevA + 0.001 and c <= prevB + 0.001, "intro motion reversed")
-		prevPve, prevA, prevB = a, b, c
-	until os.clock() - startedAt >= duration * 0.35
-	assert(prevPve > 0 and prevPve < firstPve - 0.01, "PvE never rendered an intermediate frame")
-	assert(prevA > 0 and prevA < firstA - 0.01 and prevB > 0 and prevB < firstB - 0.01,
-		"PvP never rendered intermediate frames on both sides")
+	local prior = {}
+	for _, client in clients do prior[client] = client.camera.CFrame end
+	for tick = 1, 60 do
+		for _, client in clients do
+			assert(client.controller.cameraController:setIntroProgress(tick / 60), "active camera lost")
+			inspect(client)
+			local from, to = prior[client], client.camera.CFrame
+			assert((from.LookVector - to.LookVector).Magnitude < 0.12, "abrupt orientation change")
+			prior[client] = to
+		end
+		if tick == 23 then
+			pve.viewport = portrait
+			assert(pve.controller:refreshCameraFraming(false), "resize refresh failed")
+			local frame = inspect(pve)
+			assert((pve.camera.CFrame.Position - frame.cframe.Position).Magnitude > 0.1, "resize ended the arc early")
+			prior[pve] = pve.camera.CFrame
+		end
+	end
+	for _, client in clients do assertPose(client.camera.CFrame, inspect(client).cframe) end
 
-	-- The viewport override exercises the same refresh path as the Camera.ViewportSize listener.
-	local beforeRefresh = pve.camera.CFrame
-	assert(pve.controller:refreshCameraFraming(true), "forced refresh failed")
-	assertPose(pve.camera.CFrame, beforeRefresh)
-	pve.viewport = portrait
-	assert(pve.controller:refreshCameraFraming(false), "resize refresh failed")
-	local afterResize, resizedFrame = inspect(pve)
-	assert(afterResize < 0.001, "resize did not finish at the new adaptive frame")
-
-	-- The existing cleanup path must release the camera even with a render update pending.
+	start(pvpB, arena1, "PVP", 2)
 	local oldGeneration = pvpB.controller:getBattleGeneration()
 	pvpB.controller:cleanupStage(oldGeneration)
 	assertRestored(pvpB)
-	run.RenderStepped:Wait()
-	assertRestored(pvpB)
-	local second = start(pvpB, arena1, "PVP", 2)
+	assert(not pvpB.controller.cameraController:setIntroProgress(0.5), "old arc survived teardown")
+	start(pvpB, arena2, "PVP", 1)
+	local pose = pvpB.camera.CFrame
 	pvpB.controller:cleanupStage(oldGeneration)
-	assert(inspect(pvpB) > 0, "old teardown cancelled the second intro")
-
-	local secondAt = os.clock()
-	local prevSecond = second
-	repeat
-		run.RenderStepped:Wait()
-		local a, b = inspect(pvpA), inspect(pvpB)
-		assert(a <= prevA + 0.001 and b <= prevSecond + 0.001, "camera moved away from its target")
-		assertPose(pve.camera.CFrame, resizedFrame.cframe)
-		prevA, prevSecond = a, b
-	until os.clock() - secondAt >= duration + 0.15
-	for _, session in sessions do
-		local remaining, frame = inspect(session)
-		assert(remaining < 0.001, "intro did not reach the final framing")
-		run.RenderStepped:Wait()
-		assertPose(session.camera.CFrame, frame.cframe)
-		session.controller:cleanupStage()
-		assertRestored(session)
-	end
-
-	-- CurrentCamera replacement must leave the substitute camera untouched.
-	start(pve, arena1, "PVE", 1)
-	local originalCamera = pve.camera
-	local replacement = Instance.new("Camera")
-	local originalType = replacement.CameraType
-	replacement.CFrame = CFrame.new(-30, 50, 20)
-	local replacementPose = replacement.CFrame
-	pve.camera = replacement
-	run.RenderStepped:Wait()
-	run.RenderStepped:Wait()
-	pve.camera = originalCamera
-	local replacementType, replacementFrame = replacement.CameraType, replacement.CFrame
-	replacement:Destroy()
-	assert(replacementType == originalType, "replacement camera type changed")
-	assertPose(replacementFrame, replacementPose)
-	assertRestored(pve)
+	assertPose(pvpB.camera.CFrame, pose)
 end, debug.traceback)
 
-for _, session in sessions do
-	session.controller:cleanupStage()
-	session.camera:Destroy()
+for _, client in clients do
+	client.controller:cleanupStage()
+	if ok then assertRestored(client) end
+	client.camera:Destroy()
 end
 assets:Destroy()
 root:Destroy()
 assert(ok, failure)
-print("L4_1_CAMERA_INTRO_TESTS_ALL_PASSED")
-return "L4_1_CAMERA_INTRO_TESTS_ALL_PASSED"
+return "L4_1_1_CAMERA_QA_PASSED"

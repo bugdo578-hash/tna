@@ -1,15 +1,16 @@
-import { Players, RunService, Workspace } from "@rbxts/services";
+import { Players, Workspace } from "@rbxts/services";
 import { ARENA_CLIENT_REPLICATION_POLL_SECONDS } from "../../shared/Config";
 import { ARENA_SIDE_ANCHOR_NAMES } from "../UI/CombatVisualConfig";
 import { battleCleanupStep } from "./BattleCleanup";
 import {
+	collectFramingPointsInCameraSpace,
 	computeAdaptiveCameraFrame,
 	hasRelevantViewportChange,
 	isValidViewportSize,
 	type AdaptiveCameraFrame,
 	type CameraFramingContext,
 } from "./CombatCameraFraming";
-import { playCombatCameraIntro } from "./CombatCameraIntro";
+import { buildCombatCameraArc } from "./CombatCameraIntro";
 
 interface SavedCameraState {
 	readonly camera: Camera;
@@ -87,8 +88,9 @@ export class CombatCameraController {
 	private lastAppliedFrame?: AdaptiveCameraFrame;
 	private cameraTypeGuard?: RBXScriptConnection;
 	private viewportSizeConnection?: RBXScriptConnection;
-	private introConnection?: RBXScriptConnection;
-	private introPending = false;
+	private introSide?: 0 | 1;
+	private introProgress = 0;
+	private introArc?: (progress: number) => CFrame;
 	private lastDiagnostics: readonly string[] = [];
 
 	public constructor(
@@ -113,30 +115,26 @@ export class CombatCameraController {
 		return this.getViewportSize !== undefined ? this.getViewportSize() : camera.ViewportSize;
 	}
 
-	private stopIntro(): void {
-		const connection = this.introConnection;
-		this.introConnection = undefined;
-		this.introPending = false;
-		if (connection?.Connected) battleCleanupStep("camera intro disconnect", () => connection.Disconnect());
-	}
-
 	private applyFramingToCamera(camera: Camera, cameraPart: BasePart, force: boolean): void {
 		const saved = this.savedState;
 		if (saved === undefined || cameraPart.Parent === undefined) return;
 
 		const viewportSize = this.readViewportSize(camera);
 		const viewportChanged = hasRelevantViewportChange(this.lastAppliedViewportSize, viewportSize);
-		if (!viewportChanged && (!force || this.introConnection?.Connected)) return;
-		// Uma viewport nova precisa de seu próprio enquadramento antes do próximo render.
-		if (this.introConnection?.Connected) this.stopIntro();
+		if (!viewportChanged && !force) return;
 
 		const validViewport = isValidViewportSize(viewportSize);
 		const context = this.framingContext;
+		const reference = cameraPart.CFrame;
+		const points = validViewport && context !== undefined && this.introSide !== undefined
+			? collectFramingPointsInCameraSpace(reference, context)
+			: undefined;
 		const frame = computeAdaptiveCameraFrame(
-			cameraPart.CFrame,
+			reference,
 			viewportSize,
 			saved.fieldOfView,
 			context,
+			points,
 		);
 
 		this.lastAppliedFrame = frame;
@@ -147,19 +145,12 @@ export class CombatCameraController {
 				camera.FieldOfViewMode = frame.fieldOfViewMode;
 			}
 			camera.FieldOfView = frame.fieldOfView;
-			if (this.introPending) {
-				this.introPending = false;
-				const generation = this.activeGeneration;
-				this.introConnection = playCombatCameraIntro(frame, context, (cframe) => {
-					if (this.savedState !== saved || this.activeGeneration !== generation) return false;
-					if (!this.ownsCamera(camera, cameraPart)) {
-						this.restore();
-						return false;
-					}
-					camera.CFrame = cframe;
-					return true;
-				});
-				if (this.introConnection !== undefined) return;
+			if (this.introSide !== undefined && points !== undefined) {
+				this.introArc = buildCombatCameraArc(frame, reference, context, this.introSide, viewportSize.X / viewportSize.Y, points);
+				if (this.introArc !== undefined) {
+					camera.CFrame = this.introArc(this.introProgress);
+					return;
+				}
 			}
 		}
 		camera.CFrame = frame.cframe;
@@ -187,11 +178,51 @@ export class CombatCameraController {
 		return true;
 	}
 
+	public prepareIntro(sideIndex: 0 | 1): boolean {
+		if (this.introSide === sideIndex && this.introArc !== undefined) return true;
+		this.introSide = sideIndex;
+		this.introProgress = 0;
+		return this.refreshFraming() && this.introArc !== undefined;
+	}
+
+	public setIntroProgress(progress: number): boolean {
+		const part = this.activeCameraPart;
+		const camera = this.savedState?.camera;
+		if (part === undefined || camera === undefined || !this.ownsCamera(camera, part)) return false;
+		const arc = this.introArc;
+		if (arc !== undefined) {
+			this.introProgress = progress;
+			camera.CFrame = arc(progress);
+			if (progress >= 1) {
+				this.introSide = undefined;
+				this.introArc = undefined;
+			}
+		}
+		return true;
+	}
+
+	/** Capture the exploration camera before the server can move the character. */
+	public capture(): boolean {
+		if (this.savedState !== undefined) return true;
+		const camera = this.getCamera();
+		if (camera === undefined) return false;
+		this.savedState = {
+			camera,
+			cameraType: camera.CameraType,
+			cframe: camera.CFrame,
+			cameraSubject: camera.CameraSubject,
+			fieldOfView: camera.FieldOfView,
+			fieldOfViewMode: camera.FieldOfViewMode,
+		};
+		return true;
+	}
+
 	public activateForArenaPart(
 		cameraPart: BasePart,
 		generation: number,
 		isCurrentBattle: () => boolean,
 		framingContext?: CameraFramingContext,
+		introSide?: 0 | 1,
 	): boolean {
 		const context = framingContext ?? this.framingContext;
 		if (!isCurrentBattle()) return false;
@@ -200,16 +231,10 @@ export class CombatCameraController {
 		const camera = this.getCamera();
 		if (camera === undefined) return false;
 
-		if (this.savedState !== undefined) this.restore();
-
-		const saved: SavedCameraState = {
-			camera,
-			cameraType: camera.CameraType,
-			cframe: camera.CFrame,
-			cameraSubject: camera.CameraSubject,
-			fieldOfView: camera.FieldOfView,
-			fieldOfViewMode: camera.FieldOfViewMode,
-		};
+		if (this.activeCameraPart !== undefined) this.restore();
+		if (!this.capture()) return false;
+		const saved = this.savedState;
+		if (saved?.camera !== camera) return false;
 
 		this.savedState = saved;
 		this.framingContext = context;
@@ -218,7 +243,8 @@ export class CombatCameraController {
 		this.activeIsCurrentBattle = isCurrentBattle;
 		this.lastAppliedViewportSize = undefined;
 		this.lastDiagnostics = [];
-		this.introPending = context?.anchors.arenaInstance !== undefined && RunService.IsClient();
+		this.introSide = introSide;
+		this.introProgress = 0;
 		camera.CameraType = Enum.CameraType.Scriptable;
 		this.applyFramingToCamera(camera, cameraPart, true);
 
@@ -245,6 +271,7 @@ export class CombatCameraController {
 		timeoutSeconds = 0,
 		pollSeconds = ARENA_CLIENT_REPLICATION_POLL_SECONDS,
 		framingContext?: CameraFramingContext,
+		withIntro = false,
 	): ArenaCameraResolutionResult {
 		const clampedTimeout = math.max(timeoutSeconds, 0);
 		const clampedPoll = math.max(pollSeconds, 0.01);
@@ -273,6 +300,7 @@ export class CombatCameraController {
 					generation,
 					isCurrentBattle,
 					framingContext,
+					withIntro ? sideIndex : undefined,
 				);
 				if (activated) {
 					return lastResult;
@@ -299,7 +327,8 @@ export class CombatCameraController {
 	}
 
 	public restore(): void {
-		this.stopIntro();
+		this.introSide = undefined;
+		this.introArc = undefined;
 		this.disconnectGuards();
 
 		const saved = this.savedState;
@@ -315,8 +344,7 @@ export class CombatCameraController {
 
 		const camera = saved.camera;
 
-		camera.CameraType =
-			saved.cameraType === Enum.CameraType.Scriptable ? Enum.CameraType.Custom : saved.cameraType;
+		camera.CameraType = saved.cameraType;
 		if (saved.cameraSubject !== undefined && saved.cameraSubject.Parent !== undefined) {
 			camera.CameraSubject = saved.cameraSubject;
 		} else if (camera === Workspace.CurrentCamera) {

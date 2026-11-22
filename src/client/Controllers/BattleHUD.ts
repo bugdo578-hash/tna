@@ -68,6 +68,9 @@ export class BattleHUD {
 	private opponentSideId = "";
 	private battleMode: BattleSessionMode = "PVE";
 	private battleState: BattleGlobalState = "IDLE";
+	private introId?: number;
+	private preparing = false;
+	private pauseAllowedAfterIntro = false;
 	private canPause = false;
 	private isPaused = false;
 	private lastPauseToggleClock = 0;
@@ -189,6 +192,7 @@ export class BattleHUD {
 
 		this.buildGui();
 		this.bindEvents();
+		this.combatController?.setIntroRecovery(() => this.teardownBattle(true));
 		if (this.screenGui !== undefined) {
 			this.lifetime.push(this.screenGui.Destroying.Connect(() => {
 				this.screenGui = undefined;
@@ -218,6 +222,7 @@ export class BattleHUD {
 	public destroy(): void {
 		if (this.destroyed) return;
 		this.destroyed = true;
+		this.combatController?.setIntroRecovery(undefined);
 		this.teardownBattle(true);
 		for (const connection of this.lifetime) battleCleanupStep("HUD lifetime connection", () => connection.Disconnect());
 		this.lifetime.clear();
@@ -336,6 +341,8 @@ export class BattleHUD {
 		return this.battleResult.hasResultGui();
 	}
 	private onBattleStarted(payload: BattleStartedPayload): void {
+		if (payload.transitionId !== undefined && this.combatController !== undefined &&
+			!this.combatController.introduction.owns(payload.transitionId)) return;
 		battleCleanupStep("previous HP tweens", () => this.clearHpTweens());
 		battleCleanupStep("previous XP cards", () => this.xpCards.clear());
 		if (this.screenGui) this.screenGui.DisplayOrder = UITheme.DisplayOrder;
@@ -348,7 +355,10 @@ export class BattleHUD {
 		this.opponentSideId = payload.sides[1];
 		this.battleMode = payload.mode ?? "PVE";
 		this.battleState = "IDLE";
-		this.canPause = payload.canPause === true || payload.mode === "PVE";
+		this.introId = payload.transitionId;
+		this.preparing = this.introId !== undefined;
+		this.pauseAllowedAfterIntro = payload.canPause === true || payload.mode === "PVE";
+		this.canPause = !this.preparing && this.pauseAllowedAfterIntro;
 		this.isPaused = false;
 		this.lastPauseToggleClock = 0;
 		this.battleActive = true;
@@ -461,6 +471,14 @@ export class BattleHUD {
 
 	private onStateChanged(payload: StateChangedPayload): void {
 		if (!this.battleActive || this.battleEnded) return;
+		if (payload.battleReleased !== undefined && payload.battleReleased !== this.introId) return;
+		if (this.preparing) {
+			if (payload.battleReleased === undefined) return;
+			this.preparing = false;
+			this.canPause = this.pauseAllowedAfterIntro;
+			this.refreshSessionControlsLayout();
+			this.refreshPauseVisuals();
+		}
 		this.clearPauseIfServerProgressed();
 		this.battleState = payload.state;
 		this.refreshStateBanner();
@@ -469,7 +487,7 @@ export class BattleHUD {
 	}
 
 	private onAtbSync(payload: AtbSyncPayload): void {
-		if (!this.battleActive || this.battleEnded) return;
+		if (!this.battleActive || this.battleEnded || this.preparing) return;
 		this.clearPauseIfServerProgressed();
 		const clampedAtb = clamp(payload.atb, ATB_MIN, ATB_MAX);
 		if (payload.sideId === this.ownSideId) {
@@ -556,6 +574,14 @@ export class BattleHUD {
 	}
 
 	private onBattleEnded(payload: BattleEndedPayload): void {
+		if (payload.transitionId !== undefined && this.combatController !== undefined) {
+			this.combatController.introduction.finish(payload.transitionId, () => this.finishBattle(payload));
+			return;
+		}
+		this.finishBattle(payload);
+	}
+
+	private finishBattle(payload: BattleEndedPayload): void {
 		if (!this.battleActive) {
 			battleCleanupStep("combat resources", () => this.combatController?.cleanupStage());
 			return;
@@ -579,7 +605,7 @@ export class BattleHUD {
 	}
 
 	private handleSkillButtonClicked(slot: SkillSlot): void {
-		if (!this.battleActive || this.battleEnded || this.isPaused) return;
+		if (!this.battleActive || this.battleEnded || this.isPaused || this.preparing) return;
 		if (this.battleState !== "IDLE") return;
 		const activePlayerFighter = this.getActiveFighterForSide(0);
 		if (activePlayerFighter === undefined || activePlayerFighter.dead) return;
@@ -592,7 +618,7 @@ export class BattleHUD {
 	}
 
 	private handleTagSlotClicked(index: ClientFighterIndex): void {
-		if (!this.battleActive || this.battleEnded || this.isPaused) return;
+		if (!this.battleActive || this.battleEnded || this.isPaused || this.preparing) return;
 		if (this.battleState !== "IDLE") return;
 
 		const activePlayerFighter = this.getActiveFighterForSide(0);
@@ -689,7 +715,7 @@ export class BattleHUD {
 			activePlayer: this.getActiveFighterForSide(0),
 			playerAtb: this.playerTargetAtb,
 			canUseSkillsInCurrentPhase:
-				this.battleState === "IDLE" && !this.isPaused && this.battleActive && !this.battleEnded,
+				this.battleState === "IDLE" && !this.isPaused && this.battleActive && !this.battleEnded && !this.preparing,
 		});
 	}
 
@@ -699,12 +725,12 @@ export class BattleHUD {
 			playerTeamOrder: this.playerTeamOrder,
 			fightersByTargetId: this.fightersByTargetId,
 			canSwitchInCurrentPhase:
-				this.battleActive && !this.battleEnded && !this.isPaused && this.battleState === "IDLE",
+				this.battleActive && !this.battleEnded && !this.isPaused && this.battleState === "IDLE" && !this.preparing,
 		});
 	}
 
 	private stepAtbInterpolation(dt: number): void {
-		if (!this.battleActive) return;
+		if (!this.battleActive || this.preparing) return;
 		this.fighterStatus.stepAtbInterpolation(dt, this.playerTargetAtb, this.opponentTargetAtb);
 	}
 

@@ -49,6 +49,7 @@ export const REMOTE_NAMES = {
 	RequestQuit: "RequestQuit",
 	RequestAllocate: "RequestAllocate",
 	BattleStarted: "BattleStarted",
+	BattleTransition: "BattleTransition",
 	StateChanged: "StateChanged",
 	SwitchPerformed: "SwitchPerformed",
 	AttackStarted: "AttackStarted",
@@ -63,6 +64,12 @@ export const REMOTE_NAMES = {
 
 export type ClientFighterIndex = 1 | 2 | 3;
 export type BattleSessionMode = "PVE" | "PVP";
+
+export type BattleTransitionAck = "covered" | "ready" | "scheduled" | "exitCovered" | "failed" | "cancel";
+export type BattleTransitionPayload =
+	| { readonly id: number; readonly phase: "cover" }
+	| { readonly id: number; readonly phase: "schedule"; readonly arcAt: number; readonly goAt: number }
+	| { readonly id: number; readonly phase: "exit"; readonly cageFrame?: CFrame };
 
 export interface RequestSkillPayload {
 	readonly slot: SkillSlot;
@@ -111,6 +118,7 @@ export interface BattleArenaPayload {
 }
 
 export interface BattleStartedPayload {
+	readonly transitionId?: number;
 	readonly sides: readonly [string, string];
 	readonly fighters: readonly BattleFighterSnapshot[];
 	readonly mode?: BattleSessionMode;
@@ -122,6 +130,7 @@ export interface BattleStartedPayload {
 
 export interface StateChangedPayload {
 	readonly state: BattleGlobalState;
+	readonly battleReleased?: number;
 }
 
 export interface SwitchPerformedPayload {
@@ -171,6 +180,7 @@ export interface FighterDiedPayload {
 }
 
 export interface BattleEndedPayload {
+	readonly transitionId?: number;
 	readonly reason?: BattleEndReason;
 	readonly rewardBlockedReason?: RewardBlockedReason;
 	readonly xpRewards?: readonly FighterXpReward[];

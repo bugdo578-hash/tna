@@ -17,6 +17,7 @@ export const BattleRemotes = {
 	requestQuit: waitForRemote(REMOTE_NAMES.RequestQuit),
 	requestAllocate: waitForRemote(REMOTE_NAMES.RequestAllocate),
 	battleStarted: waitForRemote(REMOTE_NAMES.BattleStarted),
+	battleTransition: waitForRemote(REMOTE_NAMES.BattleTransition),
 	stateChanged: waitForRemote(REMOTE_NAMES.StateChanged),
 	switchPerformed: waitForRemote(REMOTE_NAMES.SwitchPerformed),
 	attackStarted: waitForRemote(REMOTE_NAMES.AttackStarted),

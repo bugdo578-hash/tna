@@ -2,6 +2,7 @@
 import { validateArenaPlayerTransportL3 } from "./tests/arenaPlayerTransportTests";
 import { validateArenaRegistry } from "./tests/arenaRegistryTests";
 import { validateArenaSelectionL16 } from "./tests/arenaSelectionTests";
+import { validateBattlePreparation } from "./tests/battlePreparationTests";
 import {
 	runDummy1000Battles,
 	validateBronzeAI,
@@ -72,6 +73,7 @@ export { validateSlowAutosaveLogoutRetry } from "./tests/persistenceTests";
 export { validateJsonRoundTripPersistence, validateLoadExhaustionKick } from "./tests/dataStoreIntegrityTests";
 
 export function runSimulation(): void {
+	validateBattlePreparation();
 	validateSkillRegistry();
 	validateStarFinger();
 	validateMultiHitDeath();
@@ -119,4 +121,5 @@ export function runSimulation(): void {
 	validateArenaSelectionL16();
 	validatePvpSideAlternationL21();
 	validateArenaPlayerTransportL3();
+	print("SIMULATION_ALL_PASSED");
 }

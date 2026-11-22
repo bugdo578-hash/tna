@@ -1,90 +1,32 @@
-import { calcAverageLevel } from "../../shared/RewardMath";
-import type { BattleEndReason } from "../../shared/Remotes";
+import type { BattleEndReason, BattleTransitionAck } from "../../shared/Remotes";
 import { Players, RunService } from "@rbxts/services";
 import {
-	ATB_SYNC_INTERVAL_SECONDS,
 	BATTLE_INACTIVITY_TIMEOUT_SECONDS,
 	BATTLE_STALL_TIMEOUT_SECONDS,
 	FLOAT_TOLERANCE,
 	MIN_CLIENT_FIGHTER_INDEX,
 	PVE_PAUSE_MAX_SECONDS,
-	S3_UNLOCK_LEVEL,
 	type BattleEncounterKind,
 } from "../../shared/Config";
-import type {
-	AttackStartedPayload,
-	AtbSyncPayload,
-	BattleArenaPayload,
-	BattleFighterSnapshot,
-	BattleSessionMode,
-	BattleStartedPayload,
-	EffectAppliedPayload,
-	EffectExpiredPayload,
-	EffectTickPayload,
-	FighterDiedPayload,
-	HitResolvedPayload,
-	StateChangedPayload,
-	SwitchPerformedPayload,
-} from "../../shared/Remotes";
 import type { FighterXpReward, SkillSlot } from "../../shared/TypeDefs";
 import type { ProgressionService } from "./ProgressionService";
-import { BattleSide, type FighterIndex } from "../Components/BattleSide";
-import type { Fighter } from "../Components/Fighter";
+import type { BattleSide, FighterIndex } from "../Components/BattleSide";
 import { AIService } from "./AIService";
-import {
-	ArenaPlayerTransportService,
-	type ArenaSessionTransportResult,
-} from "./ArenaPlayerTransport";
+import type { ArenaPlayerTransportService, ArenaSessionTransportResult } from "./ArenaPlayerTransport";
 import type { ArenaRegistry, ArenaReservation, ArenaReserveFailureReason } from "./ArenaRegistry";
+import { BattleSessionArena, cleanupSessionStep } from "./BattleSessionArena";
+import { BattleSessionPresentation } from "./BattleSessionPresentation";
+import { createBattleSessionRecord, type BattleSessionRecord, type SessionMode, type SessionParticipant } from "./BattleSessionRecord";
 import { BattleRewardService } from "./BattleRewardService";
 import { BattleService } from "./BattleService";
 import type { BattleRemoteAdapter } from "./RemoteService";
 import type { TinyesService } from "./TinyesService";
 
-interface SessionParticipant {
-	readonly player: Player;
-	readonly side: BattleSide;
-	readonly sideId: string;
-}
-
-interface BattleSessionRecord {
-	reason?: BattleEndReason;
-	resolvedHits: number;
-	readonly averageLevels: readonly [number, number];
-	readonly totalMaxHp: readonly [number, number];
-	onFinished?: (firstSideWon: boolean) => void;
-	readonly rewardRng: () => number;
-	rewardPaid: boolean;
-	readonly id: number;
-	readonly battle: BattleService;
-	readonly mode: SessionMode;
-	arenaReservation?: ArenaReservation;
-	transportGeneration?: number;
-	readonly sides: readonly [BattleSide, BattleSide];
-	readonly participants: readonly SessionParticipant[];
-	readonly sideIds: readonly [string, string];
-	readonly sideIdBySide: Map<BattleSide, string>;
-	readonly fighterIds: Map<Fighter, string>;
-	readonly disconnectors: (() => void)[];
-	readonly aiControllers: AIService[];
-	secondsWithoutAction: number;
-	secondsOutsideIdle: number;
-	pauseAccumulatedSeconds: number;
-	atbSyncElapsed: number;
-	paused: boolean;
-	ended: boolean;
-	closed: boolean;
-}
-
-export type SessionMode = BattleSessionMode;
+export type { SessionMode } from "./BattleSessionRecord";
 
 interface PlayerBattleSession {
 	readonly session: BattleSessionRecord;
 	readonly side: BattleSide;
-}
-
-function getArenaParticipantKey(player: Player): string {
-	return player.UserId !== undefined ? `u:${player.UserId}` : `n:${player.Name}`;
 }
 
 export class BattleSessionService {
@@ -92,20 +34,21 @@ export class BattleSessionService {
 	private activeSessions: BattleSessionRecord[] = [];
 	private nextSessionId = 0;
 	private started = false;
-	private lastCreateFailureReason?: ArenaReserveFailureReason;
-	private lastTransportResult?: ArenaSessionTransportResult;
+	private readonly presentation: BattleSessionPresentation;
 	private readonly rewardService: BattleRewardService;
-	private readonly playerTransport: ArenaPlayerTransportService;
+	private readonly arena: BattleSessionArena;
 
 	public constructor(
 		private readonly remoteService: BattleRemoteAdapter,
 		private readonly tinyesService?: TinyesService,
 		private readonly progressionService?: ProgressionService,
-		private readonly arenaRegistry?: ArenaRegistry,
+		arenaRegistry?: ArenaRegistry,
 		playerTransport?: ArenaPlayerTransportService,
+		private readonly preparationClock?: () => number,
 	) {
+		this.presentation = new BattleSessionPresentation(remoteService);
 		this.rewardService = new BattleRewardService(tinyesService, progressionService);
-		this.playerTransport = playerTransport ?? new ArenaPlayerTransportService();
+		this.arena = new BattleSessionArena(arenaRegistry, playerTransport);
 	}
 
 	public start(): void {
@@ -117,6 +60,7 @@ export class BattleSessionService {
 			(player) => this.requestPause(player),
 			(player) => this.requestQuit(player),
 		);
+		this.remoteService.transition?.bind((player, id, ack) => this.receiveTransition(player, id, ack));
 		Players.PlayerRemoving.Connect((player) => this.destroySessionForPlayer(player));
 		RunService.Heartbeat.Connect((dt) => this.step(dt));
 	}
@@ -131,8 +75,8 @@ export class BattleSessionService {
 		onFinished?: (firstSideWon: boolean) => void,
 		encounterKind?: BattleEncounterKind,
 	): boolean {
-		this.lastCreateFailureReason = undefined;
-		this.lastTransportResult = undefined;
+		this.arena.lastCreateFailureReason = undefined;
+		this.arena.lastTransportResult = undefined;
 		if (firstPlayer.Parent !== Players) return false;
 		if (secondPlayer !== undefined && secondPlayer.Parent !== Players) return false;
 		if (this.playerSessions.has(firstPlayer)) return false;
@@ -142,115 +86,53 @@ export class BattleSessionService {
 		this.nextSessionId += 1;
 		const sessionKey = `battle-${id}`;
 
-		let arenaReservation: ArenaReservation | undefined;
-		if (this.arenaRegistry !== undefined) {
-			const arenaKind: BattleEncounterKind = mode === "PVP" ? "PVP" : (encounterKind ?? "PVE");
-			const participantKeys: string[] = [getArenaParticipantKey(firstPlayer)];
-			if (secondPlayer !== undefined) {
-				participantKeys.push(getArenaParticipantKey(secondPlayer));
-			}
-			const reserveResult = this.arenaRegistry.reserveForSession(sessionKey, arenaKind, {
-				participantKeys,
-			});
-			if (!reserveResult.ok || reserveResult.reservation === undefined) {
-				this.lastCreateFailureReason = reserveResult.reason;
-				return false;
-			}
-			arenaReservation = reserveResult.reservation;
-		}
-
-		const firstSideId = `${sessionKey}-A`;
-		const secondSideId = `${sessionKey}-B`;
-		const sideIds: readonly [string, string] = [firstSideId, secondSideId];
-		const sideIdBySide = new Map<BattleSide, string>();
-		sideIdBySide.set(firstSide, firstSideId);
-		sideIdBySide.set(secondSide, secondSideId);
-
-		const fighterIds = new Map<Fighter, string>();
-		for (const [side, sideId] of [[firstSide, firstSideId], [secondSide, secondSideId]] as const) {
-			for (const index of $range(0, side.fighters.size() - 1)) {
-				fighterIds.set(side.fighters[index], `${sideId}-fighter-${index + MIN_CLIENT_FIGHTER_INDEX}`);
-			}
-		}
-
-		const participants: SessionParticipant[] = [{ player: firstPlayer, side: firstSide, sideId: firstSideId }];
-		if (secondPlayer !== undefined) participants.push({ player: secondPlayer, side: secondSide, sideId: secondSideId });
+		const { ok: reserved, reservation: arenaReservation } = this.arena.reserve(
+			sessionKey, mode === "PVP" ? "PVP" : (encounterKind ?? "PVE"), firstPlayer, secondPlayer,
+		);
+		if (!reserved) return false;
 
 		let battle: BattleService | undefined;
 		const [battleOk, battleError] = pcall(() => {
 			battle = new BattleService(firstSide, secondSide, rng);
 		});
 		if (!battleOk || battle === undefined) {
-			if (arenaReservation !== undefined && this.arenaRegistry !== undefined) {
-				this.cleanupSessionStep("arena rollback", () => this.arenaRegistry?.releaseReservation(arenaReservation));
-			}
+			this.arena.releaseReservation(arenaReservation);
 			warn(`[BattleSessionService] erro ao inicializar ${sessionKey}: ${tostring(battleError)}`);
 			return false;
 		}
 
-		let transportGeneration: number | undefined;
-		if (arenaReservation !== undefined) {
-			const transportResult = this.playerTransport.transportSessionParticipants(
-				sessionKey,
-				arenaReservation,
-				participants.map((p) => ({
-					player: p.player,
-					physicalSideIndex: p.side === firstSide ? 0 : 1,
-				})),
-			);
-			this.lastTransportResult = transportResult;
-			if (!transportResult.ok && !transportResult.cageMissing) {
-				if (this.arenaRegistry !== undefined) {
-					this.cleanupSessionStep("arena rollback", () => this.arenaRegistry?.releaseReservation(arenaReservation));
-				}
-				return false;
-			}
-			if (transportResult.ok) {
-				transportGeneration = transportResult.generation;
-			}
+		const session = createBattleSessionRecord(
+			id, battle, [firstSide, secondSide], firstPlayer, secondPlayer, rng, mode, onFinished, arenaReservation,
+			this.remoteService.transition, this.preparationClock,
+		);
+
+		if (session.preparation === undefined && !this.arena.transport(session)) {
+			this.arena.release(session);
+			return false;
 		}
-
-		const session: BattleSessionRecord = {
-			resolvedHits: 0,
-			averageLevels: [calcAverageLevel(firstSide.fighters.map(f => f.level)), calcAverageLevel(secondSide.fighters.map(f => f.level))],
-			totalMaxHp: [firstSide.fighters.reduce((sum, f) => sum + f.hpMax, 0), secondSide.fighters.reduce((sum, f) => sum + f.hpMax, 0)],
-			onFinished,
-			rewardRng: rng,
-			rewardPaid: false,
-			id,
-			battle,
-			mode,
-			arenaReservation,
-			transportGeneration,
-			sides: [firstSide, secondSide],
-			participants,
-			sideIds,
-			sideIdBySide,
-			fighterIds,
-			disconnectors: [],
-			aiControllers: [],
-			secondsWithoutAction: 0,
-			secondsOutsideIdle: 0,
-			pauseAccumulatedSeconds: 0,
-			atbSyncElapsed: 0,
-			paused: false,
-			ended: false,
-			closed: false,
-		};
-
-		for (const participant of participants) {
+		for (const participant of session.participants) {
 			this.playerSessions.set(participant.player, { session, side: participant.side });
 		}
 		this.activeSessions.push(session);
 		const [ok, failure] = pcall(() => {
-			this.connectBattleEvents(session);
-			this.broadcastBattleStarted(session);
+			this.presentation.connect(session, (winner) => this.finishSession(session, winner, "victory"));
+			if (session.preparation !== undefined) session.preparation.cover();
+			else this.presentation.sendStarted(session);
 		});
 		if (!ok) {
 			this.abortSession(session, failure);
 			return false;
 		}
 		return true;
+	}
+
+	private receiveTransition(player: Player, id: number, ack: BattleTransitionAck): void {
+		const session = this.playerSessions.get(player)?.session;
+		const preparation = session?.preparation;
+		if (session === undefined || session.id !== id || session.closed || preparation === undefined) return;
+		if (!session.ended && ack === "cancel" && !preparation.isRunning()) this.quit(player);
+		else if (!session.ended && ack === "failed" && !preparation.isRunning()) this.finishSession(session, undefined, "error");
+		else preparation.accept(player, ack);
 	}
 
 	public destroySessionForPlayer(player: Player): void {
@@ -265,7 +147,7 @@ export class BattleSessionService {
 		const playerSession = this.playerSessions.get(player);
 		if (playerSession === undefined) return false;
 		const session = playerSession.session;
-		if (session.closed || session.ended || session.mode !== "PVE") return false;
+		if (!this.isRunning(session) || session.mode !== "PVE") return false;
 
 		if (session.paused) {
 			session.paused = false;
@@ -283,7 +165,7 @@ export class BattleSessionService {
 		const playerSession = this.playerSessions.get(player);
 		if (playerSession === undefined) return false;
 		const session = playerSession.session;
-		if (session.closed || session.ended || session.mode !== "PVE") return false;
+		if (!this.isRunning(session) || session.mode !== "PVE") return false;
 		if (paused && session.pauseAccumulatedSeconds + FLOAT_TOLERANCE >= PVE_PAUSE_MAX_SECONDS) return false;
 		session.paused = paused;
 		return true;
@@ -302,7 +184,7 @@ export class BattleSessionService {
 	}
 
 	public getLastCreateFailureReason(): ArenaReserveFailureReason | undefined {
-		return this.lastCreateFailureReason;
+		return this.arena.lastCreateFailureReason;
 	}
 
 	public getSessionArenaReservation(player: Player): ArenaReservation | undefined {
@@ -310,11 +192,11 @@ export class BattleSessionService {
 	}
 
 	public getPlayerTransportService(): ArenaPlayerTransportService {
-		return this.playerTransport;
+		return this.arena.transportService;
 	}
 
 	public getLastTransportResult(): ArenaSessionTransportResult | undefined {
-		return this.lastTransportResult;
+		return this.arena.lastTransportResult;
 	}
 
 	/**
@@ -324,7 +206,7 @@ export class BattleSessionService {
 		const playerSession = this.playerSessions.get(player);
 		if (playerSession === undefined) return false;
 		const session = playerSession.session;
-		if (session.closed || session.ended || session.paused) return false;
+		if (!this.isRunning(session) || session.paused) return false;
 		if (session.mode !== "PVE") return false;
 		const side = session.sides[sideIndex];
 		if (side === playerSession.side) return false;
@@ -342,7 +224,7 @@ export class BattleSessionService {
 		const playerSession = this.playerSessions.get(player);
 		if (playerSession === undefined) return false;
 		const session = playerSession.session;
-		if (session.closed || session.ended || session.paused) return false;
+		if (!this.isRunning(session) || session.paused) return false;
 		if (session.mode !== "PVE") return false;
 		const side = session.sides[sideIndex];
 		if (side === playerSession.side) return false;
@@ -368,7 +250,7 @@ export class BattleSessionService {
 		const aiService = new AIService(session.battle, aiSide, rng, {
 			requestSkill: (slot) => this.triggerSideSkill(player, sideIndex, slot),
 			requestSwitch: (index) => this.triggerSideSwitch(player, sideIndex, index),
-			isPaused: () => session.paused || session.closed || session.ended,
+			isPaused: () => session.paused || !this.isRunning(session),
 		});
 		session.aiControllers.push(aiService);
 		return aiService;
@@ -399,28 +281,23 @@ export class BattleSessionService {
 	public quit(player: Player, disconnected = false): void {
 		const playerSession = this.playerSessions.get(player);
 		if (playerSession === undefined) {
-			if (disconnected) {
-				this.playerTransport.forgetPlayer(player);
-				this.remoteService.forgetPlayer(player);
-				this.arenaRegistry?.forgetParticipant(getArenaParticipantKey(player));
-			}
+			if (disconnected) this.forgetParticipant(player);
 			return;
 		}
 
 		const session = playerSession.session;
-		if (disconnected) {
-			this.playerTransport.forgetPlayer(player);
-		}
+		if (disconnected) this.forgetParticipant(player);
 		const losingSide = playerSession.side;
-		const winnerSide = session.sides[0] === losingSide ? session.sides[1] : session.sides[0];
+		const winnerSide = this.isRunning(session) ? (session.sides[0] === losingSide ? session.sides[1] : session.sides[0]) : undefined;
 		const [ok, failure] = pcall(() => this.finishSession(session, winnerSide, disconnected ? "disconnect" : "quit"));
-		this.destroySession(session);
+		if (disconnected) session.preparation?.forget(player);
+		if (session.finalizeAfterCover === undefined) this.destroySession(session);
 		if (!ok) warn(`[BattleSessionService] erro ao sair: ${tostring(failure)}`);
-		if (disconnected) {
-			this.playerTransport.forgetPlayer(player);
-			this.remoteService.forgetPlayer(player);
-			this.arenaRegistry?.forgetParticipant(getArenaParticipantKey(player));
-		}
+	}
+
+	private forgetParticipant(player: Player): void {
+		this.arena.forget(player);
+		this.remoteService.forgetPlayer(player);
 	}
 
 	public step(dt: number): void {
@@ -430,12 +307,7 @@ export class BattleSessionService {
 			if (session.closed) continue;
 			const [ok, result] = pcall(() => this.stepSession(session, clampedDt));
 			if (!ok) {
-				warn(`[BattleSessionService] erro na sessão battle-${session.id}: ${tostring(result)}`);
-				const [finishOk, finishError] = pcall(() => this.finishSession(session, undefined, "error"));
-				if (!finishOk) {
-					warn(`[BattleSessionService] erro ao encerrar sessão battle-${session.id}: ${tostring(finishError)}`);
-				}
-				sessionsToDestroy.push(session);
+				this.abortSession(session, result);
 				continue;
 			}
 			if (result === true) sessionsToDestroy.push(session);
@@ -443,8 +315,37 @@ export class BattleSessionService {
 		for (const session of sessionsToDestroy) this.destroySession(session);
 	}
 
+	private isRunning(session: BattleSessionRecord): boolean {
+		return !session.closed && !session.ended && (session.preparation?.isRunning() ?? true);
+	}
+
 	/** Avança uma sessão (step + syncAtb). Retorna `true` quando a sessão terminou e deve ser destruída. */
 	private stepSession(session: BattleSessionRecord, clampedDt: number): boolean {
+		if (session.ended) {
+			if (session.finalizeAfterCover === undefined) return true;
+			if (!session.preparation?.canFinish()) return false;
+			const finalize = session.finalizeAfterCover;
+			session.finalizeAfterCover = undefined;
+			finalize();
+			return true;
+		}
+		if (session.preparation !== undefined && this.arena.isMissing(session)) {
+			this.finishSession(session, undefined, "error");
+			return false;
+		}
+		if (!this.isRunning(session)) {
+			this.arena.contain(session);
+			const action = session.preparation?.step();
+			if (action === "load") {
+				if (this.arena.transport(session)) this.presentation.sendStarted(session);
+				else this.finishSession(session, undefined, "error");
+			} else if (action === "go") {
+				this.presentation.sendReleased(session);
+			} else if (action === "timeout") {
+				this.finishSession(session, undefined, "timeout");
+			}
+			return false;
+		}
 		let remainingDt = clampedDt;
 		if (session.paused) {
 			const remainingPauseBudget = math.max(PVE_PAUSE_MAX_SECONDS - session.pauseAccumulatedSeconds, 0);
@@ -475,15 +376,15 @@ export class BattleSessionService {
 		if (!session.ended && session.secondsWithoutAction >= BATTLE_INACTIVITY_TIMEOUT_SECONDS) {
 			this.finishSession(session, undefined, "timeout");
 		}
-		if (session.ended) return true;
-		this.playerTransport.enforceContainment(`battle-${session.id}`);
-		this.syncAtb(session, remainingDt);
+		if (session.ended) return session.finalizeAfterCover === undefined;
+		this.arena.contain(session);
+		this.presentation.syncAtb(session, remainingDt);
 		return false;
 	}
 
 	private handleSkillRequest(player: Player, slot: SkillSlot): void {
 		const playerSession = this.playerSessions.get(player);
-		if (playerSession === undefined || playerSession.session.closed || playerSession.session.paused) return;
+		if (playerSession === undefined || !this.isRunning(playerSession.session) || playerSession.session.paused) return;
 		const [ok, failure] = pcall(() => {
 			if (playerSession.session.battle.requestSkill(playerSession.side, slot)) {
 				playerSession.session.secondsWithoutAction = 0;
@@ -494,7 +395,7 @@ export class BattleSessionService {
 
 	private handleSwitchRequest(player: Player, clientIndex: number): void {
 		const playerSession = this.playerSessions.get(player);
-		if (playerSession === undefined || playerSession.session.closed || playerSession.session.paused) return;
+		if (playerSession === undefined || !this.isRunning(playerSession.session) || playerSession.session.paused) return;
 		const fighterIndex = (clientIndex - MIN_CLIENT_FIGHTER_INDEX) as FighterIndex;
 		const [ok, failure] = pcall(() => {
 			if (playerSession.session.battle.requestSwitch(playerSession.side, fighterIndex)) {
@@ -502,80 +403,6 @@ export class BattleSessionService {
 			}
 		});
 		if (!ok) this.abortSession(playerSession.session, failure);
-	}
-
-	private connectBattleEvents(session: BattleSessionRecord): void {
-		const events = session.battle.events;
-		session.disconnectors.push(
-			events.state.connect((state) => {
-				const payload: StateChangedPayload = { state };
-				this.sendToParticipants(session, (player) => this.remoteService.sendStateChanged(player, payload));
-			}),
-			events.switchPerformed.connect(({ side, previousFighter, activeFighter }) => {
-				const payload: SwitchPerformedPayload = {
-					sideId: this.getSideId(session, side),
-					previousFighterId: this.getFighterId(session, previousFighter),
-					activeFighterId: this.getFighterId(session, activeFighter),
-				};
-				this.sendToParticipants(session, (player) => this.remoteService.sendSwitchPerformed(player, payload));
-			}),
-			events.attackStarted.connect(({ attacker, target, slot }) => {
-				const payload: AttackStartedPayload = {
-					attackerId: this.getFighterId(session, attacker),
-					targetId: this.getFighterId(session, target),
-					slot,
-				};
-				this.sendToParticipants(session, (player) => this.remoteService.sendAttackStarted(player, payload));
-			}),
-			events.hitResolved.connect(({ hitIndex, hit, crit, damage, target, followUpCancelled }) => {
-				session.resolvedHits++;
-				const payload: HitResolvedPayload = {
-					hitIndex,
-					hit,
-					crit,
-					damage,
-					targetId: this.getFighterId(session, target),
-					followUpCancelled,
-				};
-				this.sendToParticipants(session, (player) => this.remoteService.sendHitResolved(player, payload));
-			}),
-			events.effectApplied.connect(({ target, effect, duration, renewed }) => {
-				const payload: EffectAppliedPayload = {
-					targetId: this.getFighterId(session, target),
-					effect,
-					duration,
-					renewed,
-				};
-				this.sendToParticipants(session, (player) => this.remoteService.sendEffectApplied(player, payload));
-			}),
-			events.effectTick.connect(({ target, effect, damage, remainingTicks }) => {
-				const payload: EffectTickPayload = {
-					targetId: this.getFighterId(session, target),
-					effect,
-					damage,
-					remainingTicks,
-				};
-				this.sendToParticipants(session, (player) => this.remoteService.sendEffectTick(player, payload));
-			}),
-			events.effectExpired.connect(({ target, effect }) => {
-				const payload: EffectExpiredPayload = {
-					targetId: this.getFighterId(session, target),
-					effect,
-				};
-				this.sendToParticipants(session, (player) => this.remoteService.sendEffectExpired(player, payload));
-			}),
-			events.death.connect(({ side, fighter, nextActive }) => {
-				const payload: FighterDiedPayload = {
-					sideId: this.getSideId(session, side),
-					fighterId: this.getFighterId(session, fighter),
-					nextActive: nextActive === undefined ? undefined : this.getFighterId(session, nextActive),
-				};
-				this.sendToParticipants(session, (player) => this.remoteService.sendFighterDied(player, payload));
-			}),
-			events.battleEnd.connect((winnerSide) => {
-				this.finishSession(session, winnerSide, "victory");
-			}),
-		);
 	}
 
 	private finishSession(
@@ -586,7 +413,16 @@ export class BattleSessionService {
 		if (session.ended || session.closed) return;
 		session.ended = true;
 		session.reason = reason;
-		this.restoreTransport(session);
+		if (session.preparation !== undefined) {
+			session.finalizeAfterCover = () => this.publishResult(session, winnerSide, reason);
+			session.preparation.beginExit((player) => this.arena.cageFrame(player));
+		} else {
+			this.publishResult(session, winnerSide, reason);
+		}
+	}
+
+	private publishResult(session: BattleSessionRecord, winnerSide: BattleSide | undefined, reason: BattleEndReason): void {
+		this.arena.restore(session);
 		this.releaseSession(session, reason === "victory" && winnerSide === session.sides[0]);
 		for (const participant of session.participants) {
 			const player = participant.player;
@@ -596,7 +432,8 @@ export class BattleSessionService {
 				(rewardSession, rewardParticipant, maxTotalXp) => this.awardSessionXp(rewardSession, rewardParticipant, maxTotalXp),
 			);
 			const [sent, sendError] = pcall(() => this.remoteService.sendBattleEnded(player, {
-				winnerSideId: winnerSide === undefined ? undefined : this.getSideId(session, winnerSide),
+				transitionId: session.preparation !== undefined ? session.id : undefined,
+				winnerSideId: winnerSide === undefined ? undefined : this.presentation.getSideId(session, winnerSide),
 				tinyesReward: session.mode === "PVP" && participant.side !== winnerSide ? undefined : tinyesReward,
 				reason,
 				rewardBlockedReason,
@@ -604,90 +441,25 @@ export class BattleSessionService {
 			}));
 			if (!sent) warn(`[BattleSessionService] erro de resultado privado: ${tostring(sendError)}`);
 		}
-		this.releaseArena(session);
+		this.arena.release(session);
 	}
 
 	private awardSessionXp(session: BattleSessionRecord, participant: SessionParticipant, maxTotalXp = math.huge): FighterXpReward[] | undefined {
 		return this.rewardService.awardSessionXp(session, participant, maxTotalXp);
 	}
 
-	private broadcastBattleStarted(session: BattleSessionRecord): void {
-		const fighters: BattleFighterSnapshot[] = [];
-		for (const sideIndex of $range(0, session.sides.size() - 1)) {
-			const sessionSide = session.sides[sideIndex];
-			for (const index of $range(0, sessionSide.fighters.size() - 1)) {
-				const fighter = sessionSide.fighters[index];
-				fighters.push({
-					sideId: session.sideIds[sideIndex],
-					targetId: this.getFighterId(session, fighter),
-					fighterId: fighter.fighterId,
-					className: fighter.className,
-					level: fighter.level,
-					s3Unlocked: fighter.level >= S3_UNLOCK_LEVEL,
-					hp: fighter.hp,
-					hpMax: fighter.hpMax,
-					active: sessionSide.activeIndex === index,
-					slotCosts: [fighter.slots[0].cost, fighter.slots[1].cost, fighter.slots[2].cost],
-				});
-			}
-		}
-		const arena: BattleArenaPayload | undefined = session.arenaReservation === undefined
-			? undefined
-			: {
-				arenaId: session.arenaReservation.arenaId,
-				instanceId: session.arenaReservation.instanceId,
-				physicalSides: session.sideIds,
-			};
-		const payload: BattleStartedPayload = {
-			sides: session.sideIds,
-			fighters,
-			mode: session.mode,
-			canPause: session.mode === "PVE",
-			arena,
-		};
-		for (const participant of session.participants) {
-			const opponentId = session.sideIds[0] === participant.sideId ? session.sideIds[1] : session.sideIds[0];
-			this.remoteService.sendBattleStarted(participant.player, { ...payload, sides: [participant.sideId, opponentId] });
-		}
-	}
-
-	private syncAtb(session: BattleSessionRecord, dt: number): void {
-		session.atbSyncElapsed += dt;
-		while (session.atbSyncElapsed >= ATB_SYNC_INTERVAL_SECONDS) {
-			session.atbSyncElapsed -= ATB_SYNC_INTERVAL_SECONDS;
-			for (const sideIndex of $range(0, session.sides.size() - 1)) {
-				const side = session.sides[sideIndex];
-				const sideId = session.sideIds[sideIndex];
-				const payload: AtbSyncPayload = { sideId, atb: side.atb };
-				this.sendToParticipants(session, (player) => this.remoteService.sendAtbSync(player, payload));
-			}
-		}
-	}
-
-	private sendToParticipants(session: BattleSessionRecord, send: (player: Player) => void): void {
-		for (const participant of session.participants) send(participant.player);
-	}
-
-	private getSideId(session: BattleSessionRecord, side: BattleSide): string {
-		return session.sideIdBySide.get(side) ?? "";
-	}
-
-	private getFighterId(session: BattleSessionRecord, fighter: Fighter): string {
-		return session.fighterIds.get(fighter) ?? "";
-	}
-
 	private destroySession(session: BattleSessionRecord): void {
 		if (session.closed) return;
 		session.closed = true;
-		this.restoreTransport(session);
+		this.arena.restore(session);
 		this.releaseSession(session);
-		this.releaseArena(session);
+		this.arena.release(session);
 		session.paused = false;
 		for (const aiController of session.aiControllers) {
-			this.cleanupSessionStep("IA", () => aiController.destroy());
+			cleanupSessionStep("IA", () => aiController.destroy());
 		}
 		session.aiControllers.clear();
-		for (const disconnect of session.disconnectors) this.cleanupSessionStep("conexao", disconnect);
+		for (const disconnect of session.disconnectors) cleanupSessionStep("conexao", disconnect);
 		session.disconnectors.clear();
 		for (const participant of session.participants) {
 			const playerSession = this.playerSessions.get(participant.player);
@@ -696,11 +468,6 @@ export class BattleSessionService {
 		session.sideIdBySide.clear();
 		session.fighterIds.clear();
 		this.activeSessions = this.activeSessions.filter((activeSession) => activeSession !== session);
-	}
-
-	private cleanupSessionStep(name: string, cleanup: () => void): void {
-		const [ok, failure] = pcall(cleanup);
-		if (!ok) warn(`[BattleSessionService] limpeza ${name}: ${tostring(failure)}`);
 	}
 
 	private releaseSession(session: BattleSessionRecord, firstSideWon = false): void {
@@ -712,26 +479,10 @@ export class BattleSessionService {
 		}
 	}
 
-	private restoreTransport(session: BattleSessionRecord): void {
-		const sessionKey = `battle-${session.id}`;
-		const generation = session.transportGeneration;
-		this.cleanupSessionStep("transporte", () => {
-			this.playerTransport.restoreSession(sessionKey, generation);
-		});
-	}
-
-	private releaseArena(session: BattleSessionRecord): void {
-		const reservation = session.arenaReservation;
-		session.arenaReservation = undefined;
-		if (reservation !== undefined && this.arenaRegistry !== undefined) {
-			this.cleanupSessionStep("arena", () => this.arenaRegistry?.releaseReservation(reservation));
-		}
-	}
-
 	private abortSession(session: BattleSessionRecord, failure: unknown): void {
 		warn(`[BattleSessionService] erro na sessão battle-${session.id}: ${tostring(failure)}`);
 		const [finished, finishError] = pcall(() => this.finishSession(session, undefined, "error"));
 		if (!finished) warn(`[BattleSessionService] erro ao abortar battle-${session.id}: ${tostring(finishError)}`);
-		this.destroySession(session);
+		if (session.finalizeAfterCover === undefined) this.destroySession(session);
 	}
 }

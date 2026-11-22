@@ -18,6 +18,8 @@ import type {
 	AttackStartedPayload,
 	BattleFighterSnapshot,
 	BattleStartedPayload,
+	BattleTransitionPayload,
+	StateChangedPayload,
 	EffectAppliedPayload,
 	EffectExpiredPayload,
 	EffectTickPayload,
@@ -30,6 +32,7 @@ import type { SkillSlot, StatusEffect } from "../../shared/TypeDefs";
 import { battleCleanupStep } from "./BattleCleanup";
 import { CombatCameraController, resolveSideCameraAnchor } from "./CombatCameraController";
 import type { AdaptiveCameraFrame, CameraFramingContext, FighterFramingSample } from "./CombatCameraFraming";
+import { BattleIntroController } from "./BattleIntroController";
 import { BattleRemotes } from "./BattleRemotes";
 import { CombatArenaAnchorResolver, type ResolvedArenaAnchors } from "./CombatArenaAnchors";
 import { CombatAttackFinalizer, type PendingDeathRecord } from "./CombatAttackFinalizer";
@@ -81,6 +84,8 @@ export class CombatController {
 	private readonly fightersByTargetId = new Map<string, FighterVisualEntry>();
 	private readonly arenaAnchors: CombatArenaAnchorResolver;
 	private readonly cameraController: CombatCameraController;
+	public readonly introduction: BattleIntroController;
+	private recoverIntroHud?: () => void;
 	private readonly hitQueue: CombatHitQueue;
 	private readonly attackFinalizer: CombatAttackFinalizer<FighterVisualEntry>;
 	private readonly hitResultsByIndex: Map<number, HitResolvedPayload[]>;
@@ -125,6 +130,17 @@ export class CombatController {
 	) {
 		this.arenaAnchors = new CombatArenaAnchorResolver(arenaSearchRoot);
 		this.cameraController = new CombatCameraController(getCamera, getViewportSize);
+		this.introduction = new BattleIntroController(
+			() => {
+				this.cleanupStage(undefined, true);
+				return this.cameraController.capture();
+			},
+			(progress) => this.cameraController.setIntroProgress(progress),
+			() => {
+				if (this.recoverIntroHud !== undefined) this.recoverIntroHud();
+				else this.cleanupStage();
+			},
+		);
 		this.damagePool = new CombatDamagePool({
 			createBattleTween: (object, info, goal) => this.createBattleTween(object, info, goal),
 			delayBattle: (seconds, callback) => this.delayBattle(seconds, callback),
@@ -189,6 +205,9 @@ export class CombatController {
 		this.started = true;
 		this.initBillboardPool();
 
+		BattleRemotes.battleTransition.OnClientEvent.Connect((payload) => {
+			this.introduction.receive(payload as BattleTransitionPayload);
+		});
 		BattleRemotes.battleStarted.OnClientEvent.Connect((payload) => {
 			this.onBattleStarted(payload as BattleStartedPayload);
 		});
@@ -213,8 +232,13 @@ export class CombatController {
 		BattleRemotes.switchPerformed.OnClientEvent.Connect((payload) => {
 			this.onSwitchPerformed(payload as SwitchPerformedPayload);
 		});
-		BattleRemotes.stateChanged.OnClientEvent.Connect(() => {});
-		BattleRemotes.atbSync.OnClientEvent.Connect(() => {});
+		BattleRemotes.stateChanged.OnClientEvent.Connect((payload: StateChangedPayload) => {
+			if (payload.battleReleased !== undefined) this.introduction.release(payload.battleReleased);
+		});
+	}
+
+	public setIntroRecovery(recover?: () => void): void {
+		this.recoverIntroHud = recover;
 	}
 
 	/** Retorna a geração atual da batalha para proteger o deload contra teardowns atrasados. */
@@ -320,7 +344,20 @@ export class CombatController {
 	}
 
 	private onBattleStarted(payload: BattleStartedPayload): void {
-		const generation = this.cleanupStage();
+		const transitionId = payload.transitionId;
+		if (transitionId === undefined) {
+			this.buildBattleStage(payload, this.cleanupStage());
+			return;
+		}
+		if (!this.introduction.owns(transitionId)) return;
+		const [ok, failure] = pcall(() => this.buildBattleStage(payload, this.battleVfxGeneration));
+		if (!ok) {
+			warn("[CombatController] prepara??o da batalha", failure);
+			this.introduction.failed(transitionId);
+		}
+	}
+
+	private buildBattleStage(payload: BattleStartedPayload, generation: number): void {
 		if (generation !== this.battleVfxGeneration) return;
 		const physicalSides = payload.arena?.physicalSides ?? payload.sides;
 		this.sideIds = payload.sides;
@@ -348,6 +385,7 @@ export class CombatController {
 		if (!anchorResolution.ok) {
 			this.battleEnded = true;
 			this.activeArenaInstanceId = undefined;
+			if (payload.transitionId !== undefined) this.introduction.failed(payload.transitionId);
 			return;
 		}
 
@@ -450,54 +488,54 @@ export class CombatController {
 		if (!this.isCurrentBattle(generation)) return;
 		folder.Parent = Workspace;
 
-		const playerSideId = payload.sides[0];
-		let playerPhysicalSideIndex: 0 | 1 | undefined;
-		if (playerSideId === physicalSides[0]) {
-			playerPhysicalSideIndex = 0;
-		} else if (playerSideId === physicalSides[1]) {
-			playerPhysicalSideIndex = 1;
+		const transitionId = payload.transitionId;
+		const isCurrent = () => this.isCurrentBattle(generation) && (transitionId === undefined || this.introduction.owns(transitionId));
+		const prepare = () => {
+			const [ok, cameraReady] = pcall(() => this.resolveBattleCamera(
+				payload.sides[0], generation, isCurrent, payload.arena !== undefined, transitionId !== undefined,
+			));
+			if (transitionId === undefined || !isCurrent()) return;
+			if (ok && cameraReady && this.fightersByTargetId.size() === payload.fighters.size()) this.introduction.ready(transitionId);
+			else this.introduction.failed(transitionId);
+		};
+
+		if (transitionId !== undefined) {
+			this.preloadBattleVfx(payload, generation);
+			this.spawnBattle(prepare);
 		} else {
-			warn(`[CombatController] sideId do jogador "${playerSideId}" não pertence aos lados físicos da arena.`);
+			prepare();
+			this.preloadBattleVfx(payload, generation);
 		}
-		const framingContext = this.buildCameraFramingContext();
-		if (playerPhysicalSideIndex !== undefined) {
-			const sideIndex = playerPhysicalSideIndex;
-			const sideFolder = this.arenaAnchors.getSideFolder(sideIndex);
-			if (sideFolder !== undefined) {
-				const isInActiveRoot = (inst: Instance) => this.arenaAnchors.isDescendantInActiveRoot(inst);
-				const isCurrent = () => this.isCurrentBattle(generation);
-				const initialCheck = resolveSideCameraAnchor(sideFolder, sideIndex);
-				if (initialCheck.ok && initialCheck.camera !== undefined && isInActiveRoot(initialCheck.camera)) {
-					this.cameraController.activateForArenaPart(initialCheck.camera, generation, isCurrent, framingContext);
-				} else if (payload.arena !== undefined && !initialCheck.fatal) {
-					const timeout = this.arenaReplicationTimeoutSeconds ?? ARENA_CLIENT_REPLICATION_TIMEOUT_SECONDS;
-					this.spawnBattle(() => {
-						this.cameraController.resolveAndActivateForSide(
-							sideFolder,
-							isInActiveRoot,
-							sideIndex,
-							generation,
-							isCurrent,
-							timeout,
-							undefined,
-							framingContext,
-						);
-					});
-				} else {
-					this.cameraController.resolveAndActivateForSide(
-						sideFolder,
-						isInActiveRoot,
-						sideIndex,
-						generation,
-						isCurrent,
-						0,
-						undefined,
-						framingContext,
-					);
-				}
-			}
+	}
+
+	private resolveBattleCamera(
+		ownSideId: string, generation: number, isCurrent: () => boolean, reserved: boolean, withIntro: boolean,
+	): boolean {
+		const sideIndex = this.physicalSideIds[0] === ownSideId ? 0 : this.physicalSideIds[1] === ownSideId ? 1 : undefined;
+		if (sideIndex === undefined) return false;
+		const sideFolder = this.arenaAnchors.getSideFolder(sideIndex);
+		if (sideFolder === undefined) return false;
+		const isInActiveRoot = (instance: Instance) => this.arenaAnchors.isDescendantInActiveRoot(instance);
+		const context = this.buildCameraFramingContext();
+		const timeout = reserved ? (this.arenaReplicationTimeoutSeconds ?? ARENA_CLIENT_REPLICATION_TIMEOUT_SECONDS) : 0;
+		const resolve = () => this.cameraController.resolveAndActivateForSide(
+			sideFolder, isInActiveRoot, sideIndex, generation, isCurrent, timeout, undefined, context, withIntro,
+		);
+		if (!withIntro) {
+			const initial = resolveSideCameraAnchor(sideFolder, sideIndex);
+			if (reserved && !initial.ok && !initial.fatal) this.spawnBattle(() => { resolve(); });
+			else resolve();
+			return true;
 		}
-		this.preloadBattleVfx(payload, generation);
+
+		if (!resolve().ok) return false;
+		const deadline = os.clock() + timeout;
+		while (isCurrent()) {
+			if (this.cameraController.prepareIntro(sideIndex)) return true;
+			if (os.clock() >= deadline) break;
+			task.wait();
+		}
+		return false;
 	}
 
 	private buildCameraFramingContext(): CameraFramingContext | undefined {
@@ -1045,12 +1083,13 @@ export class CombatController {
 	}
 
 	/** Called only by the client teardown, or before replacing a stage on BattleStarted. */
-	public cleanupStage(expectedVfxGeneration?: number): number {
+	public cleanupStage(expectedVfxGeneration?: number, keepIntro = false): number {
 		if (!this.vfxBridge.ownsGeneration(expectedVfxGeneration)) {
 			return this.vfxBridge.getBattleGeneration();
 		}
 		const generation = this.vfxBridge.advanceGeneration();
 		this.battleVfxGeneration = generation;
+		if (!keepIntro) this.introduction.reset();
 		this.battleEnded = true;
 		this.currentAttackToken += 1;
 		this.activeAttack = undefined;

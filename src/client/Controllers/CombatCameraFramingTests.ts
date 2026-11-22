@@ -5,7 +5,6 @@ import {
 } from "../../shared/Config";
 import type { BattleFighterSnapshot, BattleStartedPayload } from "../../shared/Remotes";
 import {
-	CAMERA_INTRO_DURATION_SECONDS,
 	CAMERA_MAX_HORIZONTAL_FOV,
 	CAMERA_MAX_VERTICAL_FOV,
 	PLACEHOLDER_HIT_KNOCKBACK_STUDS,
@@ -368,7 +367,6 @@ export function runL2_2AdaptiveCameraTests(): boolean {
 		});
 		const wideFrame = ctrlA.getLastAppliedCameraFrame();
 		assert(wideFrame !== undefined && !wideFrame.adjusted && wideFrame.pullbackStuds === 0, "Tela larga sem recuo desnecessário");
-		task.wait(CAMERA_INTRO_DURATION_SECONDS + 0.05);
 		assert(
 			camA.CFrame.Position.sub(arenaWideRef.cameraA.CFrame.Position).Magnitude < 1e-3,
 			"Sem recuo mantém posição exata da Part de referência",

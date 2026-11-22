@@ -201,7 +201,7 @@ function isWaitingAnchorOccluded(
 	return true;
 }
 
-function collectFramingPointsInCameraSpace(
+export function collectFramingPointsInCameraSpace(
 	cameraCFrame: CFrame,
 	context: CameraFramingContext,
 ): { readonly points: Vector3[]; readonly includedSlotCount: number; readonly hasFrontAnchor: boolean } {
@@ -293,7 +293,9 @@ function collectFramingPointsInCameraSpace(
 	return { points, includedSlotCount, hasFrontAnchor };
 }
 
-function computeRequiredPullback(points: readonly Vector3[], aspect: number, verticalFovDegrees: number): number {
+export function computeRequiredPullback(
+	points: readonly Vector3[], aspect: number, verticalFovDegrees: number, camera?: CFrame,
+): number {
 	const tanV = math.tan(math.rad(verticalFovDegrees * 0.5));
 	const tanH = tanV * aspect;
 	const usableH = (1 - CAMERA_FRAME_PADDING_HORIZONTAL) * tanH;
@@ -305,7 +307,8 @@ function computeRequiredPullback(points: readonly Vector3[], aspect: number, ver
 	}
 
 	let required = 0;
-	for (const pt of points) {
+	for (const point of points) {
+		const pt = camera !== undefined ? camera.PointToObjectSpace(point) : point;
 		const depth = -pt.Z;
 		const dNear = CAMERA_MIN_NEAR_DEPTH_STUDS - depth;
 		const dX = math.abs(pt.X) / usableH - depth;
@@ -328,6 +331,7 @@ export function computeAdaptiveCameraFrame(
 	viewportSize: Vector2,
 	baseVerticalFov: number,
 	context?: CameraFramingContext,
+	pointSet?: ReturnType<typeof collectFramingPointsInCameraSpace>,
 ): AdaptiveCameraFrame {
 	const clampedBaseFov = isFiniteNumber(baseVerticalFov)
 		? math.clamp(baseVerticalFov, CAMERA_BASE_FOV_MIN, CAMERA_BASE_FOV_MAX)
@@ -344,7 +348,7 @@ export function computeAdaptiveCameraFrame(
 		};
 	}
 
-	const { points, includedSlotCount, hasFrontAnchor } = collectFramingPointsInCameraSpace(referenceCFrame, context);
+	const { points, includedSlotCount, hasFrontAnchor } = pointSet ?? collectFramingPointsInCameraSpace(referenceCFrame, context);
 	if (points.size() === 0 || !hasFrontAnchor) {
 		return {
 			cframe: referenceCFrame,

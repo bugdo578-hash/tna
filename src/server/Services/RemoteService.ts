@@ -34,6 +34,7 @@ import {
 	type SwitchPerformedPayload,
 } from "../../shared/Remotes";
 import type { AllocatableStat, SkillSlot } from "../../shared/TypeDefs";
+import type { BattleTransitionChannel } from "./BattlePreparation";
 
 interface RequestBucket {
 	tokens: number;
@@ -41,6 +42,7 @@ interface RequestBucket {
 }
 
 export interface BattleRemoteAdapter {
+	readonly transition?: BattleTransitionChannel;
 	bindRequests(
 		onSkill: (player: Player, slot: SkillSlot) => void,
 		onSwitch: (player: Player, index: ClientFighterIndex) => void,
@@ -62,6 +64,7 @@ export interface BattleRemoteAdapter {
 }
 
 export class RemoteService implements BattleRemoteAdapter {
+	readonly transition: BattleTransitionChannel;
 	readonly challengeReceived: RemoteEvent;
 	readonly requestChallengeResponse: RemoteEvent;
 	readonly challengeStatus: RemoteEvent;
@@ -92,6 +95,7 @@ export class RemoteService implements BattleRemoteAdapter {
 
 	private readonly requestBuckets = new Map<Player, RequestBucket>();
 	private readonly quitBuckets = new Map<Player, RequestBucket>();
+	private readonly transitionBuckets = new Map<Player, RequestBucket>();
 	private readonly allocateBuckets = new Map<Player, RequestBucket>();
 	private requestHandlersBound = false;
 	private allocateHandlerBound = false;
@@ -116,6 +120,19 @@ export class RemoteService implements BattleRemoteAdapter {
 		this.requestQuit = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.RequestQuit);
 		this.requestAllocate = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.RequestAllocate);
 		this.battleStarted = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.BattleStarted);
+		const transition = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.BattleTransition);
+		this.transition = {
+			bind: (receive) => {
+				transition.OnServerEvent.Connect((player, id: unknown, ack: unknown) => {
+					if (!this.consumeToken(this.transitionBuckets, player, BATTLE_REQUEST_BUCKET_CAPACITY, BATTLE_REQUEST_REFILL_PER_SECOND)) return;
+					if (!typeIs(id, "number") || id < 0 || id >= math.huge || id !== math.floor(id)) return;
+					if (ack === "covered" || ack === "ready" || ack === "scheduled" || ack === "exitCovered" || ack === "failed" || ack === "cancel") {
+						receive(player, id, ack);
+					}
+				});
+			},
+			send: (player, payload) => transition.FireClient(player, payload),
+		};
 		this.stateChanged = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.StateChanged);
 		this.switchPerformed = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.SwitchPerformed);
 		this.attackStarted = this.getOrCreateRemote(remotesFolder, REMOTE_NAMES.AttackStarted);
@@ -229,6 +246,7 @@ export class RemoteService implements BattleRemoteAdapter {
 	public forgetPlayer(player: Player): void {
 		this.requestBuckets.delete(player);
 		this.quitBuckets.delete(player);
+		this.transitionBuckets.delete(player);
 		this.allocateBuckets.delete(player);
 		this.teamBuckets.delete(player);
 	}

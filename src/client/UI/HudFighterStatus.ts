@@ -111,6 +111,7 @@ export class HudFighterStatus {
 	public resetAtbDisplay(): void {
 		this.playerDisplayAtb = 0;
 		this.opponentDisplayAtb = 0;
+		this.stepAtbInterpolation(0, 0, 0);
 	}
 
 	public resetSideAtbDisplay(isPlayer: boolean): void {

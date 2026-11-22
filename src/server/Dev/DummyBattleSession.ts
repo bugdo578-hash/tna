@@ -1,4 +1,5 @@
 import { RunService } from "@rbxts/services";
+import { BATTLE_EXIT_COVER_TIMEOUT_SECONDS } from "../../shared/configs/BattleIntro";
 import type { BattleSessionService } from "../Services/BattleSessionService";
 import type { PlayerDataService } from "../Services/PlayerDataService";
 import type { ProgressionService } from "../Services/ProgressionService";
@@ -28,6 +29,8 @@ export function createJotaroVsAnubisBattleSession(
 	if (playerSide === undefined) return false;
 	if (sessionService.hasActiveSession(player)) {
 		sessionService.requestQuit(player);
+		const deadline = os.clock() + 2 * BATTLE_EXIT_COVER_TIMEOUT_SECONDS;
+		while (sessionService.hasActiveSession(player) && os.clock() < deadline) task.wait();
 	}
 	const created = sessionService.createSession(player, undefined, playerSide, createDevOpponentSide(rng), rng, "PVE");
 	if (!created) return false;

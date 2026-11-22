@@ -16,7 +16,10 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `Services/BattleMovement.ts`: congela/restaura `WalkSpeed`/`JumpPower`/`JumpHeight`/`UseJumpPower` e `NpcBattleActive` (NPC/PVP).
 - `Services/BattleRewardService.ts`: decisão e cálculo de recompensas ao fim da sessão (PVE Bronze/PVP, Tinyes, XP, tetos diários, `RewardBlockedReason`), com `pcall`/`warn` por participante; `settleParticipant` e `awardSessionXp` (`session.rewardPaid` continua sendo marcado como guarda anti-pagamento duplicado).
 - `Services/BattleService.ts`: núcleo puro (`IDLE/PREPARE/ATTACK/RETURN`), hits, DoT/Root, troca adiada em KO (re-exporta `Signal` de `shared/Signal`).
-- `Services/BattleSessionService.ts`: sessões isoladas por jogador, `Heartbeat`, pause/quit/timeouts; delega recompensas PVE/PVP a `BattleRewardService` (mantém `awardSessionXp` na instância, usado por testes de teardown).
+- `Services/BattleSessionService.ts`: sessões isoladas, `Heartbeat`, preparação, liberação, pausa, Quit e timeout. Delega as recompensas PvE/PvP a `BattleRewardService`.
+- `Services/BattlePreparation.ts`: confirma a cobertura local, espera os clientes e agenda arco e GO pelo relógio do servidor. Também confirma a cobertura na saída.
+- `Services/BattleSessionArena.ts`: reserva, transporte, contenção e restauração dos participantes da sessão.
+- `Services/BattleSessionRecord.ts` e `Services/BattleSessionPresentation.ts`: estado de cada sessão e mensagens privadas que apresentam a batalha aos participantes.
 - `Services/BattleTeamFactory.ts`: monta `BattleSide` a partir do inventário (`createPlayerInventorySide`) ou real (`makeRealFighter`).
 - `Services/DamageService.ts`: rola Dodge/Crit por hit e aplica dano base, counter e `CRIT_MULTIPLIER`.
 - `Services/DayNightService.ts`: publica âncora solar e atributos replicáveis do ciclo dia/noite no `Workspace`.
@@ -60,7 +63,9 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `Controllers/CharacterAnimationController.ts`: controla animação de caminhada via `Animate` nativo ou fallback `Movement`.
 - `Controllers/CombatArenaAnchors.ts`: resolve, valida e mantém em cache por batalha as referências de posicionamento de `Arena_bases` (na instância reservada em `Workspace/ActiveArenas` com espera limitada de replicação e sem fallback para arena errada, ou em `Workspace.Arena_bases` em testes legados), lendo o `CFrame` completo das Parts.
 - `Controllers/CombatAttackFinalizer.ts`: coordena finalização do último hit (retorno visual de Stand/corpo), processamento de mortes pendentes (`pendingDeaths`, `flushPendingDeaths`) e fila/aplicação de trocas pendentes (`pendingSwitches`, `handleSwitchPerformed`), com limpeza entre batalhas/teardown.
-- `Controllers/CombatCameraIntro.ts`: aproxima a câmera recebida pelo enquadramento L2.2 no início da batalha. QA no Client do Studio em `tools/combat-camera-intro-client-qa.luau`.
+- `Controllers/CombatCameraIntro.ts`: calcula o arco a partir do lado físico e dos bounds dos lutadores, com chegada no enquadramento adaptativo L2.2. QA em `tools/combat-camera-intro-client-qa.luau`.
+- `Controllers/BattleIntroController.ts` e `UI/BattleIntroOverlay.ts`: cobertura local no transporte, fade, countdown pelo relógio do servidor e recuperação por sessão. Os tempos de jogo ficam em `shared/configs/BattleIntro.ts`.
+- `tools/battle-intro-play-qa.luau` e `server/Dev/tests/battlePreparationTests.ts`: QA no Studio com dois clientes e verificações do protocolo autoritativo no simulador.
 - `Controllers/CombatController.ts`: palco `Workspace/ClientBattleStage`, rigs, `AnimationTrack`/markers e apresentação de hits; delega anchors de arena a `CombatArenaAnchors`, apoio físico nos anchors a `CombatFighterGrounding`, pool de popups a `CombatDamagePool`, fila de resultados de hits a `CombatHitQueue`, finalização/KO/trocas a `CombatAttackFinalizer`, movimentação do Stand/placeholders a `CombatStandMotion` e preload/deload/emissão de VFX a `CombatVfxBridge`.
 - `Controllers/CombatDamagePool.ts`: pool de `BillboardGui` (`CombatBillboardPool`), popups flutuantes de dano, crítico, esquiva e tick de DoT, com limpeza no teardown.
 - `Controllers/CombatFighterGrounding.ts`: resolve o ponto físico de contato com o solo (`GroundContact` opcional ou menor ponto das partes físicas do corpo, ignorando Stand/acessórios/VFX/partículas/hitboxes) e alinha o `CFrame` do lutador ao plano superior do anchor preservando sua orientação 3D.
