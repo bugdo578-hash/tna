@@ -19,7 +19,6 @@ import {
 } from "../../../shared/FighterData";
 import { calcSkillSlotRoll } from "../../../shared/MathUtils";
 import type { ChallengeReceivedPayload, ChallengeStatusPayload, HitResolvedPayload } from "../../../shared/Remotes";
-import { JOTARO_SKILL_DATA } from "../../../shared/SkillData";
 import type { FighterInventoryItem } from "../../../shared/TypeDefs";
 import { BattleSide } from "../../Components/BattleSide";
 import { BattleService } from "../../Services/BattleService";
@@ -32,7 +31,7 @@ import { ProgressionService } from "../../Services/ProgressionService";
 import { PvpService } from "../../Services/PvpService";
 import { RemoteService } from "../../Services/RemoteService";
 import { ShopService } from "../../Services/ShopService";
-import { createDummySide, createJotaroVsAnubisSides, makeDummyFighter, makeRealFighter } from "../DummyFighters";
+import { createDummySide, createJotaroVsAnubisSides, DUMMY_SKILL_DATA, makeDummyFighter, makeRealFighter } from "../DummyFighters";
 import { assertInvariant, createSeededRng, createSurgicalMockAdapter } from "./testHelpers";
 
 /** A-05: ATB do ativo preservado na morte no banco, zerado na morte do ativo (normal, multi-hit, troca, último). */
@@ -333,7 +332,7 @@ export function validateLotMFighterRegistry(): void {
 		name: "Third Test",
 		className: "Controller",
 		rarity: "Rara",
-		skills: JOTARO_SKILL_DATA,
+		skills: DUMMY_SKILL_DATA,
 	};
 
 	const [ok, err] = pcall(() => {
@@ -398,11 +397,19 @@ export function validateLotMFighterRegistry(): void {
 
 		// BattleTeamFactory monta lado com o 3º fighter sem whitelist manual
 		const side = createPlayerInventorySide(player, progression, data, createSeededRng(42));
-		assertInvariant(side !== undefined && side.fighters.size() === 1, "BattleTeamFactory deve aceitar 3º fighter via FIGHTER_DATA");
+		assert(side !== undefined && side.fighters.size() === 1, "BattleTeamFactory deve aceitar 3º fighter via FIGHTER_DATA");
 		assertInvariant(
-			side !== undefined && side.fighters[0].fighterId === syntheticId && side.fighters[0].className === "Controller",
+			side.fighters[0].fighterId === syntheticId && side.fighters[0].className === "Controller",
 			"BattleTeamFactory deve usar definição do 3º fighter",
 		);
+		const opponent = createDummySide(() => 0.99);
+		const registryBattle = new BattleService(side, opponent, () => 0.99);
+		for (const [slot, effect] of [[1, "Bleed"], [2, "Burn"]] as const) {
+			side.setAtb(ATB_MAX);
+			assertInvariant(registryBattle.requestSkill(side, slot), "3º fighter pode atacar com a skill registrada");
+			registryBattle.step(1);
+			assertInvariant(opponent.getActiveFighter().hasStatusEffect(effect), `skill do 3º fighter deve aplicar ${effect}`);
+		}
 
 		// InventoryService marca 3º fighter como disponível e string arbitrária como unavailable
 		const invService = new InventoryService(data, progression, () => false, () => {});

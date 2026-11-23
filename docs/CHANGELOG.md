@@ -2,6 +2,12 @@
 
 Registro conciso de mudanças a partir de `2026-11-14` (ordem cronológica reversa). Histórico anterior a `2026-11-14` (base inicial T1–T5, T7.1, T7.2 e primeira correção de DataStore/autosave): [CHANGELOG_ARCHIVE.md](CHANGELOG_ARCHIVE.md). Estado operacional atual: [HANDOFF.md](HANDOFF.md).
 
+## 2026-11-23 — N1 · Burn e Bleed
+
+- O servidor mantém três ticks espaçados por um segundo de IDLE. Bleed usa 25% do dano real e Burn usa 20%. Cada reaplicação renova seu próprio efeito. Frações acumulam, o último tick garante pelo menos 1 e o relógio congela no Pause. O efeito acompanha o lutador para o banco. Verificada a correção A-05 do Lote M e completada a limpeza dos status no KO, incluindo Root.
+- `applyEffectsToTarget` usa `statusEffects` da timeline do hit ou da skill e independe de `fighterId`. O cliente já recebe aplicação, tick e expiração e apresenta selos nos cards ativos, dano flutuante e partículas genéricas. O painel de reservas mostra o HP, sem selos de DoT. Os eventos existentes permitem ligar VFX e SFX dedicados no futuro.
+- `BattleSimulator.runSimulation()` passou no Studio com as regressões do Lote M e os testes N1 de timeline, ticks e sessões. As 1.000 lutas de cada cenário mantiveram os resultados desta revisão antes e depois do N1: dummy 49,6% / 298,99055 s e Jotaro vs Anubis 68% / 67,5943 s.
+
 ## 2026-11-22 — L4.1.2 · Abertura de batalha e countdown
 
 - A câmera abre atrás e acima do próprio time (`CAMERA_INTRO_ARC_DEGREES = 82`, `CAMERA_INTRO_HEIGHT_FRACTION = 0.58`, `CAMERA_INTRO_RADIUS_FRACTION = 0.58`), percorrendo um arco circular fluido e espelhado ao redor do centro da arena (eixo `UpVector` local) até a pose adaptativa L2.2 em `Camera_A` ou `Camera_B`. O raio inicial ajusta-se uma única vez para manter lutadores, Stands e armas enquadrados em 16:9, 4:3 e 9:16; o percurso encurta com segurança se a arena bloquear a passagem ou a linha de visão.

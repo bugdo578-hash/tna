@@ -186,10 +186,10 @@ export function validateStatusEffectRules(): void {
 		assertInvariant(side.atb === 0, "morte por DoT deve zerar ATB");
 		if (fighter === dotDeathSideB.fighters[0]) {
 			assertInvariant(
-				fighter.hasStatusEffect("Root") &&
+				fighter.statusEffects.size() === 0 &&
 					nextActive === dotDeathSideB.fighters[1] &&
 					side.getActiveFighter() === dotDeathSideB.fighters[1],
-				"troca automática por morte deve ignorar Root",
+				"troca automática por morte deve ignorar Root e limpar os status do morto",
 			);
 			rootedAutoSwitchSucceeded = true;
 		}
@@ -200,11 +200,17 @@ export function validateStatusEffectRules(): void {
 	dotBattle.step(1.0); // Mata fighters[0] (enraizado) e troca automaticamente para fighters[1]
 	assertInvariant(rootedAutoSwitchSucceeded, "troca automática por morte de lutador com Root não ocorreu");
 
+	let lethalTicks = 0;
+	dotBattle.events.effectTick.connect(() => { lethalTicks += 1; });
 	dotDeathSideB.fighters[1].hp = 1;
 	dotDeathSideB.fighters[1].applyStatusEffect("Burn", 1, 15);
+	dotDeathSideB.fighters[1].applyStatusEffect("Bleed", 1, 12);
 	dotDeathSideB.setAtb(5);
 	dotBattle.step(1.0); // Mata o último vivo (fighters[1]) e encerra a luta
 	assertInvariant(dotDeathFired && dotBattleEnded, "morte por DoT em IDLE deve disparar death e battleEnd");
+	dotBattle.step(3);
+	assertInvariant(lethalTicks === 1 && dotDeathSideB.fighters[1].statusEffects.size() === 0,
+		"DoT simultâneo não emite um segundo tick no morto nem depois do fim");
 }
 
 export function validatePauseAndQuitRules(): void {
@@ -1341,7 +1347,7 @@ export function validateMultiHitDeath(): void {
 		assertInvariant(battle.requestSkill(a, 2), "ORA ORA inicia");
 		battle.step(timeline.prepareTime);
 		battle.step(timeline.hits[1].time);
-		assertInvariant(!target.isAlive() && !target.hasStatusEffect("Burn") && target.isRooted(), "morte no hit 2 limpa efeitos");
+		assertInvariant(!target.isAlive() && target.statusEffects.size() === 0, "morte no hit 2 limpa efeitos");
 		assertInvariant(switches === 0 && b.getActiveFighter() === target, "ativo permanece at? fim de ATTACK");
 		assertInvariant(ended === lastFighter, "?ltimo lutador encerra imediatamente");
 		const rollsAtDeath = rolls;

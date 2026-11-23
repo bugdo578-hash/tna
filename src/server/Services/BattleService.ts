@@ -355,8 +355,7 @@ export class BattleService {
 	}
 
 	private handleFighterDeath(defenderSide: BattleSide, deadFighter: Fighter): void {
-		deadFighter.statusEffects.delete("Burn");
-		deadFighter.statusEffects.delete("Bleed");
+		deadFighter.statusEffects.clear();
 		const isActiveDead = defenderSide.getActiveFighter() === deadFighter;
 		let nextActive: Fighter | undefined;
 		if (isActiveDead && this.state === "ATTACK" && !defenderSide.isDefeated()) {

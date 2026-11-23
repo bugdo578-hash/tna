@@ -3,6 +3,7 @@ import { validateArenaPlayerTransportL3 } from "./tests/arenaPlayerTransportTest
 import { validateArenaRegistry } from "./tests/arenaRegistryTests";
 import { validateArenaSelectionL16 } from "./tests/arenaSelectionTests";
 import { validateBattlePreparation } from "./tests/battlePreparationTests";
+import { validateN1DotSessions, validateN1DotSkillTimeline, validateN1DotTicks } from "./tests/dotN1Tests";
 import {
 	runDummy1000Battles,
 	validateBronzeAI,
@@ -113,6 +114,9 @@ export function runSimulation(): void {
 	validateSessionTokensAndConfirmations();
 	validateCritDamageMultiplier();
 	validateStatusEffectRules();
+	validateN1DotSkillTimeline();
+	validateN1DotTicks();
+	validateN1DotSessions();
 	validatePauseAndQuitRules();
 	validateBronzeAI();
 	validateXpCurveAndTeamDistribution();
