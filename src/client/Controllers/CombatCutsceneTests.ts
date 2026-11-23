@@ -291,7 +291,7 @@ export function runL4_2CameraCutsceneTests(): boolean {
 		assertNearCFrame(targetPivot.ToObjectSpace(camA.CFrame), fixtures.targetCutscene.keyframes[0].cframe, "Pose relativa ao alvo", 0.05, 0.05);
 		ctrlA.cleanupStage();
 
-		// 6. Multi-hit (Jotaro S2 - 5 hits) sem múltiplos disparos + dano intacto + retorno suave com resize de viewport
+		// 6. Multi-hit (Jotaro S2 - 3 hits) sem múltiplos disparos + dano intacto + retorno suave com resize de viewport
 		viewportA = new Vector2(1920, 1080);
 		startBattle(ctrlA, "arena_l42_1", "PVE", 0, "MH");
 		let hpUpdates = 0;
@@ -306,7 +306,7 @@ export function runL4_2CameraCutsceneTests(): boolean {
 		assert(ctrlA.getCameraMode() === "cutscene", "Multi-hit inicia cutscene 1 vez");
 		ctrlA.getCutsceneController().step(0.2);
 		const midPose = camA.CFrame;
-		for (const hitIndex of $range(1, 5)) {
+		for (const hitIndex of $range(1, 3)) {
 			probe(ctrlA).onHitResolved({
 				hitIndex,
 				hit: true,
@@ -332,9 +332,9 @@ export function runL4_2CameraCutsceneTests(): boolean {
 		assert(!ctrlA.getCutsceneController().isActive() && ctrlA.getCameraMode() === "adaptive", "Fim do blend-out devolve controle ao adaptive");
 		assertNearCFrame(camA.CFrame, portraitAdaptive.cframe, "Blend-out termina exatamente no enquadramento adaptativo 9:16");
 		assertNearNumber(camA.FieldOfView, portraitAdaptive.fieldOfView, "Blend-out restaura FOV adaptativo 9:16");
-		// Confirma que os 5 hits continuam resolvendo dano normalmente (sem atraso nem perda)
+		// Confirma que os 3 hits continuam resolvendo dano normalmente (sem atraso nem perda)
 		task.wait(0.65);
-		assert(hpUpdates === 5 && lastEnemyHp === 50, `Multi-hit dano intacto (updates=${hpUpdates}, hp=${lastEnemyHp})`);
+		assert(hpUpdates === 3 && lastEnemyHp === 70, `Multi-hit dano intacto (updates=${hpUpdates}, hp=${lastEnemyHp})`);
 		unsubHp();
 		ctrlA.cleanupStage();
 		assertRestoredA("Multi-hit teardown");

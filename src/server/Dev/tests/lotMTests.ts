@@ -114,7 +114,7 @@ export function validateLotMA05AtbBenchDeath(): void {
 		"atacante deve manter saldo de ATB após pagar custo da skill",
 	);
 
-	// 4. Morte do ativo em multi-hit (Jotaro S2 ORA ORA 5 hits): morre no hit 1, hits 2..5 ignorados, próximo entra com ATB 0 e HP cheio
+	// 4. Morte do ativo em multi-hit (Jotaro S2 ORA ORA 3 hits): morre no hit 1, hits 2..3 ignorados, próximo entra com ATB 0 e HP cheio
 	const [multiAttackerSide, multiDefenderSide] = createJotaroVsAnubisSides(alwaysHitRng);
 	const multiBattle = new BattleService(multiAttackerSide, multiDefenderSide, alwaysHitRng);
 	const firstDefender = multiDefenderSide.getActiveFighter();
@@ -132,7 +132,7 @@ export function validateLotMA05AtbBenchDeath(): void {
 			assertInvariant(activeFighter.hp === activeFighter.hpMax, "próximo lutador deve entrar com HP intacto");
 		}
 	});
-	assertInvariant(multiBattle.requestSkill(multiAttackerSide, 2), "Jotaro S2 (5 hits) deveria iniciar");
+	assertInvariant(multiBattle.requestSkill(multiAttackerSide, 2), "Jotaro S2 (3 hits) deveria iniciar");
 	multiBattle.step(2.0);
 	assertInvariant(multiHitsResolved === 1, `hits restantes após KO em multi-hit devem ser ignorados (recebidos=${multiHitsResolved})`);
 	assertInvariant(multiSwitchFired, "troca automática após multi-hit deveria disparar");

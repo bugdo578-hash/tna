@@ -55,20 +55,18 @@ export function validateSkillRegistry(): void {
 	assertInvariant(jotaro.size() === 3 && anubis.size() === 3, "cada personagem deve ter os slots S1, S2 e S3");
 
 	// Valores de SkillData.ts na master antes da extração (0d5a772).
-	assertSkill(jotaro[0], "star_Finger", [0.25, 0.25, 0.12], [
+	assertSkill(jotaro[0], "Star finger", [0.25, 0.25, 0.12], [
 		{ time: 0.15, damageShare: 1, followUp: false },
 	]);
-	assertSkill(jotaro[1], "Barragem_estelar", [0.3, 0.3, 0.15], [
-		{ time: 0.08, damageShare: 0.2, followUp: true },
-		{ time: 0.18, damageShare: 0.2, followUp: true },
-		{ time: 0.28, damageShare: 0.2, followUp: true },
-		{ time: 0.38, damageShare: 0.2, followUp: true },
-		{ time: 0.48, damageShare: 0.2, followUp: false },
+	assertSkill(jotaro[1], "Platinum Barrage", [0.3, 0.3, 0.15], [
+		{ time: 0.1, damageShare: 1 / 3, followUp: true },
+		{ time: 0.25, damageShare: 1 / 3, followUp: true },
+		{ time: 0.4, damageShare: 1 / 3, followUp: false },
 	]);
 	assertSkill(jotaro[2], "Time Stop", [0.4, 0.35, 0.15], [
 		{ time: 0.25, damageShare: 1, followUp: false },
 	]);
-	assertSkill(anubis[0], "Boomerang", [0.25, 0.25, 0.12], [
+	assertSkill(anubis[0], "Anu-Rang", [0.25, 0.25, 0.12], [
 		{ time: 0.15, damageShare: 1, followUp: false },
 	]);
 	assertSkill(anubis[1], "Possessão", [0.3, 0.3, 0.15], [

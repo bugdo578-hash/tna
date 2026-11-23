@@ -2,10 +2,12 @@ import type { SkillDataSlots } from "../SkillTypes";
 
 // Tempos provisórios; trocar pelos markers da animação.
 export const ANUBIS_SKILL_DATA: SkillDataSlots = [
-	// S1 Boomerang: 1 hit.
+	// S1 Anu-Rang: 1 hit.
 	{
 		id: "anubis_boomerang",
-		name: "Boomerang",
+		name: "Anu-Rang",
+		animationName: "Boomerang",
+		vfxName: "Boomerang",
 		prepareTime: 0.25,
 		hits: [{ time: 0.15, damageShare: 1, followUp: false }],
 		returnTime: 0.25,

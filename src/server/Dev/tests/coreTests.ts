@@ -392,23 +392,42 @@ export function validateJotaroAndAnubis(): void {
 	);
 	const starFinger = jotaroDef.skills[0];
 	const barrage = jotaroDef.skills[1];
-	// SkillData no Studio usa nomes de exibição. O fonte ainda usa as grafias legadas.
 	assertInvariant(
-		starFinger.name === "Star Finger" || starFinger.name === "star_Finger",
-		`Jotaro S1 deve ser Star Finger (nome recebido: ${starFinger.name})`,
+		starFinger.name === "Star finger",
+		`Jotaro S1 deve ser Star finger (nome recebido: ${starFinger.name})`,
 	);
 	assertInvariant(starFinger.hits.size() === 1, `Jotaro S1 deve ter 1 hit (recebidos: ${starFinger.hits.size()})`);
 	assertInvariant(
-		barrage.name === "Barragem Estelar" || barrage.name === "Barragem_estelar",
-		`Jotaro S2 deve ser Barragem Estelar (nome recebido: ${barrage.name})`,
+		barrage.name === "Platinum Barrage",
+		`Jotaro S2 deve ser Platinum Barrage (nome recebido: ${barrage.name})`,
 	);
-	assertInvariant(barrage.hits.size() === 5, `Jotaro S2 deve ter 5 hits (recebidos: ${barrage.hits.size()})`);
+	assertInvariant(barrage.hits.size() === 3, `Jotaro S2 deve ter 3 hits (recebidos: ${barrage.hits.size()})`);
 	let oraShareSum = 0;
 	for (const hit of jotaroDef.skills[1].hits) {
-		assertInvariant(math.abs(hit.damageShare - 0.2) <= FLOAT_TOLERANCE, "ORA ORA deve ter damageShare igual (0.2)");
+		assertInvariant(math.abs(hit.damageShare - 1 / 3) <= FLOAT_TOLERANCE, "ORA ORA deve ter damageShare igual (1/3)");
 		oraShareSum += hit.damageShare;
 	}
 	assertInvariant(math.abs(oraShareSum - 1) <= FLOAT_TOLERANCE, "ORA ORA damageShare deve somar 1");
+	// Valida exatamente 3 hits com cálculo de dano por 1/3 no S2 do Jotaro (contra Menace = counter ×1.175).
+	const oraRng = () => 0.99;
+	const oraJotaro = makeRealFighter("jotaro", oraRng, 10);
+	const oraTarget = new Fighter({
+		fighterId: "ora_target", hp: 10000, hpMax: 10000,
+		stats: { hp: 10000, atk: 10, dodge: 0, crit: 0 }, level: 10, className: "Menace",
+		slots: oraJotaro.slots, skillData: anubisDef.skills, currentAtbSpeed: oraJotaro.currentAtbSpeed,
+	});
+	const oraSideA = new BattleSide([oraJotaro], oraRng);
+	const oraBattle = new BattleService(oraSideA, new BattleSide([oraTarget], oraRng), oraRng);
+	const oraHits: number[] = [];
+	oraBattle.events.hitResolved.connect((h) => oraHits.push(h.damage));
+	oraSideA.setAtb(ATB_MAX);
+	assertInvariant(oraBattle.requestSkill(oraSideA, 2), "Jotaro S2 (Barragem_estelar) deve iniciar");
+	oraBattle.step(1.2);
+	const expectedOraHit = math.max(math.round((calcDano(oraJotaro.stats.atk, oraJotaro.slots[1].mult, oraJotaro.level) / 3) * 1.175), 1);
+	assertInvariant(
+		oraHits.size() === 3 && oraHits.every((damage) => damage === expectedOraHit),
+		`Jotaro S2 deve resolver 3 hits de ${expectedOraHit} cada`,
+	);
 	assertInvariant(jotaroDef.skills[2].hits.size() === 1, "Jotaro S3 Time Stop provisório deve ter 1 hit");
 	assertInvariant(
 		anubisDef.skills[0].hits.size() === 1 &&
@@ -1351,7 +1370,7 @@ export function validateMultiHitDeath(): void {
 		assertInvariant(switches === 0 && b.getActiveFighter() === target, "ativo permanece at? fim de ATTACK");
 		assertInvariant(ended === lastFighter, "?ltimo lutador encerra imediatamente");
 		const rollsAtDeath = rolls;
-		battle.step(timeline.hits[4].time - timeline.hits[1].time + FLOAT_TOLERANCE);
+		battle.step(timeline.hits[timeline.hits.size() - 1].time - timeline.hits[1].time + FLOAT_TOLERANCE);
 		assertInvariant(rolls === rollsAtDeath + (lastFighter ? 0 : 1), "somente sorteio da troca; sem Dodge/crit ignorado");
 		assertInvariant(resolvedHits === 2 && battle.getDamageDealt(a, attacker.itemUuid!) === initialHp, "contadores XP/PVP excluem hits ignorados");
 		assertInvariant(replacement.hp === replacement.hpMax, "substituto intacto");
