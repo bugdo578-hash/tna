@@ -2,9 +2,16 @@ import { RunService, Workspace } from "@rbxts/services";
 import { MIN_DAMAGE } from "../../shared/Config";
 import type { StatusEffect } from "../../shared/TypeDefs";
 import {
+	BURN_DAMAGE_BILLBOARD_BRIGHTNESS,
+	BURN_DAMAGE_GLOW_COLOR,
+	BURN_DAMAGE_GLOW_SCALE,
+	BURN_DAMAGE_GLOW_STROKE_COLOR,
+	BURN_DAMAGE_GLOW_STROKE_TRANSPARENCY,
+	BURN_DAMAGE_GLOW_TRANSPARENCY,
 	BURN_DAMAGE_STROKE_COLOR,
 	BURN_DAMAGE_STROKE_TRANSPARENCY,
 	BURN_DAMAGE_TEXT_COLOR,
+	BURN_DAMAGE_UI_STROKE_THICKNESS,
 	BURN_POPUP_BODY_X_HALF_FRACTION,
 	BURN_POPUP_BODY_Y_HALF_FRACTION,
 	BURN_POPUP_CAMERA_OUTWARD_PADDING_STUDS,
@@ -23,6 +30,8 @@ import {
 	DAMAGE_BILLBOARD_SIZE_CRIT,
 	DAMAGE_BILLBOARD_SIZE_DOT,
 	DAMAGE_BILLBOARD_SIZE_NORMAL,
+	DAMAGE_DEFAULT_BILLBOARD_BRIGHTNESS,
+	DAMAGE_DEFAULT_BILLBOARD_LIGHT_INFLUENCE,
 	DAMAGE_DEFAULT_STROKE_COLOR,
 	DAMAGE_DEFAULT_STROKE_TRANSPARENCY,
 	DAMAGE_POPUP_BASE_Y_OFFSET_STUDS,
@@ -36,6 +45,8 @@ import { battleCleanupStep } from "./BattleCleanup";
 export interface BillboardPoolItem {
 	readonly billboard: BillboardGui;
 	readonly label: TextLabel;
+	readonly glowLabel: TextLabel;
+	readonly stroke: UIStroke;
 	inUse: boolean;
 	activeToken: number;
 	shakeConnection?: RBXScriptConnection;
@@ -56,6 +67,8 @@ export interface CombatDamagePoolHost {
 interface FloatingTextOptions {
 	readonly strokeColor?: Color3;
 	readonly strokeTransparency?: number;
+	readonly brightness?: number;
+	readonly fireGlow?: boolean;
 	readonly studsOffset?: Vector3;
 	readonly studsOffsetWorldSpace?: Vector3;
 	readonly riseInWorldSpace?: boolean;
@@ -70,6 +83,8 @@ interface BodyBounds {
 }
 
 const DEFAULT_LABEL_POSITION = UDim2.fromScale(0, 0);
+const CENTER_ANCHOR = new Vector2(0.5, 0.5);
+const CENTER_POSITION = UDim2.fromScale(0.5, 0.5);
 const RAD_PER_CYCLE = math.pi * 2;
 const MIN_VECTOR_MAGNITUDE = 1e-4;
 
@@ -141,8 +156,27 @@ export class CombatDamagePool {
 			billboard.Name = `DamagePopup_${index}`;
 			billboard.Size = DAMAGE_BILLBOARD_SIZE_NORMAL;
 			billboard.AlwaysOnTop = true;
+			billboard.LightInfluence = DAMAGE_DEFAULT_BILLBOARD_LIGHT_INFLUENCE;
+			billboard.Brightness = DAMAGE_DEFAULT_BILLBOARD_BRIGHTNESS;
 			billboard.Enabled = false;
 			billboard.Parent = container;
+
+			const glowLabel = new Instance("TextLabel");
+			glowLabel.Name = "FireGlow";
+			glowLabel.AnchorPoint = CENTER_ANCHOR;
+			glowLabel.Position = CENTER_POSITION;
+			glowLabel.Size = UDim2.fromScale(BURN_DAMAGE_GLOW_SCALE, BURN_DAMAGE_GLOW_SCALE);
+			glowLabel.BackgroundTransparency = 1;
+			glowLabel.FontFace = GAME_FONT;
+			glowLabel.TextScaled = true;
+			glowLabel.TextColor3 = BURN_DAMAGE_GLOW_COLOR;
+			glowLabel.TextStrokeColor3 = BURN_DAMAGE_GLOW_STROKE_COLOR;
+			glowLabel.TextTransparency = 1;
+			glowLabel.TextStrokeTransparency = 1;
+			glowLabel.Text = "";
+			glowLabel.ZIndex = 1;
+			glowLabel.Visible = false;
+			glowLabel.Parent = billboard;
 
 			const label = new Instance("TextLabel");
 			label.Name = "Text";
@@ -155,9 +189,18 @@ export class CombatDamagePool {
 			label.TextStrokeTransparency = DAMAGE_DEFAULT_STROKE_TRANSPARENCY;
 			label.TextColor3 = COMBAT_FEEDBACK_COLORS.normalHit;
 			label.Text = "";
+			label.ZIndex = 2;
 			label.Parent = billboard;
 
-			this.billboardPool.push({ billboard, label, inUse: false, activeToken: 0 });
+			const stroke = new Instance("UIStroke");
+			stroke.Name = "FireStroke";
+			stroke.Color = BURN_DAMAGE_STROKE_COLOR;
+			stroke.Thickness = BURN_DAMAGE_UI_STROKE_THICKNESS;
+			stroke.Transparency = 1;
+			stroke.Enabled = false;
+			stroke.Parent = label;
+
+			this.billboardPool.push({ billboard, label, glowLabel, stroke, inUse: false, activeToken: 0 });
 		}
 
 		return container;
@@ -189,14 +232,17 @@ export class CombatDamagePool {
 	): void {
 		const item = this.acquireBillboard();
 		const token = item.activeToken;
-		const { billboard, label } = item;
+		const { billboard, label, glowLabel, stroke } = item;
 
 		const baseStudsOffset = options?.studsOffset ?? new Vector3(0, DAMAGE_POPUP_BASE_Y_OFFSET_STUDS, 0);
 		const baseWorldOffset = options?.studsOffsetWorldSpace ?? Vector3.zero;
 		const riseInWorldSpace = options?.riseInWorldSpace === true;
+		const fireGlow = options?.fireGlow === true;
 
 		billboard.Adornee = adornee;
 		billboard.Size = size;
+		billboard.LightInfluence = DAMAGE_DEFAULT_BILLBOARD_LIGHT_INFLUENCE;
+		billboard.Brightness = options?.brightness ?? DAMAGE_DEFAULT_BILLBOARD_BRIGHTNESS;
 		billboard.StudsOffset = baseStudsOffset;
 		billboard.StudsOffsetWorldSpace = baseWorldOffset;
 		billboard.Enabled = true;
@@ -209,6 +255,22 @@ export class CombatDamagePool {
 		label.TextTransparency = 0;
 		label.TextStrokeTransparency = options?.strokeTransparency ?? DAMAGE_DEFAULT_STROKE_TRANSPARENCY;
 
+		if (fireGlow) {
+			glowLabel.FontFace = GAME_FONT;
+			glowLabel.Position = CENTER_POSITION;
+			glowLabel.Text = text;
+			glowLabel.TextColor3 = BURN_DAMAGE_GLOW_COLOR;
+			glowLabel.TextStrokeColor3 = BURN_DAMAGE_GLOW_STROKE_COLOR;
+			glowLabel.TextTransparency = BURN_DAMAGE_GLOW_TRANSPARENCY;
+			glowLabel.TextStrokeTransparency = BURN_DAMAGE_GLOW_STROKE_TRANSPARENCY;
+			glowLabel.Visible = true;
+
+			stroke.Color = options?.strokeColor ?? BURN_DAMAGE_STROKE_COLOR;
+			stroke.Thickness = BURN_DAMAGE_UI_STROKE_THICKNESS;
+			stroke.Transparency = options?.strokeTransparency ?? BURN_DAMAGE_STROKE_TRANSPARENCY;
+			stroke.Enabled = true;
+		}
+
 		const moveGoal = riseInWorldSpace
 			? { StudsOffsetWorldSpace: baseWorldOffset.add(new Vector3(0, DAMAGE_POPUP_RISE_STUDS, 0)) }
 			: { StudsOffset: baseStudsOffset.add(new Vector3(0, DAMAGE_POPUP_RISE_STUDS, 0)) };
@@ -218,13 +280,14 @@ export class CombatDamagePool {
 			new TweenInfo(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 			moveGoal,
 		);
-		const fadeTween = this.host.createBattleTween(
-			label,
-			new TweenInfo(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-			{ TextTransparency: 1, TextStrokeTransparency: 1 },
-		);
+		const fadeInfo = new TweenInfo(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.In);
+		const fadeTween = this.host.createBattleTween(label, fadeInfo, { TextTransparency: 1, TextStrokeTransparency: 1 });
 		moveTween.Play();
 		fadeTween.Play();
+		if (fireGlow) {
+			this.host.createBattleTween(glowLabel, fadeInfo, { TextTransparency: 1, TextStrokeTransparency: 1 }).Play();
+			this.host.createBattleTween(stroke, fadeInfo, { Transparency: 1 }).Play();
+		}
 
 		if (options?.thermalShake === true) {
 			this.startThermalShake(item, token, math.min(BURN_SHAKE_DURATION_SECONDS, duration));
@@ -278,6 +341,8 @@ export class CombatDamagePool {
 				{
 					strokeColor: BURN_DAMAGE_STROKE_COLOR,
 					strokeTransparency: BURN_DAMAGE_STROKE_TRANSPARENCY,
+					brightness: BURN_DAMAGE_BILLBOARD_BRIGHTNESS,
+					fireGlow: true,
 					studsOffset,
 					studsOffsetWorldSpace,
 					riseInWorldSpace: useWorldSpace,
@@ -361,14 +426,17 @@ export class CombatDamagePool {
 			const elapsed = os.clock() - startedAt;
 			if (elapsed >= durationSeconds) {
 				item.label.Position = DEFAULT_LABEL_POSITION;
+				item.glowLabel.Position = CENTER_POSITION;
 				this.disconnectShake(item);
 				return;
 			}
 			const decay = 1 - elapsed / durationSeconds;
-			const offsetX = math.sin(elapsed * omega) * BURN_SHAKE_AMPLITUDE_X_PX * decay;
-			const offsetY =
-				math.cos(elapsed * omega * BURN_SHAKE_VERTICAL_PHASE_RATIO) * BURN_SHAKE_AMPLITUDE_Y_PX * decay;
-			item.label.Position = new UDim2(0, math.round(offsetX), 0, math.round(offsetY));
+			const offsetX = math.round(math.sin(elapsed * omega) * BURN_SHAKE_AMPLITUDE_X_PX * decay);
+			const offsetY = math.round(
+				math.cos(elapsed * omega * BURN_SHAKE_VERTICAL_PHASE_RATIO) * BURN_SHAKE_AMPLITUDE_Y_PX * decay,
+			);
+			item.label.Position = new UDim2(0, offsetX, 0, offsetY);
+			item.glowLabel.Position = new UDim2(0.5, offsetX, 0.5, offsetY);
 		});
 		item.shakeConnection = connection;
 		this.host.trackBattleConnection?.(connection);
@@ -385,6 +453,8 @@ export class CombatDamagePool {
 	private resetPoolItemVisuals(item: BillboardPoolItem): void {
 		this.disconnectShake(item);
 		item.billboard.Size = DAMAGE_BILLBOARD_SIZE_NORMAL;
+		item.billboard.Brightness = DAMAGE_DEFAULT_BILLBOARD_BRIGHTNESS;
+		item.billboard.LightInfluence = DAMAGE_DEFAULT_BILLBOARD_LIGHT_INFLUENCE;
 		item.billboard.StudsOffset = Vector3.zero;
 		item.billboard.StudsOffsetWorldSpace = Vector3.zero;
 		item.label.Position = DEFAULT_LABEL_POSITION;
@@ -393,6 +463,13 @@ export class CombatDamagePool {
 		item.label.TextStrokeTransparency = DAMAGE_DEFAULT_STROKE_TRANSPARENCY;
 		item.label.TextTransparency = 0;
 		item.label.Text = "";
+		item.glowLabel.Visible = false;
+		item.glowLabel.Position = CENTER_POSITION;
+		item.glowLabel.Text = "";
+		item.glowLabel.TextTransparency = 1;
+		item.glowLabel.TextStrokeTransparency = 1;
+		item.stroke.Enabled = false;
+		item.stroke.Transparency = 1;
 	}
 
 	private releasePoolItem(item: BillboardPoolItem): void {
