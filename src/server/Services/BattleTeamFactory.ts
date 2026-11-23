@@ -26,6 +26,7 @@ function makeInventoryFighter(item: FighterInventoryItem): Fighter | undefined {
 		skillData: definition.skills,
 		currentAtbSpeed: BASE_ATB_SPEED,
 		hamonConfig: definition.hamonConfig,
+		isVampire: definition.isVampire,
 	});
 }
 
@@ -74,6 +75,7 @@ export function makeRealFighter(fighterId: RealFighterId, rng: () => number, lev
 		skillData: definition.skills,
 		currentAtbSpeed: BASE_ATB_SPEED,
 		hamonConfig: definition.hamonConfig,
+		isVampire: definition.isVampire,
 	});
 }
 

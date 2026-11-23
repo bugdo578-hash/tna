@@ -99,7 +99,9 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `SkillData.ts`: fachada de compatibilidade para os tipos e os exports `JOTARO_SKILL_DATA` e `ANUBIS_SKILL_DATA`.
 - `skills/SkillTypes.ts`: tipos das timelines e tupla readonly de skills na ordem S1, S2, S3.
 - `skills/SkillRegistry.ts`: associa cada ID de personagem à sua tupla e define `RealFighterId` pelas chaves do registro.
-- `skills/fighters/JotaroSkills.ts` e `skills/fighters/AnubisSkills.ts`: timelines por personagem. Para adicionar um personagem, crie um módulo com uma tupla `SkillDataSlots`, importe-a no registro e use a entrada correspondente em `FIGHTER_DATA`.
+- `skills/fighters/JotaroSkills.ts`, `AnubisSkills.ts` e `JonathanSkills.ts`: timelines por personagem. Para adicionar um personagem, crie um módulo com uma tupla `SkillDataSlots`, importe-a no registro e use a entrada correspondente em `FIGHTER_DATA`.
+- `server/Dev/tests/jonathanN31Tests.ts`: verifica registro, Hamon e Burn condicional do Jonathan; executado pela suíte `BattleSimulator`.
+- `server/Services/SkillEffectConditions.ts`: resolve no servidor condições de efeitos de hits potenciados por Hamon.
 - `NpcData.ts`: definições PVE (`bronze_trainer`: Jotaro Lv1 + Anubis Lv2, seed `20261115`, `rematchCooldownSeconds = 300`).
 - `TypeDefs.ts`: tipos compartilhados (`ClassName`, `Rarity`, estados, `FighterInventoryItem`, `PlayerSaveData`, `DuoState`).
 - `MathUtils.ts`: fórmulas puras de custo, mult, dano, cura, counter, crit, preço e alocação (`BuffMulti`/`WeakMulti` sem uso).

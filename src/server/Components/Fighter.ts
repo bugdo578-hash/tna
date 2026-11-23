@@ -67,6 +67,7 @@ export interface AppliedHamonResult {
 }
 
 export interface FighterConfig {
+	readonly isVampire?: boolean;
 	readonly itemUuid?: string;
 	readonly fighterId?: string;
 	readonly hp: number;
@@ -81,6 +82,7 @@ export interface FighterConfig {
 }
 
 export class Fighter {
+	readonly isVampire: boolean;
 	readonly itemUuid?: string;
 	hp: number;
 	localState: FighterLocalState = "NORMAL";
@@ -101,6 +103,7 @@ export class Fighter {
 	readonly statusEffects = new Map<StatusEffect, ActiveStatusEffect>();
 
 	public constructor(config: FighterConfig) {
+		this.isVampire = config.isVampire === true;
 		this.itemUuid = config.itemUuid;
 		this.fighterId = config.fighterId ?? config.className.lower();
 		this.hpMax = config.hpMax;

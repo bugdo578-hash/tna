@@ -13,6 +13,8 @@ export interface SkillHitTimeline {
 	readonly statusEffects?: readonly StatusEffect[];
 	/** Efeitos opcionais aplicados especificamente por este hit quando o ataque consumiu Hamon. */
 	readonly hamonStatusEffects?: readonly StatusEffect[];
+	/** Restringe os efeitos Hamon deste hit a vampiros ou alvos em desvantagem. */
+	readonly hamonEffectCondition?: "vampireOrClassCounter";
 }
 
 /** Linha do tempo em segundos definida pelos dados da skill. */

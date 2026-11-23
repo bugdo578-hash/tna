@@ -13,9 +13,17 @@ export interface FighterDefinition {
 	readonly rarity: Rarity;
 	readonly skills: SkillDataSlots;
 	readonly hamonConfig?: HamonConfig;
+	readonly isVampire?: boolean;
 }
 
 export const FIGHTER_DATA: Readonly<Record<RealFighterId, FighterDefinition>> = {
+	jonathan: {
+		fighterId: "jonathan",
+		name: "Jonathan Joestar",
+		className: "Fury",
+		rarity: "Comum",
+		skills: SKILL_REGISTRY.jonathan,
+	},
 	jotaro: {
 		fighterId: "jotaro",
 		name: "Jotaro",
@@ -43,6 +51,7 @@ function isValidFighterDefinition(entry: unknown, expectedId: string): entry is 
 	if (!typeIs(def.name, "string") || def.name.size() === 0) return false;
 	if (!typeIs(def.className, "string") || (CLASS_DATA as Record<string, unknown>)[def.className] === undefined) return false;
 	if (!isValidRarity(def.rarity)) return false;
+	if (def.isVampire !== undefined && !typeIs(def.isVampire, "boolean")) return false;
 	if (!typeIs(def.skills, "table")) return false;
 	const skills = def.skills as unknown as ReadonlyArray<{ readonly hits?: ReadonlyArray<unknown> }>;
 	if (skills.size() !== 3) return false;

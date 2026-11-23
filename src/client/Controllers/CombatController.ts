@@ -702,11 +702,12 @@ export class CombatController {
 		if (template !== undefined && template.IsA("Model")) {
 			return template.Clone();
 		}
-
-		// Fallback caso um fighterId de teste (ex.: dummy "fury") não exista na pasta Assets/Fighters
-		const fallbackTemplate = fightersFolder?.FindFirstChild("jotaro");
-		if (fallbackTemplate !== undefined && fallbackTemplate.IsA("Model")) {
-			return fallbackTemplate.Clone();
+		if (findFighterDefinition(fighterId) !== undefined) {
+			warn(`[CombatController] Asset de fighter registrado ausente ou inválido: ${fighterId}`);
+		} else {
+			// IDs de teste podem usar o template genérico existente.
+			const fallbackTemplate = fightersFolder?.FindFirstChild("jotaro");
+			if (fallbackTemplate !== undefined && fallbackTemplate.IsA("Model")) return fallbackTemplate.Clone();
 		}
 
 		const placeholderModel = new Instance("Model");

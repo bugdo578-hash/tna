@@ -314,8 +314,8 @@ export function validateLotMFighterRegistry(): void {
 	// 1. Estado base: Jotaro e Anubis válidos; strings arbitrárias e valores inválidos rejeitados
 	const baseIds = getRegisteredFighterIds();
 	assertInvariant(
-		baseIds.size() === 2 && baseIds.includes("jotaro") && baseIds.includes("anubis"),
-		"FIGHTER_DATA base deve conter jotaro e anubis",
+		baseIds.size() === 3 && baseIds.includes("jotaro") && baseIds.includes("anubis") && baseIds.includes("jonathan"),
+		"FIGHTER_DATA base deve conter jotaro, anubis e jonathan",
 	);
 	assertInvariant(isRegisteredFighterId("jotaro") && isRegisteredFighterId("anubis"), "jotaro e anubis válidos");
 	for (const invalid of ["", "dio", "Jotaro", "ANUBIS", "__index", "toString", 123, undefined, {}] as unknown[]) {
@@ -344,7 +344,7 @@ export function validateLotMFighterRegistry(): void {
 		assertInvariant(!isRegisteredFighterId(malformedId), "entrada malformada em FIGHTER_DATA deve ser rejeitada");
 
 		const expandedIds = getRegisteredFighterIds();
-		assertInvariant(expandedIds.size() === 3 && expandedIds.includes(syntheticId as RealFighterId), "getRegisteredFighterIds inclui 3º fighter válido e ignora malformado");
+		assertInvariant(expandedIds.size() === 4 && expandedIds.includes(syntheticId as RealFighterId), "getRegisteredFighterIds inclui fighter sintético válido e ignora malformado");
 
 		// Validação de persistência (PlayerDataValidation)
 		const baseRoll = [calcSkillSlotRoll(1, 0.5), calcSkillSlotRoll(2, 0.5), calcSkillSlotRoll(3, 0.5)] as const;
@@ -440,11 +440,11 @@ export function validateLotMFighterRegistry(): void {
 	delete registry[malformedId];
 	assertInvariant(ok, `falha no teste de registro de fighters: ${tostring(err)}`);
 
-	// Confirma restauração limpa: apenas jotaro e anubis
+	// Confirma restauração limpa do elenco registrado.
 	const afterIds = getRegisteredFighterIds();
 	assertInvariant(
-		afterIds.size() === 2 && !isRegisteredFighterId(syntheticId) && isRegisteredFighterId("jotaro") && isRegisteredFighterId("anubis"),
-		"FIGHTER_DATA deve restaurar estado limpo com Jotaro e Anubis",
+		afterIds.size() === 3 && !isRegisteredFighterId(syntheticId) && isRegisteredFighterId("jotaro") && isRegisteredFighterId("anubis") && isRegisteredFighterId("jonathan"),
+		"FIGHTER_DATA deve restaurar o elenco registrado",
 	);
 
 	print("LOT_M_FIGHTER_REGISTRY_PASSED");

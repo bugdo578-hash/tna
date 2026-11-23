@@ -5,6 +5,7 @@ import { validateArenaSelectionL16 } from "./tests/arenaSelectionTests";
 import { validateBattlePreparation } from "./tests/battlePreparationTests";
 import { validateN1DotSessions, validateN1DotSkillTimeline, validateN1DotTicks } from "./tests/dotN1Tests";
 import { validateN2HamonSystem } from "./tests/hamonN2Tests";
+import { validateJonathanN31 } from "./tests/jonathanN31Tests";
 import {
 	runDummy1000Battles,
 	validateBronzeAI,
@@ -86,6 +87,7 @@ export { validateSlowAutosaveLogoutRetry } from "./tests/persistenceTests";
 export { validateJsonRoundTripPersistence, validateLoadExhaustionKick } from "./tests/dataStoreIntegrityTests";
 
 export function runSimulation(): void {
+	validateJonathanN31();
 	validateBattlePreparation();
 	validateSkillRegistry();
 	validateStarFinger();
