@@ -1,6 +1,6 @@
 import { InventoryService } from "./Services/InventoryService";
 import { ShopService } from "./Services/ShopService";
-import { FIGHTER_DATA, rollClassBaseStats, type RealFighterId } from "../shared/FighterData";
+import { findFighterDefinition, rollClassBaseStats } from "../shared/FighterData";
 import { calcSkillSlotRoll } from "../shared/MathUtils";
 import { Players, RunService } from "@rbxts/services";
 import {
@@ -81,7 +81,7 @@ function handlePlayerAdded(player: Player): void {
 				print("[Shop] crédito dev", amount !== undefined && playerDataService.addTinyes(player, amount, "dev /addtinyes"));
 			}
 			if (parts[0] === "/give" && parts.size() === 2) {
-				const definition = FIGHTER_DATA[parts[1] as RealFighterId];
+				const definition = findFighterDefinition(parts[1]);
 				if (definition === undefined) { warn("fighterId inexistente: " + parts[1]); return; }
 				progressionService.createInventoryFighter(player, {
 					fighterId: definition.fighterId, rarity: definition.rarity,

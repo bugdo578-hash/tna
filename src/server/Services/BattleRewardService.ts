@@ -1,5 +1,5 @@
 import { PVP_MIN_QUIT_DAMAGE_FRACTION, PVP_MIN_RESOLVED_HITS, PVP_REWARD_FACTOR, REWARD_BRACKET_MIN_LEVEL, TEAM_XP_SLOTS } from "../../shared/Config";
-import { FIGHTER_DATA, type RealFighterId } from "../../shared/FighterData";
+import { findFighterDefinition } from "../../shared/FighterData";
 import { calcXpForNextLevel } from "../../shared/ProgressionMath";
 import type { BattleEndReason, BattleSessionMode, RewardBlockedReason } from "../../shared/Remotes";
 import { calcRewardBracket } from "../../shared/RewardMath";
@@ -144,7 +144,7 @@ export class BattleRewardService {
 			let xpGained = item.xp - before.xp;
 			for (let level = before.level; level < item.level; level++) xpGained += calcXpForNextLevel(level);
 			totalXpGained += xpGained;
-			const definition = FIGHTER_DATA[item.fighterId as RealFighterId];
+			const definition = findFighterDefinition(item.fighterId);
 			rewards.push({
 				itemUuid: item.itemUuid,
 				fighterId: item.fighterId,

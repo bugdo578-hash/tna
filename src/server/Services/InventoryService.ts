@@ -1,5 +1,5 @@
 import { S3_UNLOCK_LEVEL } from "../../shared/Config";
-import { FIGHTER_DATA, type RealFighterId } from "../../shared/FighterData";
+import { findFighterDefinition } from "../../shared/FighterData";
 import { calcAvailablePoints, calcEffectiveStats, calcXpForNextLevel } from "../../shared/ProgressionMath";
 import type { PlayerDataService } from "./PlayerDataService";
 import type { ProgressionService } from "./ProgressionService";
@@ -21,7 +21,7 @@ export class InventoryService {
 		return {
 			allocationReason,
 			fighters: (this.progression.getPlayerData(player)?.inventory ?? []).map((item) => {
-				const definition = FIGHTER_DATA[item.fighterId as RealFighterId];
+				const definition = findFighterDefinition(item.fighterId);
 				return {
 					itemUuid: item.itemUuid, fighterId: item.fighterId,
 					displayName: definition?.name ?? item.fighterId,

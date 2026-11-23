@@ -201,7 +201,7 @@ export const UITheme = {
     },
 	Tinyes: {
 		ScreenGuiName: "TinyesDisplay",
-		DisplayOrder: 11,
+		DisplayOrder: 8, // Abaixo de Shop/PvpUI (9), BattleHUD/Pause (10), BattleResult (12), Inventory (20) e BattleIntroOverlay (1000)
 		Position: UDim2.fromScale(0.015, 0.27),
 		Size: UDim2.fromScale(0.22, 0.07),
 		GainStart: UDim2.fromScale(0, 1),

@@ -13,7 +13,7 @@ import {
 	STAND_SUBMODEL_NAME,
 	WORKSPACE_BATTLE_FOLDER_NAME,
 } from "../UI/CombatVisualConfig";
-import { FIGHTER_DATA, type RealFighterId } from "../../shared/FighterData";
+import { findFighterDefinition } from "../../shared/FighterData";
 import type {
 	AttackStartedPayload,
 	BattleEndedPayload,
@@ -28,7 +28,7 @@ import type {
 	HitResolvedPayload,
 	SwitchPerformedPayload,
 } from "../../shared/Remotes";
-import { ANUBIS_SKILL_DATA, JOTARO_SKILL_DATA, type SkillData } from "../../shared/SkillData";
+import { JOTARO_SKILL_DATA, type SkillData } from "../../shared/SkillData";
 import type { SkillSlot, StatusEffect } from "../../shared/TypeDefs";
 import { battleCleanupStep } from "./BattleCleanup";
 import { CombatCameraController, resolveSideCameraAnchor } from "./CombatCameraController";
@@ -550,7 +550,7 @@ export class CombatController {
 
 			const standModel = this.resolveStandSubmodel(clonedModel);
 			const standJoint = rootPart.FindFirstChild("StandJoint");
-			const attachments = this.resolveAttachments(clonedModel, rootPart);
+			const attachments = this.resolveAttachments(clonedModel, rootPart, standModel);
 			const originalTransparency = this.captureBaseTransparency(clonedModel);
 			const groundContact = resolveFighterGroundContact(clonedModel, rootPart, standModel);
 
@@ -752,14 +752,20 @@ export class CombatController {
 		return undefined;
 	}
 
-	private resolveAttachments(model: Model, fallbackPart: BasePart): RigAttachmentMap {
+	private resolveAttachments(model: Model, fallbackPart: BasePart, standModel?: Model): RigAttachmentMap {
 		const findAtt = (name: string): Attachment | BasePart => {
+			let standFallback: Attachment | undefined;
 			for (const descendant of model.GetDescendants()) {
 				if (descendant.IsA("Attachment") && descendant.Name === name) {
-					return descendant;
+					if (standModel === undefined || !descendant.IsDescendantOf(standModel)) {
+						return descendant;
+					}
+					if (standFallback === undefined) {
+						standFallback = descendant;
+					}
 				}
 			}
-			return fallbackPart;
+			return standFallback ?? fallbackPart;
 		};
 
 		return {
@@ -826,11 +832,10 @@ export class CombatController {
 	}
 
 	private resolveSkillTimeline(fighterId: string, slot: SkillSlot): SkillData {
-		const lowerId = fighterId.lower() as RealFighterId;
-		if (lowerId in FIGHTER_DATA) {
-			return FIGHTER_DATA[lowerId].skills[slot - 1];
+		const def = findFighterDefinition(fighterId) ?? findFighterDefinition(fighterId.lower());
+		if (def !== undefined) {
+			return def.skills[slot - 1];
 		}
-		if (lowerId === "anubis") return ANUBIS_SKILL_DATA[slot - 1];
 		return JOTARO_SKILL_DATA[slot - 1];
 	}
 

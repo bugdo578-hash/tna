@@ -166,15 +166,23 @@ export function runBattleWithSides(
 
 	battle.events.death.connect(({ side, fighter, nextActive }) => {
 		const sideIndex = side === firstSide ? 0 : 1;
-		deathInStep[sideIndex] = true;
-		plannedSlots[sideIndex] = pickNextSlot(rng);
-		assertInvariant(side.atb === 0, "ATB não zerou após a morte");
-		if (!side.isDefeated()) {
+		const benchDeath = side.getActiveFighter() !== fighter && side.getActiveFighter().isAlive() && nextActive === undefined;
+		if (benchDeath) {
 			assertInvariant(
-				(battle.state === "ATTACK" && nextActive === undefined && side.getActiveFighter() === fighter) ||
-				(nextActive !== undefined && nextActive.isAlive() && side.getActiveFighter() === nextActive),
-				"troca automática por morte falhou (deve ignorar Root)",
+				side.getActiveFighter().isAlive() && !side.isDefeated(),
+				"morte no banco deve manter o lutador ativo vivo sem derrota do lado",
 			);
+		} else {
+			deathInStep[sideIndex] = true;
+			plannedSlots[sideIndex] = pickNextSlot(rng);
+			assertInvariant(side.atb === 0, "ATB não zerou após a morte do ativo");
+			if (!side.isDefeated()) {
+				assertInvariant(
+					(battle.state === "ATTACK" && nextActive === undefined && side.getActiveFighter() === fighter) ||
+					(nextActive !== undefined && nextActive.isAlive() && side.getActiveFighter() === nextActive),
+					"troca automática por morte falhou (deve ignorar Root)",
+				);
+			}
 		}
 		if (verbose) print(`morte: lado ${formatSide(side, firstSide)}, ${fighter.fighterId}; próximo=${nextActive?.fighterId ?? "nenhum"}`);
 	});

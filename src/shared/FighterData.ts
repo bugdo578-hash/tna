@@ -31,6 +31,53 @@ export const FIGHTER_DATA: Readonly<Record<RealFighterId, FighterDefinition>> = 
 	},
 };
 
+function isValidRarity(value: unknown): value is Rarity {
+	return value === "Comum" || value === "Rara" || value === "Épica" || value === "Lendária";
+}
+
+function isValidFighterDefinition(entry: unknown, expectedId: string): entry is FighterDefinition {
+	if (!typeIs(entry, "table")) return false;
+	const def = entry as Partial<FighterDefinition>;
+	if (!typeIs(def.fighterId, "string") || def.fighterId.size() === 0 || def.fighterId !== expectedId) return false;
+	if (!typeIs(def.name, "string") || def.name.size() === 0) return false;
+	if (!typeIs(def.className, "string") || (CLASS_DATA as Record<string, unknown>)[def.className] === undefined) return false;
+	if (!isValidRarity(def.rarity)) return false;
+	if (!typeIs(def.skills, "table")) return false;
+	const skills = def.skills as unknown as ReadonlyArray<{ readonly hits?: ReadonlyArray<unknown> }>;
+	if (skills.size() !== 3) return false;
+	for (const index of $range(0, 2)) {
+		const slotSkill = skills[index];
+		if (!typeIs(slotSkill, "table") || !typeIs(slotSkill.hits, "table") || slotSkill.hits.size() === 0) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/** Busca uma definição válida em `FIGHTER_DATA`; rejeita strings arbitrárias e entradas malformadas. */
+export function findFighterDefinition(fighterId: unknown): FighterDefinition | undefined {
+	if (!typeIs(fighterId, "string") || fighterId.size() === 0) return undefined;
+	const entry = (FIGHTER_DATA as Record<string, unknown>)[fighterId];
+	return isValidFighterDefinition(entry, fighterId) ? entry : undefined;
+}
+
+/** Valida se `fighterId` existe com dados válidos em `FIGHTER_DATA`. */
+export function isRegisteredFighterId(fighterId: unknown): fighterId is RealFighterId {
+	return findFighterDefinition(fighterId) !== undefined;
+}
+
+/** Retorna todos os IDs válidos registrados em `FIGHTER_DATA` em ordem determinística. */
+export function getRegisteredFighterIds(): readonly RealFighterId[] {
+	const ids: RealFighterId[] = [];
+	for (const [id, entry] of pairs(FIGHTER_DATA as Record<string, unknown>)) {
+		if (typeIs(id, "string") && isValidFighterDefinition(entry, id)) {
+			ids.push(id as RealFighterId);
+		}
+	}
+	table.sort(ids);
+	return ids;
+}
+
 function rollStatInRange(range: NumericRange, rng: () => number): number {
 	const t = clamp(rng(), 0, 1);
 	return clamp(math.round(lerp(range.min, range.max, t)), range.min, range.max);
@@ -48,5 +95,7 @@ export function rollClassBaseStats(className: ClassName, rng: () => number): Sta
 }
 
 export function getFighterDefinition(fighterId: RealFighterId): FighterDefinition {
-	return FIGHTER_DATA[fighterId];
+	const definition = findFighterDefinition(fighterId);
+	assert(definition !== undefined, `fighterId não registrado em FIGHTER_DATA: ${tostring(fighterId)}`);
+	return definition;
 }

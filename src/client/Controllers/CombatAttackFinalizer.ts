@@ -232,9 +232,9 @@ export class CombatAttackFinalizer<TFighter extends AttackFinalizerFighter> {
 		}
 
 		// Troca automática por morte (nextActive) aguarda fim da sequência e da queda de KO, deduplicada com SwitchPerformed.
-		if (record.payload.nextActive !== undefined) {
+		if (record.payload.nextActive !== undefined && record.payload.nextActive !== deadTargetId) {
 			const nextFighter = this.host.getFighter(record.payload.nextActive);
-			if (nextFighter !== undefined && !nextFighter.dead) {
+			if (nextFighter !== undefined && !nextFighter.dead && !nextFighter.active) {
 				this.handleSwitchPerformed({
 					sideId: record.payload.sideId,
 					previousFighterId: deadTargetId,

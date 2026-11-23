@@ -3,7 +3,7 @@ import {
 	FLOAT_TOLERANCE, MAX_ITEM_UUID_LENGTH, MAX_SAVED_NUMBER, SHOP_LEVEL_WEIGHTS, SHOP_REQUEST_BUCKET_CAPACITY,
 	SHOP_REQUEST_REFILL_PER_SECOND, SHOP_RESET_WINDOW_SECONDS, SHOP_SHELF_COUNT,
 } from "../../shared/Config";
-import { FIGHTER_DATA, rollClassBaseStats } from "../../shared/FighterData";
+import { findFighterDefinition, getFighterDefinition, getRegisteredFighterIds, rollClassBaseStats } from "../../shared/FighterData";
 import { calcOfferPrice, calcSkillSlotRoll, calcStatQuality } from "../../shared/MathUtils";
 import type { ShopOffer } from "../../shared/TypeDefs";
 import type { PurchaseReason, PurchaseResultPayload, ShopStatePayload } from "../../shared/Remotes";
@@ -50,7 +50,10 @@ export class ShopService {
 			for (let i = 1; i <= key.size(); i++) seed = (seed * 31 + string.byte(key, i)[0]) % 2147483647;
 			const random = new Random(seed);
 			const rng = () => random.NextNumber();
-			const definition = FIGHTER_DATA[rng() < 0.5 ? "jotaro" : "anubis"];
+			const registeredIds = getRegisteredFighterIds();
+			assert(registeredIds.size() > 0, "[Shop] FIGHTER_DATA sem lutadores registrados");
+			const pickIndex = math.min(math.floor(math.clamp(rng(), 0, 1) * registeredIds.size()), registeredIds.size() - 1);
+			const definition = getFighterDefinition(registeredIds[pickIndex]);
 			const baseStats = rollClassBaseStats(definition.className, rng);
 			const skills = [calcSkillSlotRoll(1, rng()), calcSkillSlotRoll(2, rng()), calcSkillSlotRoll(3, rng())] as const;
 			const roll = rng();
@@ -81,12 +84,17 @@ export class ShopService {
 
 	private sendState(player: Player, { window, offers }: { window: number; offers: ShopOffer[] }): void {
 		this.windows.set(player, window);
-		this.send(player, { offers: offers.map((offer) => {
-			const definition = FIGHTER_DATA[offer.fighterId as "jotaro" | "anubis"];
-			return { offerId: offer.offerId, fighterId: offer.fighterId, displayName: definition.name,
+		const published: ShopStatePayload["offers"][number][] = [];
+		for (const offer of offers) {
+			const definition = findFighterDefinition(offer.fighterId);
+			if (definition === undefined) continue;
+			published.push({
+				offerId: offer.offerId, fighterId: definition.fighterId, displayName: definition.name,
 				rarity: offer.rarity, className: definition.className, level: offer.level, baseStats: offer.baseStats,
-				price: offer.price, slotCosts: [offer.skills[0].cost, offer.skills[1].cost, offer.skills[2].cost] as const };
-		}) });
+				price: offer.price, slotCosts: [offer.skills[0].cost, offer.skills[1].cost, offer.skills[2].cost] as const,
+			});
+		}
+		this.send(player, { offers: published });
 	}
 
 	public refresh(player: Player): void {

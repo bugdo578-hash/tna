@@ -1,5 +1,5 @@
 import { BASE_ATB_SPEED, MAX_ACTIVE_TEAM_SIZE, MIN_LEVEL } from "../../shared/Config";
-import { getFighterDefinition, rollClassBaseStats, type RealFighterId } from "../../shared/FighterData";
+import { findFighterDefinition, getFighterDefinition, rollClassBaseStats, type RealFighterId } from "../../shared/FighterData";
 import { calcSkillSlotRoll } from "../../shared/MathUtils";
 import { calcEffectiveStats } from "../../shared/ProgressionMath";
 import type { FighterInventoryItem, SkillSlots } from "../../shared/TypeDefs";
@@ -10,12 +10,13 @@ import type { ProgressionService } from "../Services/ProgressionService";
 
 /** Copia os rolls salvos; combate nunca compartilha estado mutável com o inventário. */
 function makeInventoryFighter(item: FighterInventoryItem): Fighter | undefined {
-	if (item.unavailable || (item.fighterId !== "jotaro" && item.fighterId !== "anubis")) return undefined;
-	const definition = getFighterDefinition(item.fighterId);
+	if (item.unavailable) return undefined;
+	const definition = findFighterDefinition(item.fighterId);
+	if (definition === undefined) return undefined;
 	const stats = calcEffectiveStats(item.baseStats, item.allocatedStats);
 	return new Fighter({
 		itemUuid: item.itemUuid,
-		fighterId: item.fighterId,
+		fighterId: definition.fighterId,
 		hp: stats.hp,
 		hpMax: stats.hp,
 		stats,

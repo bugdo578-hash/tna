@@ -18,6 +18,11 @@ import {
 	validateTokenBucketRateLimit,
 	validateTrocarIndexValidation,
 } from "./tests/coreTests";
+import {
+	validateLotMA05AtbBenchDeath,
+	validateLotMC06RateLimitBoundaries,
+	validateLotMFighterRegistry,
+} from "./tests/lotMTests";
 import { validateNpcBattles, validateNpcRematchCooldown } from "./tests/npcTests";
 import {
 	validateJsonRoundTripPersistence,
@@ -60,6 +65,11 @@ import {
 export { validateArenaPlayerTransportL3 } from "./tests/arenaPlayerTransportTests";
 export { validateArenaRegistry } from "./tests/arenaRegistryTests";
 export { validateArenaSelectionL16 } from "./tests/arenaSelectionTests";
+export {
+	validateLotMA05AtbBenchDeath,
+	validateLotMC06RateLimitBoundaries,
+	validateLotMFighterRegistry,
+} from "./tests/lotMTests";
 export { validateDayNightCycle } from "./tests/coreTests";
 export { validateNpcBattles, validateNpcRematchCooldown } from "./tests/npcTests";
 export { validatePostBattleXp, validateTinyesEconomy } from "./tests/progressionTests";
@@ -121,5 +131,8 @@ export function runSimulation(): void {
 	validateArenaSelectionL16();
 	validatePvpSideAlternationL21();
 	validateArenaPlayerTransportL3();
+	validateLotMA05AtbBenchDeath();
+	validateLotMC06RateLimitBoundaries();
+	validateLotMFighterRegistry();
 	print("SIMULATION_ALL_PASSED");
 }

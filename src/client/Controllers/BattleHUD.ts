@@ -1,7 +1,7 @@
 import { battleCleanupStep } from "./BattleCleanup";
 import { Players, RunService } from "@rbxts/services";
 import { ATB_MAX, ATB_MIN, FLOAT_TOLERANCE } from "../../shared/Config";
-import { FIGHTER_DATA, type RealFighterId } from "../../shared/FighterData";
+import { findFighterDefinition } from "../../shared/FighterData";
 import { clamp } from "../../shared/MathUtils";
 import type {
 	AtbSyncPayload,
@@ -18,7 +18,7 @@ import type {
 	StateChangedPayload,
 	SwitchPerformedPayload,
 } from "../../shared/Remotes";
-import { ANUBIS_SKILL_DATA, JOTARO_SKILL_DATA, type SkillDataSlots } from "../../shared/SkillData";
+import { JOTARO_SKILL_DATA, type SkillDataSlots } from "../../shared/SkillData";
 import type { BattleGlobalState, SkillSlot, StatusEffect } from "../../shared/TypeDefs";
 import { HudBattleResult } from "../UI/HudBattleResult";
 import { HudFighterStatus, type HudFighterState } from "../UI/HudFighterStatus";
@@ -425,17 +425,13 @@ export class BattleHUD {
 		sideIndex: 0 | 1,
 		teamSlotIndex: ClientFighterIndex,
 	): HudFighterState {
-		const lowerId = snapshot.fighterId.lower() as RealFighterId;
+		const def = findFighterDefinition(snapshot.fighterId) ?? findFighterDefinition(snapshot.fighterId.lower());
 		let displayName = snapshot.fighterId;
 		let skillTemplates: SkillDataSlots = JOTARO_SKILL_DATA;
 
-		if (lowerId in FIGHTER_DATA) {
-			const def = FIGHTER_DATA[lowerId];
+		if (def !== undefined) {
 			displayName = def.name;
 			skillTemplates = def.skills;
-		} else if (lowerId === "anubis") {
-			displayName = "Anubis";
-			skillTemplates = ANUBIS_SKILL_DATA;
 		} else if (snapshot.fighterId.size() > 0) {
 			displayName = snapshot.fighterId.sub(1, 1).upper() + snapshot.fighterId.sub(2);
 		}
@@ -542,6 +538,7 @@ export class BattleHUD {
 	private applyVisualDeathAndAutoSwitch(payload: FighterDiedPayload): void {
 		if (!this.battleActive || this.battleEnded) return;
 		const deadFighter = this.fightersByTargetId.get(payload.fighterId);
+		const wasActive = deadFighter?.active === true;
 		if (deadFighter !== undefined) {
 			deadFighter.dead = true;
 			deadFighter.active = false;
@@ -549,13 +546,15 @@ export class BattleHUD {
 			deadFighter.effects.clear();
 		}
 
-		// Regra do jogo: morte zera ATB do lado e troca automaticamente para nextActive
-		if (payload.sideId === this.ownSideId) {
-			this.playerTargetAtb = 0;
-			this.fighterStatus.resetSideAtbDisplay(true);
-		} else if (payload.sideId === this.opponentSideId) {
-			this.opponentTargetAtb = 0;
-			this.fighterStatus.resetSideAtbDisplay(false);
+		// Regra do jogo: morte do ativo zera ATB do lado; morte no banco preserva o ATB do ativo.
+		if (deadFighter === undefined || wasActive || payload.nextActive !== undefined) {
+			if (payload.sideId === this.ownSideId) {
+				this.playerTargetAtb = 0;
+				this.fighterStatus.resetSideAtbDisplay(true);
+			} else if (payload.sideId === this.opponentSideId) {
+				this.opponentTargetAtb = 0;
+				this.fighterStatus.resetSideAtbDisplay(false);
+			}
 		}
 
 		if (payload.nextActive !== undefined) {

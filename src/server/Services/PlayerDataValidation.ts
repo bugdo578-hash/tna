@@ -30,7 +30,7 @@ import {
 	SESSION_LOCK_WAIT_ATTEMPTS,
 	SESSION_LOCK_WAIT_DELAY_SECONDS,
 } from "../../shared/Config";
-import { FIGHTER_DATA, rollClassBaseStats, type RealFighterId } from "../../shared/FighterData";
+import { findFighterDefinition, rollClassBaseStats, type RealFighterId } from "../../shared/FighterData";
 import { calcMult, calcSkillSlotRoll, isValidStatAllocation } from "../../shared/MathUtils";
 import { calcAvailablePoints } from "../../shared/ProgressionMath";
 import type {
@@ -465,7 +465,7 @@ export function validateFighterInventoryItem(raw: unknown, log: (message: string
 		return { valid: false, reason: `equippedChip inválido no item ${itemUuid as string}` };
 	}
 
-	const unavailable = FIGHTER_DATA[fighterId as RealFighterId] === undefined ? true : undefined;
+	const unavailable = findFighterDefinition(fighterId) === undefined ? true : undefined;
 	if (unavailable) log(`fighterId desconhecido ${fighterId as string}: item ${itemUuid as string} preservado e indisponível`);
 	let duo: DuoState | undefined;
 	if (raw.duo !== undefined) {

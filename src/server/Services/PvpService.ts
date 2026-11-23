@@ -28,7 +28,7 @@ export class PvpService {
 	private readonly lastPhysicalSide = new Map<Player, PvpPhysicalSide>();
 	private readonly nextInvite = new Map<Player, number>();
 	private readonly declined = new Map<Player, Map<Player, number>>();
-	private readonly buckets = new Map<Player, Map<string, Bucket>>();
+	private readonly responseBuckets = new Map<Player, Bucket>();
 	private readonly bindings = new Map<Player, RBXScriptConnection[]>();
 	private readonly prompts = new Map<Player, ProximityPrompt>();
 	private readonly connections: RBXScriptConnection[] = [];
@@ -137,12 +137,14 @@ export class PvpService {
 		this.pending.set(challenger, invite);
 		this.pending.set(target, invite);
 		this.sendStatus(challenger, invite.id, "enviado");
-		if (this.consume(target, "received")) pcall(() => this.received(target, { inviteId: invite.id, challengerName: challenger.Name, expiresIn: PVP_INVITE_EXPIRY_SECONDS }));
+		if (target.Parent === Players) {
+			pcall(() => this.received(target, { inviteId: invite.id, challengerName: challenger.Name, expiresIn: PVP_INVITE_EXPIRY_SECONDS }));
+		}
 		return true;
 	}
 
 	public respond(player: Player, payload: unknown): boolean {
-		if (player.Parent !== Players || !this.data.isSessionLoaded(player) || !this.consume(player, "response")) return false;
+		if (player.Parent !== Players || !this.data.isSessionLoaded(player) || !this.consumeResponse(player)) return false;
 		if (!typeIs(payload, "table")) return false;
 		const request = payload as { inviteId?: unknown; accept?: unknown };
 		for (const [key] of pairs(payload)) if (key !== "inviteId" && key !== "accept") return false;
@@ -210,15 +212,16 @@ export class PvpService {
 	}
 
 	private sendStatus(player: Player, inviteId: string, status: ChallengeStatus): void {
-		if (player.Parent === Players && this.consume(player, "status")) pcall(() => this.status(player, { inviteId, status }));
+		if (player.Parent === Players) pcall(() => this.status(player, { inviteId, status }));
 	}
 
-	private consume(player: Player, channel: string): boolean {
-		let channels = this.buckets.get(player);
-		if (channels === undefined) { channels = new Map(); this.buckets.set(player, channels); }
+	private consumeResponse(player: Player): boolean {
 		const now = this.clock();
-		let bucket = channels.get(channel);
-		if (bucket === undefined) { bucket = { tokens: PVP_RESPONSE_BUCKET_CAPACITY, time: now }; channels.set(channel, bucket); }
+		let bucket = this.responseBuckets.get(player);
+		if (bucket === undefined) {
+			bucket = { tokens: PVP_RESPONSE_BUCKET_CAPACITY, time: now };
+			this.responseBuckets.set(player, bucket);
+		}
 		bucket.tokens = math.min(PVP_RESPONSE_BUCKET_CAPACITY, bucket.tokens + math.max(0, now - bucket.time) * PVP_RESPONSE_REFILL_PER_SECOND);
 		bucket.time = now;
 		if (bucket.tokens < 1) return false;
@@ -239,7 +242,7 @@ export class PvpService {
 		this.lastPhysicalSide.delete(player);
 		this.declined.delete(player);
 		for (const [, targets] of this.declined) targets.delete(player);
-		this.buckets.delete(player);
+		this.responseBuckets.delete(player);
 	}
 }
 

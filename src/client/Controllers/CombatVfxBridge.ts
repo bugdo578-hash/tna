@@ -22,10 +22,18 @@ export interface CombatVfxFighterRef {
 	readonly targetId: string;
 	readonly fighterId: string;
 	readonly model: Model;
+	readonly rootPart?: BasePart;
 	readonly attachments: {
 		readonly Peito: Attachment | BasePart;
 	};
 }
+
+interface WorkingVfxSpatialTarget {
+	readonly instance: Model | BasePart;
+	readonly relativeCFrame: CFrame;
+}
+
+const VFX_PIVOT_MARKER_NAMES = new Set(["Pivot", "Origin", "Root", "Center"]);
 
 export interface ResolvedBattleVfx {
 	readonly instance: Instance;
@@ -45,6 +53,7 @@ export class CombatVfxBridge {
 	public readonly preloadedVfxEntries: PreloadedVfxEntry[] = [];
 	public readonly battleVfxWorkingCopies = new Map<string, Instance>();
 	public readonly vfxCarrierParts = new Map<Instance, BasePart>();
+	private readonly vfxSpatialLayouts = new Map<Instance, readonly WorkingVfxSpatialTarget[]>();
 
 	private battleVfxGeneration = 0;
 
@@ -75,6 +84,7 @@ export class CombatVfxBridge {
 	public clearWorkingCopies(): void {
 		this.battleVfxWorkingCopies.clear();
 		this.vfxCarrierParts.clear();
+		this.vfxSpatialLayouts.clear();
 	}
 
 	public clearActiveVfx(): void {
@@ -89,6 +99,7 @@ export class CombatVfxBridge {
 		this.preloadedVfxEntries.clear();
 		this.battleVfxWorkingCopies.clear();
 		this.vfxCarrierParts.clear();
+		this.vfxSpatialLayouts.clear();
 		for (const entry of entries) {
 			battleCleanupStep("vfx deload folder", () => this.host.getVfxController()?.deload(entry.folder, entry.generation));
 		}
@@ -212,7 +223,7 @@ export class CombatVfxBridge {
 		isCrit: boolean,
 	): void {
 		if (this.host.getVfxController() === undefined) return;
-		const origem = target.attachments.Peito;
+		const origem = this.resolveTargetOrigem(target);
 
 		const skillVfx = this.resolveSkillVfx(attacker, timeline, slot);
 		if (skillVfx !== undefined) {
@@ -233,7 +244,7 @@ export class CombatVfxBridge {
 		if (this.host.getVfxController() === undefined) return;
 		const koVfx = this.resolveNamedCombatVfx(deadFighter, VFX_GLOBAL_KO_NAME);
 		if (koVfx !== undefined) {
-			this.emitResolvedBattleVfx(koVfx, deadFighter.attachments.Peito, VFX_PRIORIDADE_ESSENCIAL);
+			this.emitResolvedBattleVfx(koVfx, this.resolveTargetOrigem(deadFighter), VFX_PRIORIDADE_ESSENCIAL);
 		}
 	}
 
@@ -244,11 +255,6 @@ export class CombatVfxBridge {
 	): void {
 		const vfx = this.host.getVfxController();
 		if (vfx === undefined || this.host.isBattleEnded()) return;
-		if (resolved.isInModel) {
-			vfx.emit(resolved.instance, origem, prioridade, true);
-			return;
-		}
-
 		const working = this.getOrCreateWorkingVfxCopy(resolved.key, resolved.instance, origem);
 		if (working === undefined) return;
 		vfx.emit(working, origem, prioridade, true);
@@ -263,6 +269,8 @@ export class CombatVfxBridge {
 			working = template.Clone();
 			working.Name = `BattleVFX_${key}`;
 			working.SetAttribute(VFX_ATTR_IGNORAR_CULLING, true);
+			this.prepareWorkingVfxPhysics(working);
+			this.captureSpatialLayout(working);
 			this.parentAndPositionWorkingVfx(working, origem);
 			this.battleVfxWorkingCopies.set(key, working);
 			return working;
@@ -272,12 +280,100 @@ export class CombatVfxBridge {
 		return working;
 	}
 
+	private resolveTargetOrigem(target: CombatVfxFighterRef): VfxOrigem {
+		const peito = target.attachments.Peito;
+		if (peito !== undefined && peito.Parent !== undefined) {
+			return peito;
+		}
+		if (target.rootPart !== undefined && target.rootPart.Parent !== undefined) {
+			return target.rootPart;
+		}
+		return target.model;
+	}
+
 	private resolveOrigemCFrame(origem: VfxOrigem): CFrame {
 		if (typeIs(origem, "CFrame")) return origem;
 		if (typeIs(origem, "Vector3")) return new CFrame(origem);
 		if (origem.IsA("Attachment")) return origem.WorldCFrame;
 		if (origem.IsA("BasePart")) return origem.CFrame;
 		return origem.GetPivot();
+	}
+
+	private prepareWorkingVfxPhysics(working: Instance): void {
+		const configurePart = (part: BasePart): void => {
+			part.Anchored = true;
+			part.CanCollide = false;
+			part.CanQuery = false;
+			part.CanTouch = false;
+		};
+		if (working.IsA("BasePart")) {
+			configurePart(working);
+		}
+		for (const descendant of working.GetDescendants()) {
+			if (descendant.IsA("BasePart")) {
+				configurePart(descendant);
+			}
+		}
+	}
+
+	private collectTopSpatialInstances(root: Instance, out: Array<Model | BasePart>): void {
+		if (root.IsA("Model")) {
+			out.push(root);
+			return;
+		}
+		if (root.IsA("BasePart")) {
+			out.push(root);
+		}
+		for (const child of root.GetChildren()) {
+			if (child.IsA("Model")) {
+				out.push(child);
+			} else if (child.IsA("BasePart")) {
+				this.collectTopSpatialInstances(child, out);
+			} else {
+				this.collectTopSpatialInstances(child, out);
+			}
+		}
+	}
+
+	private findExplicitPivotCFrame(working: Instance): CFrame | undefined {
+		for (const child of working.GetChildren()) {
+			if (!VFX_PIVOT_MARKER_NAMES.has(child.Name)) continue;
+			if (child.IsA("Attachment")) return child.WorldCFrame;
+			if (child.IsA("BasePart")) return child.CFrame;
+			if (child.IsA("Model")) return child.GetPivot();
+		}
+		return undefined;
+	}
+
+	private captureSpatialLayout(working: Instance): void {
+		const spatialInstances: Array<Model | BasePart> = [];
+		this.collectTopSpatialInstances(working, spatialInstances);
+		if (spatialInstances.size() === 0) {
+			this.vfxSpatialLayouts.delete(working);
+			return;
+		}
+
+		let referenceCFrame: CFrame;
+		if (working.IsA("Model")) {
+			referenceCFrame = working.GetPivot();
+		} else if (working.IsA("BasePart")) {
+			referenceCFrame = working.CFrame;
+		} else {
+			const first = spatialInstances[0];
+			referenceCFrame =
+				this.findExplicitPivotCFrame(working) ??
+				(first.IsA("Model") ? first.GetPivot() : first.CFrame);
+		}
+
+		const layout: WorkingVfxSpatialTarget[] = [];
+		for (const item of spatialInstances) {
+			const itemCFrame = item.IsA("Model") ? item.GetPivot() : item.CFrame;
+			layout.push({
+				instance: item,
+				relativeCFrame: referenceCFrame.ToObjectSpace(itemCFrame),
+			});
+		}
+		this.vfxSpatialLayouts.set(working, layout);
 	}
 
 	private parentAndPositionWorkingVfx(working: Instance, origem: VfxOrigem): void {
@@ -302,6 +398,7 @@ export class CombatVfxBridge {
 			carrier.Parent = stageFolder;
 			this.vfxCarrierParts.set(working, carrier);
 			working.Parent = carrier;
+			this.positionWorkingVfx(working, origem);
 			return;
 		}
 
@@ -323,8 +420,22 @@ export class CombatVfxBridge {
 		const carrier = this.vfxCarrierParts.get(working);
 		if (carrier !== undefined && carrier.Parent !== undefined) {
 			carrier.CFrame = cf;
+		}
+
+		const layout = this.vfxSpatialLayouts.get(working);
+		if (layout !== undefined && layout.size() > 0) {
+			for (const entry of layout) {
+				if (entry.instance.Parent === undefined) continue;
+				const desired = cf.mul(entry.relativeCFrame);
+				if (entry.instance.IsA("Model")) {
+					entry.instance.PivotTo(desired);
+				} else {
+					entry.instance.CFrame = desired;
+				}
+			}
 			return;
 		}
+
 		if (working.IsA("Model")) {
 			working.PivotTo(cf);
 		} else if (working.IsA("BasePart")) {

@@ -29,7 +29,7 @@ import {
 	SESSION_LOCK_WAIT_ATTEMPTS,
 	SESSION_LOCK_WAIT_DELAY_SECONDS,
 } from "../../shared/Config";
-import { FIGHTER_DATA, rollClassBaseStats, type RealFighterId } from "../../shared/FighterData";
+import { getFighterDefinition, isRegisteredFighterId, rollClassBaseStats, type RealFighterId } from "../../shared/FighterData";
 import { calcMult, calcSkillSlotRoll, isValidStatAllocation } from "../../shared/MathUtils";
 import { calcAvailablePoints } from "../../shared/ProgressionMath";
 import type {
@@ -422,7 +422,7 @@ export class PlayerDataService {
 
 		const inventoryUuids = new Set<string>();
 		for (const fighter of session.getProgressionData().inventory) {
-			if (!fighter.unavailable) inventoryUuids.add(fighter.itemUuid);
+			if (!fighter.unavailable && isRegisteredFighterId(fighter.fighterId)) inventoryUuids.add(fighter.itemUuid);
 		}
 
 		const nextTeam: string[] = [];
@@ -1773,7 +1773,7 @@ export class PlayerDataService {
 	}
 
 	private createStarterInventoryItem(): FighterInventoryItem {
-		const starterDef = FIGHTER_DATA[this.starterFighterId];
+		const starterDef = getFighterDefinition(this.starterFighterId);
 		const starterBaseStats = rollClassBaseStats(starterDef.className, this.rng);
 		const starterSkills: SkillSlots = [
 			calcSkillSlotRoll(1, this.rng()),

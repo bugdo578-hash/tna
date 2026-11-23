@@ -357,17 +357,14 @@ export class BattleService {
 	private handleFighterDeath(defenderSide: BattleSide, deadFighter: Fighter): void {
 		deadFighter.statusEffects.delete("Burn");
 		deadFighter.statusEffects.delete("Bleed");
+		const isActiveDead = defenderSide.getActiveFighter() === deadFighter;
 		let nextActive: Fighter | undefined;
-		if (this.state === "ATTACK" && defenderSide.getActiveFighter() === deadFighter && !defenderSide.isDefeated()) {
+		if (isActiveDead && this.state === "ATTACK" && !defenderSide.isDefeated()) {
 			this.pendingSwitchSide = defenderSide;
 			defenderSide.resetAtb();
-		} else if (!defenderSide.getActiveFighter().isAlive()) {
+		} else if (isActiveDead) {
 			const nextIndex = defenderSide.onActiveFighterDeath(this.rng);
 			nextActive = nextIndex === undefined ? undefined : defenderSide.getActiveFighter();
-		} else {
-			defenderSide.resetAtb();
-			const currentActive = defenderSide.getActiveFighter();
-			nextActive = currentActive.isAlive() ? currentActive : undefined;
 		}
 
 		this.events.death.fire({

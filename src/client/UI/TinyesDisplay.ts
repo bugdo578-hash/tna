@@ -7,6 +7,7 @@ const gui = new Instance("ScreenGui");
 gui.Name = UITheme.Tinyes.ScreenGuiName;
 gui.ResetOnSpawn = false;
 gui.DisplayOrder = UITheme.Tinyes.DisplayOrder;
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling;
 const label = new Instance("TextLabel");
 label.Name = "Balance";
 label.Position = UITheme.Tinyes.Position;
