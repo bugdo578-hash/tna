@@ -21,7 +21,7 @@ export const JONATHAN_SKILL_DATA: SkillDataSlots = [
 		hits: [
 			{ time: 0.1, damageShare: 1 / 3, followUp: true },
 			{ time: 0.25, damageShare: 1 / 3, followUp: true },
-			{ time: 0.4, damageShare: 1 / 3, followUp: false, hamonStatusEffects: ["Burn"], hamonEffectCondition: "vampireOrClassCounter" },
+			{ time: 0.4, damageShare: 1 / 3, followUp: false },
 		],
 		returnTime: 0.3, dodgeReturnTime: 0.15, hamonChargeCost: 2,
 	},

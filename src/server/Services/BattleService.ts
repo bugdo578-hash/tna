@@ -3,7 +3,7 @@ import {
 	HAMON_MULTI_HIT_CHARGE_COST, HAMON_SINGLE_HIT_CHARGE_COST, MIN_DAMAGE, S3_UNLOCK_LEVEL,
 } from "../../shared/Config";
 import { calcCusto } from "../../shared/MathUtils";
-import { canApplyHamonHitEffects } from "./SkillEffectConditions";
+import { canApplyHamonHitEffects, resolvePendingHamonEffects } from "./SkillEffectConditions";
 import { Signal } from "../../shared/Signal";
 import type { SkillData, SkillHitTimeline } from "../../shared/SkillData";
 import type { BattleGlobalState, HamonConfig, SkillSlot, StatusEffect } from "../../shared/TypeDefs";
@@ -354,8 +354,9 @@ export class BattleService {
 		if (timeline.statusEffects !== undefined) {
 			this.applyEffectsToTarget(targetSide, target, slot, timeline.statusEffects, connectedDamage, timeline.hamonConfig);
 		}
-		if (this.activeAttackHamonConsumed && timeline.hamonStatusEffects !== undefined) {
-			this.applyEffectsToTarget(targetSide, target, slot, timeline.hamonStatusEffects, connectedDamage, timeline.hamonConfig);
+		if (this.activeAttackHamonConsumed) {
+			const hamonEffects = resolvePendingHamonEffects(timeline, attackerSide?.getActiveFighter(), target);
+			if (hamonEffects.size() > 0) this.applyEffectsToTarget(targetSide, target, slot, hamonEffects, connectedDamage, timeline.hamonConfig);
 		}
 	}
 

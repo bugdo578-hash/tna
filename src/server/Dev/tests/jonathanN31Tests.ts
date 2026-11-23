@@ -101,7 +101,7 @@ export function validateJonathanN31(): void {
 	battle.step(1);
 	assertInvariant(jonathan.getHamonCharges() === 3, "S2 renova cargas para 3");
 
-	// 3. S1 = Luck & Pluck: 1 hit, consome 1 carga, aplica ×1,30 do slot S1 sobre D_slot arredondado
+	// 3. S1 = Luck & Pluck: 1 hit, consome 1 carga, aplica ×1,30 do slot S1 e Burn passivo do Hamon em alvo elegível
 	const s1Hits: number[] = [];
 	battle.events.hitResolved.connect((hit) => s1Hits.push(hit.damage));
 	side.setAtb(ATB_MAX);
@@ -111,7 +111,31 @@ export function validateJonathanN31(): void {
 	const s1HamonDamage = calcHamonDamage(s1SlotDamage, HAMON_DEFAULT_SLOT_MULTIPLIERS[1]);
 	const s1Expected = math.max(math.round(s1HamonDamage * 1.175), 1);
 	assertInvariant(s1Hits.size() === 1 && s1Hits[0] === s1Expected, "S1 aplica ×1,30 sobre D_slot arredondado");
+	assertInvariant(enemy.isAlive() && enemy.hasStatusEffect("Burn"), "Passiva do Hamon: S1 com Hamon aplica Burn em Anubis (Menace)");
 	assertInvariant(!ally.hasHamon() && !enemy.hasHamon(), "cargas permanecem individuais após S1");
+
+	// 3b. Passiva de Burn do Hamon na S1: aplica em vampiro/desvantagem com Hamon; não aplica em neutro nem sem Hamon
+	for (const [targetClass, vampire, charges, expectedBurn] of [
+		["Menace", false, 1, true], ["Menace", false, 0, false],
+		["Controller", false, 1, false], ["Controller", true, 1, true],
+	] as const) {
+		const jBase = makeRealFighter("jonathan", rng, 10);
+		const tgt = new Fighter({
+			fighterId: "synthetic_s1_burn", hp: 500, hpMax: 500,
+			stats: { hp: 500, atk: 10, dodge: 0, crit: 0 }, level: 10, className: targetClass as ClassName,
+			slots: jBase.slots, skillData: skills, currentAtbSpeed: BASE_ATB_SPEED, isVampire: vampire,
+		});
+		const s1Side = new BattleSide([jBase], rng);
+		const s1Battle = new BattleService(s1Side, new BattleSide([tgt], rng), rng);
+		if (charges > 0) jBase.applyHamon({ initialCharges: charges });
+		s1Side.setAtb(ATB_MAX);
+		assertInvariant(s1Battle.requestSkill(s1Side, 1), "S1 aceita para teste da passiva de Burn do Hamon");
+		s1Battle.step(1);
+		assertInvariant(
+			tgt.hasStatusEffect("Burn") === expectedBurn,
+			`Passiva Burn Hamon na S1 (class=${targetClass}, vampire=${vampire}, charges=${charges})`,
+		);
+	}
 
 	// 4. Permutação temporária de slots em fixture: [Respiração de Hamon (S1), Sunlight Yellow Overdrive (S2), Luck & Pluck (S3)]
 	const permutedSkills: SkillDataSlots = [skills[1], skills[2], skills[0]];
