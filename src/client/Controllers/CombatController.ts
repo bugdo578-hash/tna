@@ -42,6 +42,7 @@ import type { CombatCameraMode } from "./CombatCutsceneTypes";
 import { BattleFighterMaterialization } from "./BattleFighterMaterialization";
 import { BattleIntroController } from "./BattleIntroController";
 import { BattleRemotes } from "./BattleRemotes";
+import { BattleStatusVfx } from "./BattleStatusVfx";
 import { CombatArenaAnchorResolver, type ResolvedArenaAnchors } from "./CombatArenaAnchors";
 import {
 	areRequiredFightersReady,
@@ -110,6 +111,7 @@ export class CombatController {
 	private readonly pendingDeaths: Map<string, PendingDeathRecord>;
 	private readonly damagePool: CombatDamagePool;
 	private readonly vfxBridge: CombatVfxBridge;
+	private readonly statusVfx: BattleStatusVfx;
 	private readonly standMotion: CombatStandMotion;
 	private readonly billboardPool: BillboardPoolItem[];
 	private readonly hpVisualListeners = new Set<(targetId: string, hp: number, hpMax: number) => void>();
@@ -190,6 +192,11 @@ export class CombatController {
 			getVfxController: () => this.vfxController,
 			getAssetsRoot: () => this.assetsRoot,
 			getGlobalVfxRoot: () => this.getGlobalVfxRoot(),
+			getStageFolder: () => this.stageFolder,
+			isBattleEnded: () => this.battleEnded,
+		});
+		this.statusVfx = new BattleStatusVfx({
+			getAssetsRoot: () => this.assetsRoot,
 			getStageFolder: () => this.stageFolder,
 			isBattleEnded: () => this.battleEnded,
 		});
@@ -1150,6 +1157,10 @@ export class CombatController {
 		const target = this.fightersByTargetId.get(payload.targetId);
 		if (target === undefined) return;
 
+		if (payload.effect === "Burn" && this.statusVfx.applyBurn(target.targetId, target.model)) {
+			return;
+		}
+
 		let emitter = target.effectEmitters.get(payload.effect);
 		if (emitter === undefined) {
 			emitter = new Instance("ParticleEmitter");
@@ -1191,6 +1202,9 @@ export class CombatController {
 	}
 
 	private onEffectExpired(payload: EffectExpiredPayload): void {
+		if (payload.effect === "Burn") {
+			this.statusVfx.removeBurn(payload.targetId);
+		}
 		const target = this.fightersByTargetId.get(payload.targetId);
 		if (target === undefined) return;
 		const emitter = target.effectEmitters.get(payload.effect);
@@ -1202,6 +1216,7 @@ export class CombatController {
 	}
 
 	private onFighterDied(payload: FighterDiedPayload): void {
+		this.statusVfx.removeBurn(payload.fighterId);
 		if (!this.battleEnded && this.fightersByTargetId.has(payload.fighterId)) {
 			this.cutsceneController.notifyKo(this.battleVfxGeneration, this.activeBattleId);
 		}
@@ -1301,6 +1316,7 @@ export class CombatController {
 			battleCleanupStep("fighter base", () => entry.model.PivotTo(entry.homeCFrame));
 		}
 		this.damagePool.clear();
+		battleCleanupStep("status vfx clear", () => this.statusVfx.clearAll());
 		battleCleanupStep("cutscene reset", () => this.cutsceneController.resetForBattle());
 		battleCleanupStep("camera restore", () => this.cameraController.restore());
 		battleCleanupStep("stage destroy", () => this.stageFolder?.Destroy());

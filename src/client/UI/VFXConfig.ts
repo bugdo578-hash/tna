@@ -4,6 +4,9 @@
 export const VFX_MODULE_NAME = "Part_Icles";
 export const VFX_TEMPLATES_FOLDER_NAME = "vfxs";
 export const BATTLE_SPAWN_VFX_TEMPLATE_NAME = "spawnvfx";
+export const BATTLE_BURN_VFX_TEMPLATE_NAME = "BurnDot";
+export const BATTLE_BURN_CORE_EMITTER_NAME = "foginlowpoly";
+export const BATTLE_BURN_IMPACT_EMITTER_NAME = "fogo bloco";
 
 /** Nome do RemoteEvent opcional de VFX de mundo em `ReplicatedStorage`. */
 export const VFX_REMOTE_EVENT_NAME = "VFXEvent";
