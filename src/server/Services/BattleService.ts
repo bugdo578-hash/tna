@@ -20,6 +20,7 @@ function isSelfOrNoDamageHit(hit: SkillHitTimeline, skill?: SkillData): boolean 
 
 function getAttackHamonChargeCost(timeline: SkillData): number {
 	if (timeline.effectTarget === "self") return 0;
+	if (timeline.hamonChargeCost !== undefined) return math.max(math.floor(timeline.hamonChargeCost), 0);
 	let offensiveHits = 0;
 	for (const hit of timeline.hits) {
 		if (!isSelfOrNoDamageHit(hit, timeline)) offensiveHits += 1;
@@ -67,9 +68,7 @@ export interface BattleEvents {
 export class BattleService {
 	private readonly damageBySide = new Map<BattleSide, Map<string, number>>();
 
-	public getDamageDealt(side: BattleSide, itemUuid: string): number {
-		return this.damageBySide.get(side)?.get(itemUuid) ?? 0;
-	}
+	public getDamageDealt(side: BattleSide, itemUuid: string): number { return this.damageBySide.get(side)?.get(itemUuid) ?? 0; }
 
 	private recordDamage(source: Fighter | undefined, damage: number): void {
 		if (source === undefined || source.itemUuid === undefined || damage <= 0) return;

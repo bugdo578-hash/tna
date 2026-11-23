@@ -1,4 +1,5 @@
 import { ATB_SYNC_INTERVAL_SECONDS, MIN_CLIENT_FIGHTER_INDEX, S3_UNLOCK_LEVEL } from "../../shared/Config";
+import { getSkillId } from "../../shared/SkillData";
 import type {
 	AttackStartedPayload,
 	AtbSyncPayload,
@@ -36,11 +37,12 @@ export class BattleSessionPresentation {
 				};
 				this.sendToParticipants(session, (player) => this.remoteService.sendSwitchPerformed(player, payload));
 			}),
-			events.attackStarted.connect(({ attacker, target, slot }) => {
+			events.attackStarted.connect(({ attacker, target, slot, skillData }) => {
 				const payload: AttackStartedPayload = {
 					attackerId: this.getFighterId(session, attacker),
 					targetId: this.getFighterId(session, target),
 					slot,
+					skillId: getSkillId(skillData, `S${slot}`),
 				};
 				this.sendToParticipants(session, (player) => this.remoteService.sendAttackStarted(player, payload));
 			}),
@@ -123,6 +125,11 @@ export class BattleSessionPresentation {
 					hpMax: fighter.hpMax,
 					active: sessionSide.activeIndex === index,
 					slotCosts: [fighter.slots[0].cost, fighter.slots[1].cost, fighter.slots[2].cost],
+					skillIds: [
+						getSkillId(fighter.skillData[0], "S1"),
+						getSkillId(fighter.skillData[1], "S2"),
+						getSkillId(fighter.skillData[2], "S3"),
+					],
 				});
 			}
 		}

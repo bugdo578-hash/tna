@@ -104,6 +104,8 @@ export interface BattleFighterSnapshot {
 	readonly active: boolean;
 	/** Custos de ATB dos 3 slots (S1, S2, S3) rolados no servidor para este lutador. */
 	readonly slotCosts?: readonly [number, number, number];
+	/** Identidades estáveis das habilidades equipadas nos slots S1, S2 e S3. */
+	readonly skillIds?: readonly [string, string, string];
 }
 
 export interface BattleArenaPayload {
@@ -143,6 +145,8 @@ export interface AttackStartedPayload {
 	readonly attackerId: string;
 	readonly targetId: string;
 	readonly slot: SkillSlot;
+	/** Identidade estável da habilidade executada, independente do slot S1/S2/S3. */
+	readonly skillId?: string;
 }
 
 export interface HitResolvedPayload {

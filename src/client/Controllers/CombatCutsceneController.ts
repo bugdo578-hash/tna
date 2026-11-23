@@ -29,6 +29,7 @@ export interface CutsceneStartRequest {
 	readonly fighterId: string;
 	readonly slot: SkillSlot;
 	readonly skillId?: string;
+	readonly skillName?: string;
 	readonly attacker: CutsceneFighterRef;
 	readonly target: CutsceneFighterRef;
 }
@@ -138,6 +139,7 @@ export class CombatCutsceneController {
 			fighterId: request.fighterId,
 			slot: request.slot,
 			skillId: request.skillId,
+			skillName: request.skillName,
 		});
 		if (definition === undefined) return false;
 

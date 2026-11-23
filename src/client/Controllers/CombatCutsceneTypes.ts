@@ -65,8 +65,10 @@ export interface CameraCutsceneDefinition {
 export interface CutsceneSkillLookup {
 	readonly fighterId: string;
 	readonly slot: SkillSlot;
-	/** Identificador estável opcional da habilidade (ex.: `timeline.name` ou ID dedicado). */
+	/** Identificador estável opcional da habilidade (ex.: `timeline.id`). */
 	readonly skillId?: string;
+	/** Nome opcional da habilidade para compatibilidade com registros legados por `timeline.name`. */
+	readonly skillName?: string;
 }
 
 /** Pose final já avaliada em espaço de mundo pronta para ser aplicada pelo `CombatCameraController`. */

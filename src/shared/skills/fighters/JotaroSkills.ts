@@ -4,6 +4,7 @@ import type { SkillDataSlots } from "../SkillTypes";
 export const JOTARO_SKILL_DATA: SkillDataSlots = [
 	// S1 star_Finger (Dedinhos): 1 hit. Só dano (cegueira é FUTURO).
 	{
+		id: "jotaro_star_finger",
 		name: "star_Finger",
 		prepareTime: 0.25,
 		hits: [{ time: 0.15, damageShare: 1, followUp: false }],
@@ -12,6 +13,7 @@ export const JOTARO_SKILL_DATA: SkillDataSlots = [
 	},
 	// S2 Barragem_estelar (ORA ORA): 5 hits, damageShare igual (soma 1). Sem Stun.
 	{
+		id: "jotaro_barragem_estelar",
 		name: "Barragem_estelar",
 		prepareTime: 0.3,
 		hits: [
@@ -26,6 +28,7 @@ export const JOTARO_SKILL_DATA: SkillDataSlots = [
 	},
 	// S3 Time Stop: 1 hit forte provisório (Time Stop real é FUTURO).
 	{
+		id: "jotaro_time_stop",
 		name: "Time Stop",
 		prepareTime: 0.4,
 		hits: [{ time: 0.25, damageShare: 1, followUp: false }],

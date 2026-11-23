@@ -1,12 +1,17 @@
 import { getFighterDefinition } from "../../../shared/FighterData";
 import {
 	ANUBIS_SKILL_DATA,
+	findSkillById,
+	getSkillId,
+	JONATHAN_SKILL_DATA,
 	JOTARO_SKILL_DATA,
+	resolveEquippedSkillSlots,
 	type SkillData,
 	type SkillDataSlots,
 	type SkillHitTimeline,
 } from "../../../shared/SkillData";
 import { ANUBIS_SKILL_DATA as ANUBIS_MODULE_SKILLS } from "../../../shared/skills/fighters/AnubisSkills";
+import { JONATHAN_SKILL_DATA as JONATHAN_MODULE_SKILLS } from "../../../shared/skills/fighters/JonathanSkills";
 import { JOTARO_SKILL_DATA as JOTARO_MODULE_SKILLS } from "../../../shared/skills/fighters/JotaroSkills";
 import { SKILL_REGISTRY } from "../../../shared/skills/SkillRegistry";
 import { assertInvariant } from "./testHelpers";
@@ -72,4 +77,39 @@ export function validateSkillRegistry(): void {
 	assertSkill(anubis[2], "Adaptação", [0.4, 0.35, 0.15], [
 		{ time: 0.25, damageShare: 1, followUp: false },
 	]);
+
+	// Identidades estáveis de habilidades (N3.1.1) e nova ordem do Jonathan (S1 Luck & Pluck, S2 Respiração de Hamon, S3 Sunlight Yellow Overdrive).
+	const jonathan: SkillDataSlots = SKILL_REGISTRY.jonathan;
+	assertInvariant(jonathan === JONATHAN_SKILL_DATA && jonathan === JONATHAN_MODULE_SKILLS, "tupla compartilhada de Jonathan");
+	assertInvariant(getFighterDefinition("jonathan").skills === jonathan, "FighterData deve usar as skills de Jonathan");
+	assertInvariant(
+		getSkillId(jonathan[0]) === "jonathan_luck_and_pluck" &&
+			getSkillId(jonathan[1]) === "jonathan_hamon_breathing" &&
+			getSkillId(jonathan[2]) === "jonathan_sunlight_yellow_overdrive",
+		"Jonathan deve possuir S1=Luck & Pluck, S2=Respiração de Hamon, S3=Sunlight Yellow Overdrive com IDs estáveis",
+	);
+	assertInvariant(
+		getSkillId(jotaro[0]) === "jotaro_star_finger" &&
+			getSkillId(jotaro[1]) === "jotaro_barragem_estelar" &&
+			getSkillId(jotaro[2]) === "jotaro_time_stop" &&
+			getSkillId(anubis[0]) === "anubis_boomerang" &&
+			getSkillId(anubis[1]) === "anubis_possessao" &&
+			getSkillId(anubis[2]) === "anubis_adaptacao",
+		"Jotaro e Anubis devem manter habilidades originais com IDs estáveis",
+	);
+	for (const slots of [jotaro, anubis, jonathan]) {
+		for (const skill of slots) {
+			const id = getSkillId(skill);
+			assertInvariant(findSkillById(id) === skill, `findSkillById deve resolver ${id}`);
+		}
+	}
+	const permuted = resolveEquippedSkillSlots(jonathan, [
+		"jonathan_sunlight_yellow_overdrive",
+		"jonathan_luck_and_pluck",
+		"jonathan_hamon_breathing",
+	]);
+	assertInvariant(
+		permuted[0] === jonathan[2] && permuted[1] === jonathan[0] && permuted[2] === jonathan[1],
+		"resolveEquippedSkillSlots deve reordenar habilidades por identidade estável",
+	);
 }

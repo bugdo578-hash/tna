@@ -4,6 +4,7 @@ import type { SkillDataSlots } from "../SkillTypes";
 export const ANUBIS_SKILL_DATA: SkillDataSlots = [
 	// S1 Boomerang: 1 hit.
 	{
+		id: "anubis_boomerang",
 		name: "Boomerang",
 		prepareTime: 0.25,
 		hits: [{ time: 0.15, damageShare: 1, followUp: false }],
@@ -12,6 +13,7 @@ export const ANUBIS_SKILL_DATA: SkillDataSlots = [
 	},
 	// S2 Possessão: 1 hit no alvo (dano espalhado é FUTURO).
 	{
+		id: "anubis_possessao",
 		name: "Possessão",
 		prepareTime: 0.3,
 		hits: [{ time: 0.2, damageShare: 1, followUp: false }],
@@ -20,6 +22,7 @@ export const ANUBIS_SKILL_DATA: SkillDataSlots = [
 	},
 	// S3 Adaptação: 1 hit provisório (Modo de Adaptação é FUTURO).
 	{
+		id: "anubis_adaptacao",
 		name: "Adaptação",
 		prepareTime: 0.4,
 		hits: [{ time: 0.25, damageShare: 1, followUp: false }],

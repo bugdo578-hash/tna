@@ -44,6 +44,11 @@ export interface CombatStandMotionHost {
 	readonly isFollowUpCancelled: () => boolean;
 }
 
+function isBarrageAdvanceSkill(attacker: StandMotionFighter, timeline: SkillData): boolean {
+	if (timeline.id !== undefined) return timeline.id === "jotaro_barragem_estelar";
+	return attacker.fighterId.lower() === "jotaro" && timeline.name === "Barragem_estelar";
+}
+
 /** Movimentação e animações placeholder de corpo/Stand; recursos registrados pelo host. */
 export class CombatStandMotion {
 	public constructor(private readonly host: CombatStandMotionHost) {}
@@ -53,15 +58,16 @@ export class CombatStandMotion {
 		target: StandMotionFighter,
 		timeline: SkillData,
 		attackToken: number,
-		slot: SkillSlot,
+		_slot: SkillSlot,
 		consumeHit: (hitIndex: number) => void,
 	): void {
 		const isSelfOnly = timeline.effectTarget === "self" || timeline.hits.every((hit) => hit.kind === "self" || hit.noDamage === true || hit.damageShare <= 0);
+		const isBarrageAdvance = isBarrageAdvanceSkill(attacker, timeline);
 		const startCFrame = attacker.homeCFrame;
 		const targetPos = target.homeCFrame.Position;
 		const advanceFraction = isSelfOnly
 			? 0
-			: attacker.fighterId.lower() === "jotaro" && slot === 2
+			: isBarrageAdvance
 				? PLACEHOLDER_ORA_ADVANCE_FRACTION
 				: PLACEHOLDER_ADVANCE_FRACTION;
 		const approachPos = startCFrame.Position.Lerp(targetPos, advanceFraction);
@@ -91,9 +97,7 @@ export class CombatStandMotion {
 					this.tweenModelTo(attacker.model, punchCFrame, PLACEHOLDER_STRIKE_TWEEN_SECONDS);
 
 					// Se tiver Stand (ex.: Star Platinum), projeta o Stand levemente à frente no golpe
-					const extraAdvance = attacker.fighterId.lower() === "jotaro" && slot === 2
-						? PLACEHOLDER_ORA_EXTRA_ADVANCE_STUDS
-						: 0;
+					const extraAdvance = isBarrageAdvance ? PLACEHOLDER_ORA_EXTRA_ADVANCE_STUDS : 0;
 					this.pulseStandStrike(attacker, PLACEHOLDER_STAND_STRIKE_STUDS + extraAdvance);
 				}
 

@@ -28,7 +28,7 @@ import type {
 	HitResolvedPayload,
 	SwitchPerformedPayload,
 } from "../../shared/Remotes";
-import { JOTARO_SKILL_DATA, type SkillData } from "../../shared/SkillData";
+import { findSkillById, JOTARO_SKILL_DATA, resolveEquippedSkillSlots, type SkillData, type SkillDataSlots } from "../../shared/SkillData";
 import type { SkillSlot, StatusEffect } from "../../shared/TypeDefs";
 import { battleCleanupStep } from "./BattleCleanup";
 import { CombatCameraController, resolveSideCameraAnchor } from "./CombatCameraController";
@@ -82,6 +82,7 @@ interface FighterVisualEntry {
 	active: boolean;
 	dead: boolean;
 	homeCFrame: CFrame;
+	readonly equippedSkills: SkillDataSlots;
 	readonly effectEmitters: Map<StatusEffect, ParticleEmitter>;
 }
 
@@ -565,6 +566,9 @@ export class CombatController {
 			this.prepareModelPhysics(clonedModel, rootPart);
 			clonedModel.PivotTo(homeCFrame);
 
+			const fighterDef = findFighterDefinition(snapshot.fighterId) ?? findFighterDefinition(snapshot.fighterId.lower());
+			const equippedSkills = resolveEquippedSkillSlots(fighterDef?.skills ?? JOTARO_SKILL_DATA, snapshot.skillIds);
+
 			const entry: FighterVisualEntry = {
 				targetId: snapshot.targetId,
 				fighterId: snapshot.fighterId,
@@ -586,6 +590,7 @@ export class CombatController {
 				active: snapshot.active,
 				dead: snapshot.hp <= 0,
 				homeCFrame,
+				equippedSkills,
 				effectEmitters: new Map<StatusEffect, ParticleEmitter>(),
 			};
 
@@ -832,12 +837,10 @@ export class CombatController {
 		}
 	}
 
-	private resolveSkillTimeline(fighterId: string, slot: SkillSlot): SkillData {
-		const def = findFighterDefinition(fighterId) ?? findFighterDefinition(fighterId.lower());
-		if (def !== undefined) {
-			return def.skills[slot - 1];
-		}
-		return JOTARO_SKILL_DATA[slot - 1];
+	private resolveSkillTimeline(attacker: FighterVisualEntry, slot: SkillSlot, skillId?: string): SkillData {
+		const byId = findSkillById(skillId);
+		if (byId !== undefined) return byId;
+		return attacker.equippedSkills[slot - 1];
 	}
 
 	private onHitResolved(payload: HitResolvedPayload): void {
@@ -892,7 +895,7 @@ export class CombatController {
 		const attackToken = this.currentAttackToken;
 		this.followUpCancelledForCurrentAttack = false;
 
-		const timeline = this.resolveSkillTimeline(attacker.fighterId, payload.slot);
+		const timeline = this.resolveSkillTimeline(attacker, payload.slot, payload.skillId);
 		const totalHits = timeline.hits.size();
 		const attackState: ActiveAttackState = { token: attackToken, attacker, target, timeline, slot: payload.slot };
 		this.activeAttack = attackState;
@@ -926,7 +929,8 @@ export class CombatController {
 			attackToken: token,
 			fighterId: attacker.fighterId,
 			slot,
-			skillId: timeline.name,
+			skillId: timeline.id ?? timeline.name,
+			skillName: timeline.name,
 			attacker: { targetId: attacker.targetId, model: attacker.model, rootPart: attacker.rootPart },
 			target: { targetId: target.targetId, model: target.model, rootPart: target.rootPart },
 		});
@@ -945,11 +949,18 @@ export class CombatController {
 		slot: SkillSlot,
 		timeline: SkillData,
 	): AnimationTrack | undefined {
-		const animName = timeline.name ?? `S${slot}`;
+		const candidateNames: string[] = [];
+		for (const candidate of [timeline.animationName, timeline.id, timeline.name, `S${slot}`]) {
+			if (candidate !== undefined && candidate.size() > 0 && !candidateNames.includes(candidate)) {
+				candidateNames.push(candidate);
+			}
+		}
 		const findAnimationInstance = (root: Instance): Animation | undefined => {
-			for (const child of root.GetDescendants()) {
-				if (child.IsA("Animation") && (child.Name === animName || child.Name === `S${slot}`)) {
-					if (child.AnimationId.size() > 0) return child;
+			for (const candidate of candidateNames) {
+				for (const child of root.GetDescendants()) {
+					if (child.IsA("Animation") && child.Name === candidate && child.AnimationId.size() > 0) {
+						return child;
+					}
 				}
 			}
 			return undefined;
@@ -993,6 +1004,9 @@ export class CombatController {
 		attackToken: number,
 		slot: SkillSlot,
 	): void {
+		const isBarrageAdvance = timeline.id !== undefined
+			? timeline.id === "jotaro_barragem_estelar"
+			: attacker.fighterId.lower() === "jotaro" && timeline.name === "Barragem_estelar";
 		const totalHits = timeline.hits.size();
 		for (const index of $range(1, totalHits)) {
 			const scheduledHit = timeline.hits[index - 1];
@@ -1007,7 +1021,7 @@ export class CombatController {
 				if (this.hitQueue.isHitConsumed(index) || this.followUpCancelledForCurrentAttack) return;
 				if (!target.dead && !isNoDamageHit) {
 					this.pulseStandStrike(attacker, PLACEHOLDER_STAND_STRIKE_STUDS +
-						(attacker.fighterId.lower() === "jotaro" && slot === 2 ? PLACEHOLDER_ORA_EXTRA_ADVANCE_STUDS : 0));
+						(isBarrageAdvance ? PLACEHOLDER_ORA_EXTRA_ADVANCE_STUDS : 0));
 				}
 				this.spawnBattle(() => {
 					this.waitForAndConsumeHitIndex(index, attacker, target, timeline, attackToken, slot);

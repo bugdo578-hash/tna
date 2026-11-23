@@ -157,12 +157,23 @@ export class CombatVfxBridge {
 		timeline: SkillData,
 		slot: SkillSlot,
 	): ResolvedBattleVfx | undefined {
-		const skillName = timeline.name ?? `S${slot}`;
-		const slotName = `S${slot}`;
+		const candidates: string[] = [];
+		for (const candidate of [timeline.vfxName, timeline.id, timeline.name, `S${slot}`]) {
+			if (candidate !== undefined && candidate.size() > 0 && !candidates.includes(candidate)) {
+				candidates.push(candidate);
+			}
+		}
+		const findFirst = (container: Instance): Instance | undefined => {
+			for (const name of candidates) {
+				const found = container.FindFirstChild(name);
+				if (found !== undefined) return found;
+			}
+			return undefined;
+		};
 
 		const modelVfx = attacker.model.FindFirstChild(VFX_ASSETS_FOLDER_NAME);
 		if (modelVfx !== undefined) {
-			const direct = modelVfx.FindFirstChild(skillName) ?? modelVfx.FindFirstChild(slotName);
+			const direct = findFirst(modelVfx);
 			if (direct !== undefined) {
 				return { instance: direct, isInModel: true, key: `model:${attacker.targetId}:${direct.Name}` };
 			}
@@ -174,7 +185,7 @@ export class CombatVfxBridge {
 		const fighterVfx =
 			vfxRoot.FindFirstChild(attacker.fighterId) ?? vfxRoot.FindFirstChild(attacker.fighterId.lower());
 		if (fighterVfx !== undefined) {
-			const found = fighterVfx.FindFirstChild(skillName) ?? fighterVfx.FindFirstChild(slotName);
+			const found = findFirst(fighterVfx);
 			if (found !== undefined) {
 				return { instance: found, isInModel: false, key: `fighter:${attacker.fighterId.lower()}:${found.Name}` };
 			}

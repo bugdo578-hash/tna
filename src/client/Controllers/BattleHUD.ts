@@ -18,7 +18,7 @@ import type {
 	StateChangedPayload,
 	SwitchPerformedPayload,
 } from "../../shared/Remotes";
-import { JOTARO_SKILL_DATA, type SkillDataSlots } from "../../shared/SkillData";
+import { JOTARO_SKILL_DATA, resolveEquippedSkillSlots, type SkillDataSlots } from "../../shared/SkillData";
 import type { BattleGlobalState, SkillSlot, StatusEffect } from "../../shared/TypeDefs";
 import { HudBattleResult } from "../UI/HudBattleResult";
 import { HudFighterStatus, type HudFighterState } from "../UI/HudFighterStatus";
@@ -436,6 +436,7 @@ export class BattleHUD {
 		} else if (snapshot.fighterId.size() > 0) {
 			displayName = snapshot.fighterId.sub(1, 1).upper() + snapshot.fighterId.sub(2);
 		}
+		skillTemplates = resolveEquippedSkillSlots(skillTemplates, snapshot.skillIds);
 
 		const iconText = displayName.sub(1, 2).upper();
 		const slotCosts: readonly [number, number, number] = snapshot.slotCosts ?? UITheme.Numbers.DefaultSlotCosts;

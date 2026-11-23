@@ -76,17 +76,18 @@ export class CombatCutsceneRegistry {
 
 	/**
 	 * Resolve a cutscene cadastrada para um ataque.
-	 * Prioridade: cadastro específico `(fighterId, slot)` -> cadastro por `skillId` estável.
+	 * Prioridade: identidade estável (`skillId` -> `skillName`) -> fallback legado `(fighterId, slot)`.
 	 */
 	public resolve(query: CutsceneSkillLookup): CameraCutsceneDefinition | undefined {
-		const slotKey = buildFighterSlotCutsceneKey(query.fighterId, query.slot);
-		const bySlot = this.byFighterSlot.get(slotKey);
-		if (bySlot !== undefined) return bySlot;
-
 		if (query.skillId !== undefined && query.skillId.size() > 0) {
-			return this.bySkillId.get(normalizeSkillId(query.skillId));
+			const byId = this.bySkillId.get(normalizeSkillId(query.skillId));
+			if (byId !== undefined) return byId;
 		}
-		return undefined;
+		if (query.skillName !== undefined && query.skillName.size() > 0) {
+			const byName = this.bySkillId.get(normalizeSkillId(query.skillName));
+			if (byName !== undefined) return byName;
+		}
+		return this.byFighterSlot.get(buildFighterSlotCutsceneKey(query.fighterId, query.slot));
 	}
 
 	public getRegisteredCount(): number {
