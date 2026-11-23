@@ -64,7 +64,7 @@ export const DAMAGE_BILLBOARD_SIZE_DOT = new UDim2(0, 68, 0, 26);
 export const DAMAGE_BILLBOARD_SIZE_BANNER = new UDim2(0, 220, 0, 64); // sem uso hoje
 
 // Apresentação visual dedicada aos popups de dano de Burn (cor térmica, brilho incandescente, escala 1,24x, posição externa e tremidinha).
-export const BURN_DAMAGE_TEXT_COLOR = Color3.fromRGB(255, 60, 28);
+export const BURN_DAMAGE_TEXT_COLOR = Color3.fromRGB(219, 148, 18);
 export const BURN_DAMAGE_STROKE_COLOR = Color3.fromRGB(255, 212, 38);
 export const BURN_DAMAGE_STROKE_TRANSPARENCY = 0;
 export const BURN_DAMAGE_UI_STROKE_THICKNESS = 2.5;

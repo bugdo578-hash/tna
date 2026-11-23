@@ -12,6 +12,7 @@ import { battleCleanupStep } from "./BattleCleanup";
 interface StatusPartIclesApi extends PartIclesApi {
 	readonly Connection?: RBXScriptConnection;
 	EnableEmit(this: StatusPartIclesApi, item: Instance, link?: Instance, emitCtx?: unknown): void;
+	SoftDisable(this: StatusPartIclesApi, item: Instance): void;
 	Disable(this: StatusPartIclesApi, item: Instance): void;
 	SetEmitParent(this: StatusPartIclesApi, item: Instance, parent: Instance): void;
 }
@@ -96,6 +97,33 @@ function disableDescendantCollision(root: Instance): void {
 }
 
 /**
+ * Pré-registra o modelo do lutador na ExcludeList do OnHit de `foginlowpoly` para que
+ * os primeiros fragmentos não sejam desperdiçados colidindo com o próprio corpo.
+ */
+function addFighterToOnHitExcludeList(corePart: BasePart, fighterModel: Model): void {
+	const props = corePart.FindFirstChild("PartIcleProperties");
+	const onHit = props?.FindFirstChild("Events")?.FindFirstChild("OnHit");
+	if (!onHit?.IsA("Configuration")) return;
+
+	let excludeList = onHit.FindFirstChild("ExcludeList");
+	if (excludeList === undefined) {
+		excludeList = new Instance("Folder");
+		excludeList.Name = "ExcludeList";
+		excludeList.Parent = onHit;
+	}
+	if (!excludeList.IsA("Folder")) return;
+
+	for (const child of excludeList.GetChildren()) {
+		if (child.IsA("ObjectValue") && child.Value === fighterModel) return;
+	}
+	const ref = new Instance("ObjectValue");
+	ref.Name = "AutoIgnoreHumanoid";
+	ref.Value = fighterModel;
+	ref.SetAttribute("_AutoIgnoreHumanoid", true);
+	ref.Parent = excludeList;
+}
+
+/**
  * Gerencia o VFX customizado de Burn (`ReplicatedStorage.vfxs.BurnDot`):
  * - Clona os `ParticleEmitter`s diretos de `BurnDot` nas partes do corpo (cabeça, torso, braços e pernas)
  *   ajustando o `Rate` por membro para manter a densidade equilibrada.
@@ -174,6 +202,7 @@ export class BattleStatusVfx {
 				const clonedCore = coreTemplate.Clone();
 				clonedCore.Name = `StatusVFX_Burn_${BATTLE_BURN_CORE_EMITTER_NAME}_${targetId}`;
 				disableDescendantCollision(clonedCore);
+				addFighterToOnHitExcludeList(clonedCore, model);
 
 				const impactChild = clonedCore.FindFirstChild(BATTLE_BURN_IMPACT_EMITTER_NAME);
 				if (impactChild?.IsA("BasePart")) {
@@ -263,7 +292,11 @@ export class BattleStatusVfx {
 		if (corePart === undefined || corePart.Parent === undefined) return;
 		const api = this.ensurePartIcles();
 		if (api === undefined) return;
-		battleCleanupStep("burn core emit", () => api.EnableEmit(corePart));
+		battleCleanupStep("burn core emit", () => {
+			// SoftDisable encerra o loop anterior sem matar partículas já emitidas, permitindo reemissão consecutiva.
+			api.SoftDisable(corePart);
+			api.EnableEmit(corePart);
+		});
 	}
 
 	private cancelTailCleanup(handle: ActiveBurnVfx): void {
