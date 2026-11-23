@@ -10,9 +10,13 @@ import {
 import type { BattleTransitionAck, BattleTransitionPayload } from "../../shared/Remotes";
 import { BattleIntroOverlay } from "../UI/BattleIntroOverlay";
 import {
+	BATTLE_INTRO_COVER_FADE_SECONDS,
+	BATTLE_INTRO_EXIT_COVER_FADE_SECONDS,
 	BATTLE_INTRO_EXIT_REPLICATION_SECONDS,
 	BATTLE_INTRO_FADE_SECONDS,
 	BATTLE_INTRO_GO_HOLD_SECONDS,
+	BATTLE_INTRO_LOADING_CONTENT_FADE_IN_SECONDS,
+	BATTLE_INTRO_LOADING_CONTENT_FADE_OUT_SECONDS,
 	BATTLE_INTRO_LOCAL_GRACE_SECONDS,
 } from "../UI/CombatVisualConfig";
 import { battleCleanupStep } from "./BattleCleanup";
@@ -26,6 +30,8 @@ interface IntroState {
 	readonly id: number;
 	readonly overlay: BattleIntroOverlay;
 	deadline: number;
+	coverStartedAt: number;
+	loadingStartedAt?: number;
 	covered: boolean;
 	coverFramePending: boolean;
 	ready: boolean;
@@ -36,6 +42,7 @@ interface IntroState {
 	fadeFinished: boolean;
 	goShownAt?: number;
 	exit?: Exit;
+	exitStartedAt?: number;
 	exitCovered: boolean;
 	finish?: () => void;
 }
@@ -107,7 +114,8 @@ export class BattleIntroController {
 		if (state?.id !== id || !this.owns(id)) return;
 		state.cancelled = true;
 		this.cancelMaterialization(id);
-		state.overlay.cover(false);
+		state.overlay.stopLoadingAnimation();
+		state.overlay.cover(false, true);
 		this.onCancelled?.(id);
 		this.send(id, "failed");
 	}
@@ -161,17 +169,20 @@ export class BattleIntroController {
 			if (state?.id !== id || !this.owns(id)) return;
 			state.cancelled = true;
 			this.cancelMaterialization(id);
-			overlay.cover(false);
+			overlay.stopLoadingAnimation();
+			overlay.cover(false, true);
 			this.onCancelled?.(id);
 			this.send(id, "cancel");
 		});
+		const now = Workspace.GetServerTimeNow();
 		const state: IntroState = {
 			id, overlay, covered: false, coverFramePending: true, ready: false, cancelled: false, released: false,
 			cameraFinal: false, fadeFinished: false, exitCovered: false,
-			deadline: Workspace.GetServerTimeNow() + BATTLE_COVER_TIMEOUT_SECONDS + BATTLE_INTRO_LOCAL_GRACE_SECONDS,
+			coverStartedAt: now,
+			deadline: now + BATTLE_COVER_TIMEOUT_SECONDS + BATTLE_INTRO_LOCAL_GRACE_SECONDS,
 		};
 		this.current = state;
-		overlay.cover(true);
+		overlay.cover(true, false);
 		this.ensureRender();
 		const [ok, captured] = pcall(this.captureCamera);
 		if (!ok || !captured) this.failed(id);
@@ -198,6 +209,12 @@ export class BattleIntroController {
 		}
 		if (state.exit !== undefined) {
 			if (!state.exitCovered) {
+				if (state.exitStartedAt === undefined) state.exitStartedAt = now;
+				const exitElapsed = math.max(now - state.exitStartedAt, 0);
+				const exitCover = math.clamp(exitElapsed / BATTLE_INTRO_EXIT_COVER_FADE_SECONDS, 0, 1);
+				const easedExitCover = exitCover * exitCover * (3 - 2 * exitCover);
+				state.overlay.setCurtainTransparency(1 - easedExitCover);
+				if (exitCover < 1) return;
 				state.exitCovered = true;
 				this.send(state.id, "exitCovered");
 				return;
@@ -218,17 +235,37 @@ export class BattleIntroController {
 		}
 		if (state.cancelled) return;
 		if (!state.covered) {
+			const coverElapsed = math.max(now - state.coverStartedAt, 0);
+			const coverProgress = math.clamp(coverElapsed / BATTLE_INTRO_COVER_FADE_SECONDS, 0, 1);
+			const easedCover = coverProgress * coverProgress * (3 - 2 * coverProgress);
+			state.overlay.setCurtainTransparency(1 - easedCover);
+			if (coverProgress < 1) return;
 			state.covered = true;
+			state.loadingStartedAt = now;
 			state.deadline = now + BATTLE_LOADING_TIMEOUT_SECONDS + BATTLE_INTRO_LOCAL_GRACE_SECONDS;
+			state.overlay.startLoadingAnimation();
 			this.send(state.id, "covered");
 		}
 		const schedule = this.schedule;
-		if (schedule === undefined) return;
+		const loadingElapsed = math.max(now - (state.loadingStartedAt ?? now), 0);
+		const contentFadeIn = math.clamp(loadingElapsed / BATTLE_INTRO_LOADING_CONTENT_FADE_IN_SECONDS, 0, 1);
+		if (schedule === undefined) {
+			state.overlay.updateLoading(loadingElapsed, 1 - contentFadeIn);
+			return;
+		}
+		const curtainFade = math.clamp(1 + (now - schedule.arcAt) / BATTLE_INTRO_FADE_SECONDS, 0, 1);
+		const fadeOutStart = schedule.arcAt - BATTLE_INTRO_FADE_SECONDS - BATTLE_INTRO_LOADING_CONTENT_FADE_OUT_SECONDS * 0.6;
+		const rawFadeOut = math.clamp((now - fadeOutStart) / BATTLE_INTRO_LOADING_CONTENT_FADE_OUT_SECONDS, 0, 1);
+		const contentFadeOut = math.max(rawFadeOut * rawFadeOut * (3 - 2 * rawFadeOut), curtainFade);
+		if (contentFadeOut < 1) {
+			state.overlay.updateLoading(loadingElapsed, math.max(1 - contentFadeIn, contentFadeOut));
+		} else {
+			state.overlay.stopLoadingAnimation();
+		}
 		if (!state.fadeFinished) {
-			const fade = math.clamp(1 + (now - schedule.arcAt) / BATTLE_INTRO_FADE_SECONDS, 0, 1);
-			if (fade === 0) return;
-			state.overlay.reveal(fade * fade * (3 - 2 * fade));
-			state.fadeFinished = fade === 1;
+			if (curtainFade === 0) return;
+			state.overlay.reveal(curtainFade * curtainFade * (3 - 2 * curtainFade));
+			state.fadeFinished = curtainFade === 1;
 		}
 		if (now < schedule.arcAt) return;
 		const progress = math.clamp((now - schedule.arcAt) / BATTLE_CAMERA_ARC_SECONDS, 0, 1);
@@ -268,9 +305,11 @@ export class BattleIntroController {
 	private coverExit(state: IntroState, payload: Exit): void {
 		this.cancelMaterialization(state.id);
 		state.exit = payload;
+		state.exitStartedAt = undefined;
 		state.coverFramePending = true;
+		state.overlay.stopLoadingAnimation();
 		state.overlay.gui.Enabled = true;
-		state.overlay.cover(false);
+		state.overlay.cover(false, false);
 		state.deadline = Workspace.GetServerTimeNow() + BATTLE_EXIT_COVER_TIMEOUT_SECONDS + BATTLE_INTRO_LOCAL_GRACE_SECONDS;
 		this.ensureRender();
 	}
