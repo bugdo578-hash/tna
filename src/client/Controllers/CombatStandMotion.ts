@@ -56,25 +56,35 @@ export class CombatStandMotion {
 		slot: SkillSlot,
 		consumeHit: (hitIndex: number) => void,
 	): void {
+		const isSelfOnly = timeline.effectTarget === "self" || timeline.hits.every((hit) => hit.kind === "self" || hit.noDamage === true || hit.damageShare <= 0);
 		const startCFrame = attacker.homeCFrame;
 		const targetPos = target.homeCFrame.Position;
-		const advanceFraction = attacker.fighterId.lower() === "jotaro" && slot === 2
-			? PLACEHOLDER_ORA_ADVANCE_FRACTION
-			: PLACEHOLDER_ADVANCE_FRACTION;
+		const advanceFraction = isSelfOnly
+			? 0
+			: attacker.fighterId.lower() === "jotaro" && slot === 2
+				? PLACEHOLDER_ORA_ADVANCE_FRACTION
+				: PLACEHOLDER_ADVANCE_FRACTION;
 		const approachPos = startCFrame.Position.Lerp(targetPos, advanceFraction);
-		const strikeBaseCFrame = CFrame.lookAt(approachPos, targetPos);
+		const strikeBaseCFrame = isSelfOnly ? startCFrame : CFrame.lookAt(approachPos, targetPos);
 
 		const firstHitTime = timeline.hits.size() > 0 ? math.max(timeline.hits[0].time, 0.05) : 0.1;
-		this.tweenModelTo(attacker.model, strikeBaseCFrame, firstHitTime * 0.8);
+		if (!isSelfOnly) {
+			this.tweenModelTo(attacker.model, strikeBaseCFrame, firstHitTime * 0.8);
+		}
 
 		const totalHits = timeline.hits.size();
 		for (const index of $range(1, totalHits)) {
 			const hitSpec = timeline.hits[index - 1];
+			const isNoDamageHit =
+				hitSpec?.kind === "self" ||
+				hitSpec?.noDamage === true ||
+				timeline.effectTarget === "self" ||
+				(hitSpec !== undefined && hitSpec.damageShare <= 0);
 			this.host.delayBattle(hitSpec.time, () => {
 				if (!this.host.isAttackCurrent(attackToken)) return;
 				if (this.host.isFollowUpCancelled() && index > 1) return;
 
-				if (!target.dead) {
+				if (!target.dead && !isNoDamageHit) {
 					// Pequeno avanço/soco a cada hit do slot (inclusive multi-hit como Barragem_estelar)
 					const punchOffset = strikeBaseCFrame.LookVector.mul(index % 2 === 1 ? 0.55 : 0.35);
 					const punchCFrame = strikeBaseCFrame.add(punchOffset);

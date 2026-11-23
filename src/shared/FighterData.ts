@@ -2,7 +2,7 @@ import { CLASS_DATA } from "./ClassData";
 import { clamp, lerp } from "./MathUtils";
 import { SKILL_REGISTRY, type RealFighterId } from "./skills/SkillRegistry";
 import type { SkillDataSlots } from "./skills/SkillTypes";
-import type { ClassName, NumericRange, Rarity, StatBlock } from "./TypeDefs";
+import type { ClassName, HamonConfig, NumericRange, Rarity, StatBlock } from "./TypeDefs";
 
 export type { RealFighterId } from "./skills/SkillRegistry";
 
@@ -12,6 +12,7 @@ export interface FighterDefinition {
 	readonly className: ClassName;
 	readonly rarity: Rarity;
 	readonly skills: SkillDataSlots;
+	readonly hamonConfig?: HamonConfig;
 }
 
 export const FIGHTER_DATA: Readonly<Record<RealFighterId, FighterDefinition>> = {

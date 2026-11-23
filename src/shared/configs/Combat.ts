@@ -1,5 +1,5 @@
-// Constantes de combate (ATB, dano, crítico, dodge, efeitos e Root).
-import type { NumericRange, SkillSlot } from "../TypeDefs";
+// Constantes de combate (ATB, dano, crítico, dodge, efeitos, Root e Hamon).
+import type { HamonSlotMultipliers, NumericRange, SkillSlot } from "../TypeDefs";
 
 export const ATB_MIN = 0;
 export const ATB_MAX = 10;
@@ -56,4 +56,15 @@ export const ROOT_DURATION_BY_SLOT: Readonly<Record<SkillSlot, number>> = {
 	1: 5,
 	2: 8,
 	3: 12,
+};
+
+export const HAMON_DEFAULT_MAX_CHARGES = 3;
+export const HAMON_DEFAULT_DURATION_SECONDS = 30;
+export const HAMON_SINGLE_HIT_CHARGE_COST = 1;
+export const HAMON_MULTI_HIT_CHARGE_COST = 2;
+
+export const HAMON_DEFAULT_SLOT_MULTIPLIERS: HamonSlotMultipliers = {
+	1: 1.3,
+	2: 1.8,
+	3: 2.2,
 };

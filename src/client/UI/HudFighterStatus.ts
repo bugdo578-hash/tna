@@ -6,6 +6,13 @@ import type { ClassName, StatusEffect } from "../../shared/TypeDefs";
 import { battleCleanupStep } from "../Controllers/BattleCleanup";
 import { UITheme } from "./UITheme";
 
+export interface HudEffectMeta {
+	readonly duration: number;
+	readonly remainingDuration: number;
+	readonly charges?: number;
+	readonly maxCharges?: number;
+}
+
 export interface HudFighterState {
 	readonly targetId: string;
 	readonly fighterId: string;
@@ -24,6 +31,7 @@ export interface HudFighterState {
 	active: boolean;
 	dead: boolean;
 	readonly effects: Set<StatusEffect>;
+	readonly effectMeta?: Map<StatusEffect, HudEffectMeta>;
 }
 
 export interface StatusCardWidgets {
@@ -36,7 +44,8 @@ export interface StatusCardWidgets {
 	readonly hpValueLabel: TextLabel;
 	readonly atbFill: Frame;
 	readonly atbValueLabel: TextLabel;
-	readonly statusBadges: Readonly<Record<StatusEffect, TextLabel>>;
+	readonly statusBadges: Readonly<Record<string, TextLabel>>;
+	readonly genericStatusBadge?: TextLabel;
 	readonly atbMarkers: readonly {
 		readonly root: Frame;
 		readonly line: Frame;
@@ -249,26 +258,42 @@ export class HudFighterStatus {
 		badgeRow.BackgroundTransparency = UITheme.Transparency.Hidden;
 		badgeRow.Parent = header;
 
-		const effectsOrder: readonly StatusEffect[] = ["Burn", "Bleed", "Root"];
-		const statusBadges = {} as Record<StatusEffect, TextLabel>;
+		const effectsOrder: readonly StatusEffect[] = ["Burn", "Bleed", "Root", "Hamon"];
+		const statusBadges = {} as Record<string, TextLabel>;
+		const badgeStep = 1 / effectsOrder.size();
+		const badgeWidth = badgeStep - 0.02;
 		for (const idx of $range(0, effectsOrder.size() - 1)) {
 			const effect = effectsOrder[idx];
 			const badge = this.host.createTextLabel(
 				badgeRow,
 				`Badge_${effect}`,
-				UDim2.fromScale(idx * 0.34, 0),
-				UITheme.Layout.StatusBadgeItemSize,
-				UITheme.Texts.StatusShortLabels[effect],
+				UDim2.fromScale(idx * badgeStep, 0),
+				UDim2.fromScale(badgeWidth, 1),
+				UITheme.Texts.StatusShortLabels[effect] ?? effect.upper(),
 				UITheme.Fonts.Bold,
 				UITheme.Colors.TextPrimary,
 				Enum.TextXAlignment.Center,
 			);
-			badge.BackgroundColor3 = UITheme.StatusColors[effect];
+			badge.BackgroundColor3 = UITheme.StatusColors[effect] ?? UITheme.Colors.PanelSecondary;
 			badge.BackgroundTransparency = UITheme.Transparency.Opaque;
 			badge.Visible = false;
 			this.host.applyCorner(badge, UITheme.CornerRadius.Badge);
 			statusBadges[effect] = badge;
 		}
+		const genericStatusBadge = this.host.createTextLabel(
+			badgeRow,
+			"Badge_Generic",
+			UDim2.fromScale((effectsOrder.size() - 1) * badgeStep, 0),
+			UDim2.fromScale(badgeWidth, 1),
+			"BUFF",
+			UITheme.Fonts.Bold,
+			UITheme.Colors.TextPrimary,
+			Enum.TextXAlignment.Center,
+		);
+		genericStatusBadge.BackgroundColor3 = UITheme.Colors.PanelSecondary;
+		genericStatusBadge.BackgroundTransparency = UITheme.Transparency.Opaque;
+		genericStatusBadge.Visible = false;
+		this.host.applyCorner(genericStatusBadge, UITheme.CornerRadius.Badge);
 
 		// Barra de HP
 		const hpTrack = new Instance("Frame");
@@ -409,6 +434,7 @@ export class HudFighterStatus {
 			atbFill,
 			atbValueLabel,
 			statusBadges,
+			genericStatusBadge,
 			atbMarkers,
 		};
 	}
@@ -433,8 +459,29 @@ export class HudFighterStatus {
 		hpTween.Play();
 		card.hpValueLabel.Text = UITheme.Texts.FormatHp(fighter.hp, fighter.hpMax);
 
-		for (const effect of ["Burn", "Bleed", "Root"] as const) {
-			card.statusBadges[effect].Visible = fighter.effects.has(effect);
+		for (const effect of ["Burn", "Bleed", "Root", "Hamon"] as const) {
+			const badge = card.statusBadges[effect];
+			if (badge !== undefined) {
+				badge.Visible = fighter.effects.has(effect);
+			}
+		}
+		if (card.genericStatusBadge !== undefined) {
+			let unknownEffect: string | undefined;
+			for (const activeEffect of fighter.effects) {
+				if (card.statusBadges[activeEffect] === undefined) {
+					unknownEffect = tostring(activeEffect);
+					break;
+				}
+			}
+			if (unknownEffect !== undefined) {
+				const shortMap = UITheme.Texts.StatusShortLabels as Readonly<Record<string, string>>;
+				const colorMap = UITheme.StatusColors as Readonly<Record<string, Color3>>;
+				card.genericStatusBadge.Text = shortMap[unknownEffect] ?? unknownEffect.sub(1, 5).upper();
+				card.genericStatusBadge.BackgroundColor3 = colorMap[unknownEffect] ?? UITheme.Colors.PanelSecondary;
+				card.genericStatusBadge.Visible = true;
+			} else {
+				card.genericStatusBadge.Visible = false;
+			}
 		}
 
 		if (isPlayer) {

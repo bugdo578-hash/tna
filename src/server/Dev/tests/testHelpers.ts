@@ -114,9 +114,11 @@ export function runBattleWithSides(
 		if (verbose) print(`attackStarted: ${attacker.fighterId} (${attacker.className}) S${slot} -> ${target.fighterId} (${target.className})`);
 	});
 
-	battle.events.hitResolved.connect(({ hitIndex, hit, crit, damage, target, followUpCancelled }) => {
+	battle.events.hitResolved.connect(({ hitIndex, hit, crit, damage, target, followUpCancelled, noDamage }) => {
 		assertInvariant(hitIndex >= 1, "hitIndex deve começar em 1");
-		if (hit) {
+		if (noDamage) {
+			assertInvariant(hit && !crit && damage === 0 && !followUpCancelled, "hit sem dano não pode ser esquivado, crítico nem cancelar follow-up");
+		} else if (hit) {
 			assertInvariant(damage >= MIN_HIT_DAMAGE, "dano de acerto abaixo do mínimo");
 			assertInvariant(!followUpCancelled, "acerto não pode cancelar follow-up");
 		} else {
@@ -134,7 +136,7 @@ export function runBattleWithSides(
 	battle.events.effectApplied.connect(({ side, target, effect, duration: effectDuration, totalDamage, renewed }) => {
 		assertInvariant(target.isAlive() && target.localState !== "CAIDO", "efeito aplicado em lutador caído");
 		assertInvariant(target.hasStatusEffect(effect), "efeito aplicado não consta no lutador");
-		assertInvariant(target.statusEffects.size() <= 3, "efeitos empilharam indevidamente");
+		assertInvariant(target.statusEffects.size() <= 4, "efeitos empilharam indevidamente");
 		if (effect === "Bleed" || effect === "Burn") {
 			assertInvariant(totalDamage > 0, "DoT aplicado sem dano real");
 		}

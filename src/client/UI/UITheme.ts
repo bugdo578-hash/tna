@@ -281,6 +281,7 @@ export const UITheme = {
 		Burn: Color3.fromRGB(255, 140, 42),
 		Bleed: Color3.fromRGB(235, 58, 68),
 		Root: Color3.fromRGB(190, 125, 255),
+		Hamon: Color3.fromRGB(255, 212, 72),
 	} as Readonly<Record<StatusEffect, Color3>>,
 
 	Transparency: {
@@ -473,6 +474,7 @@ export const UITheme = {
 			Burn: "BURN",
 			Bleed: "BLEED",
 			Root: "ROOT",
+			Hamon: "HAMON",
 		} as Readonly<Record<StatusEffect, string>>,
 		FormatHp: (hp: number, hpMax: number): string => `${math.ceil(math.max(hp, 0))} / ${math.ceil(hpMax)}`,
 		FormatAtb: (atb: number, atbMax: number): string => `${ string.format("%.1f", math.clamp(atb, 0, atbMax)) } / ${atbMax}`,

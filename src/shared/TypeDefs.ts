@@ -11,7 +11,18 @@ export type BattleGlobalState = "IDLE" | "PREPARE" | "ATTACK" | "RETURN";
 export type FighterLocalState = "NORMAL" | "CARREGANDO" | "CAIDO";
 
 /** Efeitos de status ativos no lançamento do Mundo 1. */
-export type StatusEffect = "Burn" | "Bleed" | "Root";
+export type StatusEffect = "Burn" | "Bleed" | "Root" | "Hamon";
+
+/** Multiplicadores por slot para habilidades potenciadas por Hamon. */
+export type HamonSlotMultipliers = Readonly<Record<SkillSlot, number>>;
+
+/** Configuração reutilizável do buff de Hamon por habilidade ou lutador. */
+export interface HamonConfig {
+	readonly maxCharges?: number;
+	readonly initialCharges?: number;
+	readonly durationSeconds?: number;
+	readonly slotMultipliers?: Partial<HamonSlotMultipliers>;
+}
 
 /** Índice de slot de habilidade (S1, S2, S3). */
 export type SkillSlot = 1 | 2 | 3;

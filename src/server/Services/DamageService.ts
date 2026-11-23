@@ -13,12 +13,19 @@ export interface HitResult {
 }
 
 export class DamageService {
-	public resolveHit(attacker: Fighter, defender: Fighter, slot: SkillSlot, damageShare: number, rng: () => number): HitResult {
+	public resolveHit(
+		attacker: Fighter,
+		defender: Fighter,
+		slot: SkillSlot,
+		damageShare: number,
+		rng: () => number,
+		baseDamageMultiplier = 1,
+	): HitResult {
 		const dodgeChance = (defender.stats.dodge * DODGE_PERCENT_PER_POINT) / PERCENTAGE_BASE;
 		if (rng() < dodgeChance) return { hit: false, crit: false, damage: 0 };
 
 		const skill = attacker.slots[slot - 1];
-		const baseDamage = calcDano(attacker.stats.atk, skill.mult, attacker.level) * damageShare;
+		const baseDamage = calcDano(attacker.stats.atk, skill.mult, attacker.level) * damageShare * baseDamageMultiplier;
 		const counterMultiplier = calcCounterMult(attacker.className, defender.className);
 		const normalHitDamage = math.max(math.round(baseDamage * counterMultiplier), MIN_HIT_DAMAGE);
 		const critChance = (attacker.stats.crit * CRIT_PERCENT_PER_POINT) / PERCENTAGE_BASE;

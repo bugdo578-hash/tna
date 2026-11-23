@@ -994,11 +994,17 @@ export class CombatController {
 	): void {
 		const totalHits = timeline.hits.size();
 		for (const index of $range(1, totalHits)) {
+			const scheduledHit = timeline.hits[index - 1];
+			const isNoDamageHit =
+				scheduledHit?.kind === "self" ||
+				scheduledHit?.noDamage === true ||
+				timeline.effectTarget === "self" ||
+				(scheduledHit !== undefined && scheduledHit.damageShare <= 0);
 			const markerName = `Hit${index}`;
 			this.battleConnections.add(track.GetMarkerReachedSignal(markerName).Connect(() => {
 				if (this.currentAttackToken !== attackToken || this.battleEnded) return;
 				if (this.hitQueue.isHitConsumed(index) || this.followUpCancelledForCurrentAttack) return;
-				if (!target.dead) {
+				if (!target.dead && !isNoDamageHit) {
 					this.pulseStandStrike(attacker, PLACEHOLDER_STAND_STRIKE_STUDS +
 						(attacker.fighterId.lower() === "jotaro" && slot === 2 ? PLACEHOLDER_ORA_EXTRA_ADVANCE_STUDS : 0));
 				}
@@ -1008,7 +1014,6 @@ export class CombatController {
 			}));
 
 			// Fallback se o marker não disparar na AnimationTrack: usa o tempo de SkillData + HIT_RESULT_WAIT_SECONDS
-			const scheduledHit = timeline.hits[index - 1];
 			this.delayBattle(scheduledHit.time + HIT_RESULT_WAIT_SECONDS, () => {
 				if (this.currentAttackToken !== attackToken || this.battleEnded) return;
 				if (!this.hitQueue.isHitConsumed(index)) {
@@ -1082,6 +1087,16 @@ export class CombatController {
 		slot?: SkillSlot,
 	): void {
 		const target = this.fightersByTargetId.get(result.targetId) ?? fallbackTarget;
+		const scheduledHit = timeline?.hits[result.hitIndex - 1];
+		const isNoDamageHit =
+			result.noDamage === true ||
+			scheduledHit?.kind === "self" ||
+			scheduledHit?.noDamage === true ||
+			timeline?.effectTarget === "self" ||
+			(result.hit && result.damage <= 0);
+		if (isNoDamageHit) {
+			return;
+		}
 
 		if (!result.hit) {
 			// Miss / Dodge: movimento lateral de esquiva + "DODGE" no BillboardGui, sem número e sem reduzir HP
@@ -1116,6 +1131,7 @@ export class CombatController {
 
 	private onEffectApplied(payload: EffectAppliedPayload): void {
 		if (this.battleEnded) return;
+		if (payload.effect === "Hamon") return;
 		const target = this.fightersByTargetId.get(payload.targetId);
 		if (target === undefined) return;
 

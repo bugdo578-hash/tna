@@ -1,72 +1,57 @@
 import {
-	ATB_COST_RANGES,
-	DOT_TICK_INTERVAL_SECONDS,
-	FLOAT_TOLERANCE,
-	MIN_DAMAGE,
-	S3_UNLOCK_LEVEL,
+	ATB_COST_RANGES, DOT_TICK_INTERVAL_SECONDS, FLOAT_TOLERANCE,
+	HAMON_MULTI_HIT_CHARGE_COST, HAMON_SINGLE_HIT_CHARGE_COST, MIN_DAMAGE, S3_UNLOCK_LEVEL,
 } from "../../shared/Config";
 import { calcCusto } from "../../shared/MathUtils";
 import { Signal } from "../../shared/Signal";
 import type { SkillData, SkillHitTimeline } from "../../shared/SkillData";
-import type { BattleGlobalState, SkillSlot, StatusEffect } from "../../shared/TypeDefs";
+import type { BattleGlobalState, HamonConfig, SkillSlot, StatusEffect } from "../../shared/TypeDefs";
 import { BattleSide, type FighterIndex } from "../Components/BattleSide";
 import type { DotStatusEffect, Fighter } from "../Components/Fighter";
 import { ATBService } from "./ATBService";
 import { DamageService, type HitResult } from "./DamageService";
 
-const STATUS_EFFECT_ORDER: readonly StatusEffect[] = ["Bleed", "Burn", "Root"];
+const STATUS_EFFECT_ORDER: readonly StatusEffect[] = ["Bleed", "Burn", "Root", "Hamon"];
+
+function isSelfOrNoDamageHit(hit: SkillHitTimeline, skill?: SkillData): boolean {
+	return hit.kind === "self" || hit.noDamage === true || skill?.effectTarget === "self" || hit.damageShare <= 0;
+}
+
+function getAttackHamonChargeCost(timeline: SkillData): number {
+	if (timeline.effectTarget === "self") return 0;
+	let offensiveHits = 0;
+	for (const hit of timeline.hits) {
+		if (!isSelfOrNoDamageHit(hit, timeline)) offensiveHits += 1;
+	}
+	return offensiveHits <= 0 ? 0 : offensiveHits === 1 ? HAMON_SINGLE_HIT_CHARGE_COST : HAMON_MULTI_HIT_CHARGE_COST;
+}
 
 export { Signal };
 
 export interface AttackStartedEvent {
-	readonly attacker: Fighter;
-	readonly target: Fighter;
-	readonly slot: SkillSlot;
-	readonly skillData: SkillData;
+	readonly attacker: Fighter; readonly target: Fighter; readonly slot: SkillSlot; readonly skillData: SkillData;
 }
-
 export interface SwitchPerformedEvent {
-	readonly side: BattleSide;
-	readonly previousFighter: Fighter;
-	readonly activeFighter: Fighter;
+	readonly side: BattleSide; readonly previousFighter: Fighter; readonly activeFighter: Fighter;
 }
-
 export interface HitResolvedEvent extends HitResult {
-	readonly hitIndex: number;
-	readonly target: Fighter;
-	readonly followUpCancelled: boolean;
+	readonly hitIndex: number; readonly target: Fighter; readonly followUpCancelled: boolean; readonly noDamage?: boolean;
 }
-
 export interface FighterDeathEvent {
-	readonly side: BattleSide;
-	readonly fighter: Fighter;
-	readonly nextActive: Fighter | undefined;
+	readonly side: BattleSide; readonly fighter: Fighter; readonly nextActive: Fighter | undefined;
 }
-
 export interface EffectAppliedEvent {
-	readonly side: BattleSide;
-	readonly target: Fighter;
-	readonly effect: StatusEffect;
-	readonly slot: SkillSlot;
-	readonly duration: number;
-	readonly totalDamage: number;
-	readonly renewed: boolean;
+	readonly side: BattleSide; readonly target: Fighter; readonly effect: StatusEffect; readonly slot: SkillSlot;
+	readonly duration: number; readonly totalDamage: number; readonly renewed: boolean;
+	readonly charges?: number; readonly maxCharges?: number; readonly remainingDuration?: number;
 }
-
 export interface EffectTickEvent {
-	readonly side: BattleSide;
-	readonly target: Fighter;
-	readonly effect: DotStatusEffect;
-	readonly damage: number;
-	readonly remainingTicks: number;
+	readonly side: BattleSide; readonly target: Fighter; readonly effect: DotStatusEffect;
+	readonly damage: number; readonly remainingTicks: number;
 }
-
 export interface EffectExpiredEvent {
-	readonly side: BattleSide;
-	readonly target: Fighter;
-	readonly effect: StatusEffect;
+	readonly side: BattleSide; readonly target: Fighter; readonly effect: StatusEffect;
 }
-
 export interface BattleEvents {
 	readonly state: Signal<BattleGlobalState>;
 	readonly switchPerformed: Signal<SwitchPerformedEvent>;
@@ -99,6 +84,7 @@ export class BattleService {
 			return;
 		}
 	}
+
 	state: BattleGlobalState = "IDLE";
 	readonly events: BattleEvents = {
 		state: new Signal<BattleGlobalState>(),
@@ -123,17 +109,16 @@ export class BattleService {
 	private connectedTarget: Fighter | undefined;
 	private connectedTargetSide: BattleSide | undefined;
 	private connectedDamageOnTarget = 0;
+	private selfSkillResolved = false;
+	private activeAttackHamonConsumed = false;
+	private activeAttackHamonMultiplier = 1;
 	private returnDuration = 0;
 	private nextTickSideIndex: 0 | 1 = 0;
 	private battleEnded = false;
 	// Provisório: manter o ativo morto até terminar ATTACK; ignorar os hits restantes.
 	private pendingSwitchSide: BattleSide | undefined;
 
-	public constructor(
-		firstSide: BattleSide,
-		secondSide: BattleSide,
-		private readonly rng: () => number,
-	) {
+	public constructor(firstSide: BattleSide, secondSide: BattleSide, private readonly rng: () => number) {
 		this.sides = [firstSide, secondSide];
 	}
 
@@ -141,11 +126,7 @@ export class BattleService {
 		if (this.state !== "IDLE" || this.battleEnded || !this.sides.includes(side)) return false;
 		const previousFighter = side.getActiveFighter();
 		if (!side.trocar(index)) return false;
-		this.events.switchPerformed.fire({
-			side,
-			previousFighter,
-			activeFighter: side.getActiveFighter(),
-		});
+		this.events.switchPerformed.fire({ side, previousFighter, activeFighter: side.getActiveFighter() });
 		return true;
 	}
 
@@ -159,22 +140,39 @@ export class BattleService {
 		const timeline = fighter.skillData[slot - 1];
 		const range = ATB_COST_RANGES[slot];
 		const cost = calcCusto(slot, roll.t);
-		if (
-			math.abs(roll.cost - cost) > FLOAT_TOLERANCE ||
-			roll.cost < range.min ||
-			roll.cost > range.max ||
-			side.atb < cost
-		)
+		if (math.abs(roll.cost - cost) > FLOAT_TOLERANCE || roll.cost < range.min || roll.cost > range.max || side.atb < cost) {
 			return false;
+		}
 		if (timeline.hits.size() === 0) return false;
 
 		side.setAtb(side.atb - cost);
+		const requiredHamonCharges = getAttackHamonChargeCost(timeline);
+		let hamonConsumed = false;
+		let hamonMultiplier = 1;
+		if (requiredHamonCharges > 0 && fighter.canConsumeHamon(requiredHamonCharges)) {
+			const expectedMultiplier = fighter.getHamonSlotMultiplier(slot, timeline.hamonDamageMultiplier);
+			const updatedHamon = fighter.consumeHamonCharges(requiredHamonCharges);
+			if (updatedHamon !== undefined) {
+				hamonConsumed = true;
+				hamonMultiplier = expectedMultiplier;
+				this.events.effectApplied.fire({
+					side, target: fighter, effect: "Hamon", slot: updatedHamon.slot,
+					duration: updatedHamon.duration, totalDamage: 0, renewed: true,
+					charges: updatedHamon.charges, maxCharges: updatedHamon.maxCharges,
+					remainingDuration: updatedHamon.remainingDuration,
+				});
+			}
+		}
+
 		this.attackerSide = side;
 		this.skillSlot = slot;
 		this.skillData = timeline;
 		this.connectedTarget = undefined;
 		this.connectedTargetSide = undefined;
 		this.connectedDamageOnTarget = 0;
+		this.selfSkillResolved = false;
+		this.activeAttackHamonConsumed = hamonConsumed;
+		this.activeAttackHamonMultiplier = hamonMultiplier;
 		this.nextHitIndex = 0;
 		this.phaseElapsed = 0;
 		this.returnDuration = timeline.returnTime;
@@ -254,7 +252,6 @@ export class BattleService {
 				if (!this.battleEnded && remaining > 0) this.tickIdle(remaining);
 				return;
 			}
-
 			return;
 		}
 	}
@@ -266,22 +263,38 @@ export class BattleService {
 		if (side === undefined || slot === undefined || skillData === undefined) return;
 		const defenderSide = side === this.sides[0] ? this.sides[1] : this.sides[0];
 		this.events.attackStarted.fire({
-			attacker: side.getActiveFighter(),
-			target: defenderSide.getActiveFighter(),
-			slot,
-			skillData,
+			attacker: side.getActiveFighter(), target: defenderSide.getActiveFighter(), slot, skillData,
 		});
 	}
 
 	private resolveScheduledHit(hitTimeline: SkillHitTimeline, hitIndex: number, totalHits: number): boolean {
 		const side = this.attackerSide;
 		const slot = this.skillSlot;
+		const timeline = this.skillData;
 		if (side === undefined || slot === undefined) return false;
 		const defenderSide = side === this.sides[0] ? this.sides[1] : this.sides[0];
-		if (this.pendingSwitchSide === defenderSide) return false;
 		const attacker = side.getActiveFighter();
+
+		if (isSelfOrNoDamageHit(hitTimeline, timeline)) {
+			if (!attacker.isAlive()) return false;
+			this.selfSkillResolved = true;
+			this.events.hitResolved.fire({
+				hitIndex, target: attacker, followUpCancelled: false, hit: true, crit: false, damage: 0, noDamage: true,
+			});
+			if (hitTimeline.statusEffects !== undefined) {
+				this.applyEffectsToTarget(side, attacker, slot, hitTimeline.statusEffects, 0, timeline?.hamonConfig);
+			}
+			if (this.activeAttackHamonConsumed && hitTimeline.hamonStatusEffects !== undefined) {
+				this.applyEffectsToTarget(side, attacker, slot, hitTimeline.hamonStatusEffects, 0, timeline?.hamonConfig);
+			}
+			return false;
+		}
+
+		if (this.pendingSwitchSide === defenderSide) return false;
 		const target = defenderSide.getActiveFighter();
-		const result = this.damageService.resolveHit(attacker, target, slot, hitTimeline.damageShare, this.rng);
+		const result = this.damageService.resolveHit(
+			attacker, target, slot, hitTimeline.damageShare, this.rng, this.activeAttackHamonMultiplier,
+		);
 		const followUpCancelled = !result.hit && totalHits === 1;
 		let realDamage = 0;
 		if (result.hit) {
@@ -300,7 +313,10 @@ export class BattleService {
 			}
 
 			if (target.isAlive() && hitTimeline.statusEffects !== undefined) {
-				this.applyEffectsToTarget(defenderSide, target, slot, hitTimeline.statusEffects, realDamage);
+				this.applyEffectsToTarget(defenderSide, target, slot, hitTimeline.statusEffects, realDamage, timeline?.hamonConfig);
+			}
+			if (target.isAlive() && this.activeAttackHamonConsumed && hitTimeline.hamonStatusEffects !== undefined) {
+				this.applyEffectsToTarget(defenderSide, target, slot, hitTimeline.hamonStatusEffects, realDamage, timeline?.hamonConfig);
 			}
 		}
 
@@ -315,41 +331,58 @@ export class BattleService {
 
 	private resolvePendingSkillEffects(timeline: SkillData): void {
 		const slot = this.skillSlot;
+		const attackerSide = this.attackerSide;
+		if (slot === undefined) return;
+
+		if (timeline.effectTarget === "self" && attackerSide !== undefined) {
+			const attacker = attackerSide.getActiveFighter();
+			if (!this.selfSkillResolved || !attacker.isAlive()) return;
+			if (timeline.statusEffects !== undefined) {
+				this.applyEffectsToTarget(attackerSide, attacker, slot, timeline.statusEffects, 0, timeline.hamonConfig);
+			} else if (timeline.hamonConfig !== undefined) {
+				this.applyEffectsToTarget(attackerSide, attacker, slot, ["Hamon"], 0, timeline.hamonConfig);
+			}
+			if (this.activeAttackHamonConsumed && timeline.hamonStatusEffects !== undefined) {
+				this.applyEffectsToTarget(attackerSide, attacker, slot, timeline.hamonStatusEffects, 0, timeline.hamonConfig);
+			}
+			return;
+		}
+
 		const target = this.connectedTarget;
 		const targetSide = this.connectedTargetSide;
 		const connectedDamage = this.connectedDamageOnTarget;
-		if (
-			slot === undefined ||
-			timeline.statusEffects === undefined ||
-			target === undefined ||
-			targetSide === undefined ||
-			connectedDamage <= 0 ||
-			!target.isAlive()
-		)
-			return;
+		if (target === undefined || targetSide === undefined || connectedDamage <= 0 || !target.isAlive()) return;
 
-		this.applyEffectsToTarget(targetSide, target, slot, timeline.statusEffects, connectedDamage);
+		if (timeline.statusEffects !== undefined) {
+			this.applyEffectsToTarget(targetSide, target, slot, timeline.statusEffects, connectedDamage, timeline.hamonConfig);
+		}
+		if (this.activeAttackHamonConsumed && timeline.hamonStatusEffects !== undefined) {
+			this.applyEffectsToTarget(targetSide, target, slot, timeline.hamonStatusEffects, connectedDamage, timeline.hamonConfig);
+		}
 	}
 
 	private applyEffectsToTarget(
-		targetSide: BattleSide,
-		target: Fighter,
-		slot: SkillSlot,
-		effects: readonly StatusEffect[],
-		realDamage: number,
+		targetSide: BattleSide, target: Fighter, slot: SkillSlot,
+		effects: readonly StatusEffect[], realDamage: number, hamonConfig?: HamonConfig,
 	): void {
 		for (const effect of effects) {
+			if (effect === "Hamon") {
+				const appliedHamon = target.applyHamon(hamonConfig, slot);
+				if (appliedHamon === undefined) continue;
+				this.events.effectApplied.fire({
+					side: targetSide, target, effect: "Hamon", slot,
+					duration: appliedHamon.activeEffect.duration, totalDamage: 0, renewed: appliedHamon.renewed,
+					charges: appliedHamon.activeEffect.charges, maxCharges: appliedHamon.activeEffect.maxCharges,
+					remainingDuration: appliedHamon.activeEffect.remainingDuration,
+				});
+				continue;
+			}
 			const applied = target.applyStatusEffect(effect, slot, realDamage, this.attackerSide?.getActiveFighter());
 			if (applied === undefined) continue;
 			const totalDamage = applied.activeEffect.kind === "dot" ? applied.activeEffect.totalDamage : 0;
 			this.events.effectApplied.fire({
-				side: targetSide,
-				target,
-				effect,
-				slot,
-				duration: applied.activeEffect.duration,
-				totalDamage,
-				renewed: applied.renewed,
+				side: targetSide, target, effect, slot,
+				duration: applied.activeEffect.duration, totalDamage, renewed: applied.renewed,
 			});
 		}
 	}
@@ -366,11 +399,7 @@ export class BattleService {
 			nextActive = nextIndex === undefined ? undefined : defenderSide.getActiveFighter();
 		}
 
-		this.events.death.fire({
-			side: defenderSide,
-			fighter: deadFighter,
-			nextActive,
-		});
+		this.events.death.fire({ side: defenderSide, fighter: deadFighter, nextActive });
 
 		if (defenderSide.isDefeated()) {
 			this.battleEnded = true;
@@ -394,12 +423,9 @@ export class BattleService {
 	}
 
 	private clearSkill(): void {
-		this.attackerSide = undefined;
-		this.skillSlot = undefined;
-		this.skillData = undefined;
-		this.connectedTarget = undefined;
-		this.connectedTargetSide = undefined;
-		this.connectedDamageOnTarget = 0;
+		this.attackerSide = undefined; this.skillSlot = undefined; this.skillData = undefined;
+		this.connectedTarget = undefined; this.connectedTargetSide = undefined; this.connectedDamageOnTarget = 0;
+		this.selfSkillResolved = false; this.activeAttackHamonConsumed = false; this.activeAttackHamonMultiplier = 1;
 		this.nextHitIndex = 0;
 	}
 
@@ -410,47 +436,34 @@ export class BattleService {
 		this.atbService.tick(this.sides[firstIndex], dt);
 		this.atbService.tick(this.sides[secondIndex], dt);
 		this.tickSideStatusEffects(this.sides[firstIndex], dt);
-		if (!this.battleEnded) {
-			this.tickSideStatusEffects(this.sides[secondIndex], dt);
-		}
+		if (!this.battleEnded) this.tickSideStatusEffects(this.sides[secondIndex], dt);
 	}
 
 	private tickSideStatusEffects(side: BattleSide, dt: number): void {
 		if (dt <= 0 || this.battleEnded) return;
-
 		for (const fighter of side.fighters) {
 			if (this.battleEnded) return;
 			if (!fighter.isAlive() || fighter.localState === "CAIDO") continue;
-
 			for (const effectName of STATUS_EFFECT_ORDER) {
 				const activeEffect = fighter.statusEffects.get(effectName);
 				if (activeEffect === undefined) continue;
-
-				if (activeEffect.kind === "root") {
+				if (activeEffect.kind === "root" || activeEffect.kind === "hamon") {
 					activeEffect.remainingDuration -= dt;
 					if (activeEffect.remainingDuration <= FLOAT_TOLERANCE) {
-						fighter.statusEffects.delete("Root");
-						this.events.effectExpired.fire({
-							side,
-							target: fighter,
-							effect: "Root",
-						});
+						fighter.statusEffects.delete(activeEffect.effect);
+						this.events.effectExpired.fire({ side, target: fighter, effect: activeEffect.effect });
 					}
 					continue;
 				}
-
 				activeEffect.elapsed += dt;
 				while (
 					activeEffect.elapsed + FLOAT_TOLERANCE >= DOT_TICK_INTERVAL_SECONDS &&
-					activeEffect.remainingTicks > 0 &&
-					fighter.isAlive() &&
-					!this.battleEnded
+					activeEffect.remainingTicks > 0 && fighter.isAlive() && !this.battleEnded
 				) {
 					activeEffect.elapsed = math.max(activeEffect.elapsed - DOT_TICK_INTERVAL_SECONDS, 0);
 					activeEffect.remainingTicks -= 1;
 					activeEffect.accumulatedDamage += activeEffect.damagePerTick;
 					const isLastTick = activeEffect.remainingTicks === 0;
-
 					let tickDamage = 0;
 					if (isLastTick) {
 						tickDamage = math.max(math.round(activeEffect.accumulatedDamage), MIN_DAMAGE);
@@ -459,28 +472,18 @@ export class BattleService {
 						tickDamage = math.floor(activeEffect.accumulatedDamage + FLOAT_TOLERANCE);
 						activeEffect.accumulatedDamage = math.max(activeEffect.accumulatedDamage - tickDamage, 0);
 					}
-
 					if (tickDamage >= MIN_DAMAGE) {
 						const realDamage = fighter.takeDamage(tickDamage);
 						this.recordDamage(activeEffect.source, realDamage);
 						this.events.effectTick.fire({
-							side,
-							target: fighter,
-							effect: activeEffect.effect,
-							damage: tickDamage,
-							remainingTicks: activeEffect.remainingTicks,
+							side, target: fighter, effect: activeEffect.effect,
+							damage: tickDamage, remainingTicks: activeEffect.remainingTicks,
 						});
 					}
-
 					if (isLastTick) {
 						fighter.statusEffects.delete(activeEffect.effect);
-						this.events.effectExpired.fire({
-							side,
-							target: fighter,
-							effect: activeEffect.effect,
-						});
+						this.events.effectExpired.fire({ side, target: fighter, effect: activeEffect.effect });
 					}
-
 					if (!fighter.isAlive()) {
 						this.handleFighterDeath(side, fighter);
 						break;

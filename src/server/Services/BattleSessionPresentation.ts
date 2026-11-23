@@ -44,7 +44,7 @@ export class BattleSessionPresentation {
 				};
 				this.sendToParticipants(session, (player) => this.remoteService.sendAttackStarted(player, payload));
 			}),
-			events.hitResolved.connect(({ hitIndex, hit, crit, damage, target, followUpCancelled }) => {
+			events.hitResolved.connect(({ hitIndex, hit, crit, damage, target, followUpCancelled, noDamage }) => {
 				session.resolvedHits++;
 				const payload: HitResolvedPayload = {
 					hitIndex,
@@ -53,15 +53,19 @@ export class BattleSessionPresentation {
 					damage,
 					targetId: this.getFighterId(session, target),
 					followUpCancelled,
+					noDamage,
 				};
 				this.sendToParticipants(session, (player) => this.remoteService.sendHitResolved(player, payload));
 			}),
-			events.effectApplied.connect(({ target, effect, duration, renewed }) => {
+			events.effectApplied.connect(({ target, effect, duration, renewed, charges, maxCharges, remainingDuration }) => {
 				const payload: EffectAppliedPayload = {
 					targetId: this.getFighterId(session, target),
 					effect,
 					duration,
 					renewed,
+					charges,
+					maxCharges,
+					remainingDuration,
 				};
 				this.sendToParticipants(session, (player) => this.remoteService.sendEffectApplied(player, payload));
 			}),

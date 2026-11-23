@@ -25,6 +25,7 @@ function makeInventoryFighter(item: FighterInventoryItem): Fighter | undefined {
 		slots: [{ ...item.skills[0] }, { ...item.skills[1] }, { ...item.skills[2] }],
 		skillData: definition.skills,
 		currentAtbSpeed: BASE_ATB_SPEED,
+		hamonConfig: definition.hamonConfig,
 	});
 }
 
@@ -72,6 +73,7 @@ export function makeRealFighter(fighterId: RealFighterId, rng: () => number, lev
 		slots,
 		skillData: definition.skills,
 		currentAtbSpeed: BASE_ATB_SPEED,
+		hamonConfig: definition.hamonConfig,
 	});
 }
 

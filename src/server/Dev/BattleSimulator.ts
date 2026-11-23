@@ -4,6 +4,7 @@ import { validateArenaRegistry } from "./tests/arenaRegistryTests";
 import { validateArenaSelectionL16 } from "./tests/arenaSelectionTests";
 import { validateBattlePreparation } from "./tests/battlePreparationTests";
 import { validateN1DotSessions, validateN1DotSkillTimeline, validateN1DotTicks } from "./tests/dotN1Tests";
+import { validateN2HamonSystem } from "./tests/hamonN2Tests";
 import {
 	runDummy1000Battles,
 	validateBronzeAI,
@@ -78,6 +79,7 @@ export { validatePvpBattles, validatePvpDailyXpAndMinimumFight, validatePvpPairA
 export { validatePvpSideAlternationL21 } from "./tests/pvpSideAlternationTests";
 export { validatePurchaseAndAllocationResults, validateShop } from "./tests/shopTests";
 export { validateStarFinger } from "./tests/starFingerTests";
+export { validateN2HamonSystem } from "./tests/hamonN2Tests";
 export { validateBattleTeardownLifecycle } from "./tests/teardownTests";
 export { validateQuitRequestRateLimit } from "./tests/teardownTests";
 export { validateSlowAutosaveLogoutRetry } from "./tests/persistenceTests";
@@ -117,6 +119,7 @@ export function runSimulation(): void {
 	validateN1DotSkillTimeline();
 	validateN1DotTicks();
 	validateN1DotSessions();
+	validateN2HamonSystem();
 	validatePauseAndQuitRules();
 	validateBronzeAI();
 	validateXpCurveAndTeamDistribution();

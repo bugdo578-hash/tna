@@ -152,6 +152,7 @@ export interface HitResolvedPayload {
 	readonly damage: number;
 	readonly targetId: string;
 	readonly followUpCancelled: boolean;
+	readonly noDamage?: boolean;
 }
 
 export interface EffectAppliedPayload {
@@ -159,6 +160,9 @@ export interface EffectAppliedPayload {
 	readonly effect: StatusEffect;
 	readonly duration: number;
 	readonly renewed: boolean;
+	readonly charges?: number;
+	readonly maxCharges?: number;
+	readonly remainingDuration?: number;
 }
 
 export interface EffectTickPayload {

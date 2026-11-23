@@ -262,7 +262,8 @@ export class BattleHUD {
 			this.lifetime.push(
 				BattleRemotes.hitResolved.OnClientEvent.Connect((payload) => {
 					const hit = payload as HitResolvedPayload;
-					if (!hit.hit) return;
+					const isNoDamageHit = hit.noDamage === true || (hit.hit && hit.damage <= 0);
+					if (!hit.hit || isNoDamageHit) return;
 					const fighter = this.fightersByTargetId.get(hit.targetId);
 					if (fighter !== undefined) {
 						this.applyVisualHpUpdate(hit.targetId, math.max(fighter.hp - hit.damage, 0), fighter.hpMax);
@@ -462,6 +463,7 @@ export class BattleHUD {
 			active: snapshot.active,
 			dead: snapshot.hp <= 0,
 			effects: new Set<StatusEffect>(),
+			effectMeta: new Map(),
 		};
 	}
 
@@ -512,6 +514,12 @@ export class BattleHUD {
 		const fighter = this.fightersByTargetId.get(payload.targetId);
 		if (fighter === undefined || fighter.dead) return;
 		fighter.effects.add(payload.effect);
+		fighter.effectMeta?.set(payload.effect, {
+			duration: payload.duration,
+			remainingDuration: payload.remainingDuration ?? payload.duration,
+			charges: payload.charges,
+			maxCharges: payload.maxCharges,
+		});
 		this.refreshActiveStatusCards();
 		this.refreshTagSlots();
 	}
@@ -521,6 +529,7 @@ export class BattleHUD {
 		const fighter = this.fightersByTargetId.get(payload.targetId);
 		if (fighter === undefined) return;
 		fighter.effects.delete(payload.effect);
+		fighter.effectMeta?.delete(payload.effect);
 		this.refreshActiveStatusCards();
 		this.refreshTagSlots();
 	}
@@ -544,6 +553,7 @@ export class BattleHUD {
 			deadFighter.active = false;
 			deadFighter.hp = 0;
 			deadFighter.effects.clear();
+			deadFighter.effectMeta?.clear();
 		}
 
 		// Regra do jogo: morte do ativo zera ATB do lado; morte no banco preserva o ATB do ativo.
