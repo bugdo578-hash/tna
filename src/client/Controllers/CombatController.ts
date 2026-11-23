@@ -187,6 +187,9 @@ export class CombatController {
 		this.damagePool = new CombatDamagePool({
 			createBattleTween: (object, info, goal) => this.createBattleTween(object, info, goal),
 			delayBattle: (seconds, callback) => this.delayBattle(seconds, callback),
+			trackBattleConnection: (connection) => this.trackBattleConnection(connection),
+			untrackBattleConnection: (connection) => this.untrackBattleConnection(connection),
+			getCamera,
 		});
 		this.vfxBridge = new CombatVfxBridge({
 			getVfxController: () => this.vfxController,
@@ -1198,7 +1201,7 @@ export class CombatController {
 		}
 		this.notifyHpVisualChanged(target.targetId, target.hp, target.hpMax);
 
-		this.damagePool.showDotTick(target.attachments.Cabeca, displayTickDamage, payload.effect);
+		this.damagePool.showDotTick(target.attachments.Cabeca, displayTickDamage, payload.effect, target.model, target.rootPart);
 	}
 
 	private onEffectExpired(payload: EffectExpiredPayload): void {

@@ -53,10 +53,37 @@ export const BENCH_FIGHTER_TRANSPARENCY = 0.55;
 export const DAMAGE_BILLBOARD_POOL_SIZE = 16;
 export const DAMAGE_POPUP_DURATION_SECONDS = 0.65;
 export const DAMAGE_POPUP_RISE_STUDS = 2.0;
+export const DAMAGE_POPUP_BASE_Y_OFFSET_STUDS = 1.2;
+export const DAMAGE_DEFAULT_STROKE_COLOR = Color3.fromRGB(0, 0, 0);
+export const DAMAGE_DEFAULT_STROKE_TRANSPARENCY = 0.15;
 export const DAMAGE_BILLBOARD_SIZE_NORMAL = new UDim2(0, 90, 0, 36);
 export const DAMAGE_BILLBOARD_SIZE_CRIT = new UDim2(0, 130, 0, 52);
 export const DAMAGE_BILLBOARD_SIZE_DOT = new UDim2(0, 68, 0, 26);
 export const DAMAGE_BILLBOARD_SIZE_BANNER = new UDim2(0, 220, 0, 64); // sem uso hoje
+
+// Apresentação visual dedicada aos popups de dano de Burn (cor térmica, escala 1,24x, posição externa e tremidinha).
+export const BURN_DAMAGE_TEXT_COLOR = Color3.fromRGB(255, 60, 28);
+export const BURN_DAMAGE_STROKE_COLOR = Color3.fromRGB(255, 212, 38);
+export const BURN_DAMAGE_STROKE_TRANSPARENCY = 0;
+export const BURN_DAMAGE_SIZE_MULTIPLIER = 1.24;
+export const DAMAGE_BILLBOARD_SIZE_BURN = new UDim2(
+	0,
+	math.round(DAMAGE_BILLBOARD_SIZE_NORMAL.X.Offset * BURN_DAMAGE_SIZE_MULTIPLIER),
+	0,
+	math.round(DAMAGE_BILLBOARD_SIZE_NORMAL.Y.Offset * BURN_DAMAGE_SIZE_MULTIPLIER),
+);
+export const BURN_POPUP_BODY_X_HALF_FRACTION = 0.42;
+export const BURN_POPUP_BODY_Y_HALF_FRACTION = 0.38;
+export const BURN_POPUP_CAMERA_OUTWARD_PADDING_STUDS = 0.35;
+export const BURN_POPUP_CAMERA_Z_OFFSET_STUDS = 0.65;
+export const BURN_POPUP_FALLBACK_HALF_WIDTH_STUDS = 0.9;
+export const BURN_POPUP_FALLBACK_HALF_HEIGHT_STUDS = 1.1;
+export const BURN_POPUP_FALLBACK_DEPTH_RADIUS_STUDS = 0.65;
+export const BURN_SHAKE_AMPLITUDE_X_PX = 4;
+export const BURN_SHAKE_AMPLITUDE_Y_PX = 2.5;
+export const BURN_SHAKE_FREQUENCY_HZ = 28;
+export const BURN_SHAKE_VERTICAL_PHASE_RATIO = 1.37;
+export const BURN_SHAKE_DURATION_SECONDS = 0.38;
 
 export const COMBAT_FEEDBACK_COLORS = {
 	normalHit: Color3.fromRGB(255, 255, 255),
