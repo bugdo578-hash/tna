@@ -26,7 +26,6 @@ function getAttackHamonChargeCost(timeline: SkillData): number {
 	}
 	return offensiveHits <= 0 ? 0 : offensiveHits === 1 ? HAMON_SINGLE_HIT_CHARGE_COST : HAMON_MULTI_HIT_CHARGE_COST;
 }
-
 export { Signal };
 
 export interface AttackStartedEvent {
