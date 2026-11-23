@@ -110,7 +110,7 @@ export class BattleService {
 	private connectedDamageOnTarget = 0;
 	private selfSkillResolved = false;
 	private activeAttackHamonConsumed = false;
-	private activeAttackHamonMultiplier = 1;
+	private activePlannedHitDamages: readonly number[] = [];
 	private returnDuration = 0;
 	private nextTickSideIndex: 0 | 1 = 0;
 	private battleEnded = false;
@@ -149,7 +149,7 @@ export class BattleService {
 		let hamonConsumed = false;
 		let hamonMultiplier = 1;
 		if (requiredHamonCharges > 0 && fighter.canConsumeHamon(requiredHamonCharges)) {
-			const expectedMultiplier = fighter.getHamonSlotMultiplier(slot, timeline.hamonDamageMultiplier);
+			const expectedMultiplier = fighter.getHamonSlotMultiplier(slot);
 			const updatedHamon = fighter.consumeHamonCharges(requiredHamonCharges);
 			if (updatedHamon !== undefined) {
 				hamonConsumed = true;
@@ -171,7 +171,7 @@ export class BattleService {
 		this.connectedDamageOnTarget = 0;
 		this.selfSkillResolved = false;
 		this.activeAttackHamonConsumed = hamonConsumed;
-		this.activeAttackHamonMultiplier = hamonMultiplier;
+		this.activePlannedHitDamages = this.damageService.planAttackDamage(fighter, slot, timeline, hamonMultiplier).hitDamages;
 		this.nextHitIndex = 0;
 		this.phaseElapsed = 0;
 		this.returnDuration = timeline.returnTime;
@@ -291,9 +291,8 @@ export class BattleService {
 
 		if (this.pendingSwitchSide === defenderSide) return false;
 		const target = defenderSide.getActiveFighter();
-		const result = this.damageService.resolveHit(
-			attacker, target, slot, hitTimeline.damageShare, this.rng, this.activeAttackHamonMultiplier,
-		);
+		const plannedDamage = this.activePlannedHitDamages[hitIndex - 1] ?? 0;
+		const result = this.damageService.resolvePlannedHit(attacker, target, plannedDamage, this.rng);
 		const followUpCancelled = !result.hit && totalHits === 1;
 		let realDamage = 0;
 		if (result.hit) {
@@ -424,7 +423,7 @@ export class BattleService {
 	private clearSkill(): void {
 		this.attackerSide = undefined; this.skillSlot = undefined; this.skillData = undefined;
 		this.connectedTarget = undefined; this.connectedTargetSide = undefined; this.connectedDamageOnTarget = 0;
-		this.selfSkillResolved = false; this.activeAttackHamonConsumed = false; this.activeAttackHamonMultiplier = 1;
+		this.selfSkillResolved = false; this.activeAttackHamonConsumed = false; this.activePlannedHitDamages = [];
 		this.nextHitIndex = 0;
 	}
 

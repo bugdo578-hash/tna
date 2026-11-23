@@ -170,10 +170,10 @@ export class Fighter {
 		return hamon !== undefined && hamon.remainingDuration > 0 && hamon.charges >= requiredCharges;
 	}
 
-	public getHamonSlotMultiplier(slot: SkillSlot, skillOverrideMultiplier?: number): number {
+	public getHamonSlotMultiplier(slot: SkillSlot): number {
 		const hamon = this.getHamonEffect();
 		if (hamon === undefined || hamon.charges <= 0 || hamon.remainingDuration <= 0) return 1;
-		return skillOverrideMultiplier ?? hamon.slotMultipliers[slot] ?? HAMON_DEFAULT_SLOT_MULTIPLIERS[slot];
+		return hamon.slotMultipliers[slot] ?? HAMON_DEFAULT_SLOT_MULTIPLIERS[slot];
 	}
 
 	public consumeHamonCharges(requiredCharges: number): ActiveHamonEffect | undefined {

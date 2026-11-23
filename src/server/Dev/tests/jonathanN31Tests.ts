@@ -1,7 +1,7 @@
 import { Players } from "@rbxts/services";
-import { ATB_MAX, BASE_ATB_SPEED } from "../../../shared/Config";
+import { ATB_MAX, BASE_ATB_SPEED, HAMON_DEFAULT_SLOT_MULTIPLIERS } from "../../../shared/Config";
 import { findFighterDefinition } from "../../../shared/FighterData";
-import { calcDano, calcSkillSlotRoll } from "../../../shared/MathUtils";
+import { calcDano, calcHamonDamage, calcSkillSlotRoll, distributeDamageAcrossHits } from "../../../shared/MathUtils";
 import type { AttackStartedPayload, BattleStartedPayload } from "../../../shared/Remotes";
 import { getSkillId, type SkillDataSlots } from "../../../shared/SkillData";
 import type { ClassName, SkillSlot, SkillSlots } from "../../../shared/TypeDefs";
@@ -19,6 +19,7 @@ function assertOverdriveBehavior(
 ): void {
 	const rng = () => 0.99;
 	const slots: SkillSlots = [calcSkillSlotRoll(1, 0.5), calcSkillSlotRoll(2, 0.5), calcSkillSlotRoll(3, 0.5)];
+	const slotHamonMult = HAMON_DEFAULT_SLOT_MULTIPLIERS[overdriveSlot];
 	for (const [className, vampire, charges, expectedBurn] of [
 		["Menace", false, 3, true], ["Menace", false, 2, true], ["Menace", false, 1, false],
 		["Controller", false, 3, false], ["Controller", true, 3, true], ["Menace", false, 0, false],
@@ -52,11 +53,15 @@ function assertOverdriveBehavior(
 		assertInvariant(attacker.getHamonCharges() === (charges >= 2 ? charges - 2 : charges), `${label}: consome 2 cargas uma vez`);
 		battle.step(1.1);
 		const counter = className === "Menace" ? 1.175 : 1;
-		const expected = math.max(
-			math.round(calcDano(attacker.stats.atk, attacker.slots[overdriveSlot - 1].mult, attacker.level) / 3 * counter * (charges >= 2 ? 1.8 : 1)),
-			1,
+		const slotDamage = calcDano(attacker.stats.atk, attacker.slots[overdriveSlot - 1].mult, attacker.level);
+		const totalDamage = calcHamonDamage(slotDamage, charges >= 2 ? slotHamonMult : 1);
+		const planned = distributeDamageAcrossHits(totalDamage, [1 / 3, 1 / 3, 1 / 3]);
+		const expectedHits = planned.map((d) => (d <= 0 ? 0 : counter === 1 ? d : math.max(math.round(d * counter), 1)));
+		assertInvariant(
+			hits.size() === 3 &&
+				hits[0] === expectedHits[0] && hits[1] === expectedHits[1] && hits[2] === expectedHits[2],
+			`${label}: 3 hits com multiplicador do slot S${overdriveSlot} (×${slotHamonMult}) e distribuição exata`,
 		);
-		assertInvariant(hits.size() === 3 && hits.every((damage) => damage === expected), `${label}: 3 hits com ×1,80 independente do slot`);
 		assertInvariant(
 			burns === (expectedBurn ? 1 : 0) && target.hasStatusEffect("Burn") === expectedBurn && (!expectedBurn || burnHitIndex === 3),
 			`${label}: Burn condicional aplicado apenas no 3º hit`,
@@ -75,7 +80,7 @@ export function validateJonathanN31(): void {
 		"Jonathan na ordem oficial: S1 Luck & Pluck, S2 Respiração de Hamon, S3 Sunlight Yellow Overdrive",
 	);
 
-	// 1. Ordem oficial do Jonathan: S3 = Sunlight Yellow Overdrive (×1,80, 3 hits, 2 cargas, Burn condicional)
+	// 1. Ordem oficial do Jonathan: S3 = Sunlight Yellow Overdrive (×2,20 no S3, 3 hits, 2 cargas, Burn condicional)
 	assertOverdriveBehavior(3, skills, "Jonathan S3 oficial");
 
 	const rng = () => 0.99;
@@ -85,7 +90,7 @@ export function validateJonathanN31(): void {
 	const side = new BattleSide([jonathan, ally], rng);
 	const battle = new BattleService(side, new BattleSide([enemy], rng), rng);
 
-	// 2. S2 = Respiração de Hamon: ativa e renova 3 cargas individuais (e funciona também no Lv1)
+	// 2. S2 = Respiração de Hamon: ativa e renova 3 cargas individuais
 	side.setAtb(ATB_MAX);
 	assertInvariant(battle.requestSkill(side, 2), "S2 (Respiração de Hamon) aceita");
 	battle.step(1);
@@ -96,19 +101,21 @@ export function validateJonathanN31(): void {
 	battle.step(1);
 	assertInvariant(jonathan.getHamonCharges() === 3, "S2 renova cargas para 3");
 
-	// 3. S1 = Luck & Pluck: 1 hit, consome 1 carga, aplica ×1,30
+	// 3. S1 = Luck & Pluck: 1 hit, consome 1 carga, aplica ×1,30 do slot S1 sobre D_slot arredondado
 	const s1Hits: number[] = [];
 	battle.events.hitResolved.connect((hit) => s1Hits.push(hit.damage));
 	side.setAtb(ATB_MAX);
 	assertInvariant(battle.requestSkill(side, 1) && jonathan.getHamonCharges() === 2, "S1 consome 1 carga");
 	battle.step(1);
-	const s1Expected = math.max(math.round(calcDano(jonathan.stats.atk, jonathan.slots[0].mult, jonathan.level) * 1.3 * 1.175), 1);
-	assertInvariant(s1Hits.size() === 1 && s1Hits[0] === s1Expected, "S1 aplica ×1,30 ao dano base");
+	const s1SlotDamage = calcDano(jonathan.stats.atk, jonathan.slots[0].mult, jonathan.level);
+	const s1HamonDamage = calcHamonDamage(s1SlotDamage, HAMON_DEFAULT_SLOT_MULTIPLIERS[1]);
+	const s1Expected = math.max(math.round(s1HamonDamage * 1.175), 1);
+	assertInvariant(s1Hits.size() === 1 && s1Hits[0] === s1Expected, "S1 aplica ×1,30 sobre D_slot arredondado");
 	assertInvariant(!ally.hasHamon() && !enemy.hasHamon(), "cargas permanecem individuais após S1");
 
 	// 4. Permutação temporária de slots em fixture: [Respiração de Hamon (S1), Sunlight Yellow Overdrive (S2), Luck & Pluck (S3)]
 	const permutedSkills: SkillDataSlots = [skills[1], skills[2], skills[0]];
-	assertOverdriveBehavior(2, permutedSkills, "Fixture permutada Overdrive no S2");
+	assertOverdriveBehavior(2, permutedSkills, "Fixture permutada Overdrive no S2 (×1,80)");
 
 	const permBase = makeRealFighter("jonathan", rng, 10);
 	const permJonathan = new Fighter({
@@ -126,18 +133,20 @@ export function validateJonathanN31(): void {
 	permBattle.step(1);
 	assertInvariant(permJonathan.getHamonCharges() === 3 && permEnemy.hp === permEnemy.hpMax, "Fixture permutada: S1 recarrega 3 cargas sem dano");
 
-	// S3 permutado = Luck & Pluck -> 1 hit, consome 1 carga, mantém ×1,30 (e NÃO ×2,20 do slot 3!)
+	// S3 permutado = Luck & Pluck -> 1 hit, consome 1 carga, usa roll de S3 e Hamon ×2,20 do slot S3
 	const permS3Hits: number[] = [];
 	permBattle.events.hitResolved.connect((hit) => permS3Hits.push(hit.damage));
 	permSide.setAtb(ATB_MAX);
 	assertInvariant(permBattle.requestSkill(permSide, 3) && permJonathan.getHamonCharges() === 2, "Fixture permutada: Luck & Pluck no S3 consome 1 carga");
 	permBattle.step(1);
-	const permS3Expected = math.max(math.round(calcDano(permJonathan.stats.atk, permJonathan.slots[2].mult, permJonathan.level) * 1.3 * 1.175), 1);
-	assertInvariant(permS3Hits.size() === 1 && permS3Hits[0] === permS3Expected, "Fixture permutada: Luck & Pluck no S3 preserva ×1,30");
+	const permS3Slot = calcDano(permJonathan.stats.atk, permJonathan.slots[2].mult, permJonathan.level);
+	const permS3Hamon = calcHamonDamage(permS3Slot, HAMON_DEFAULT_SLOT_MULTIPLIERS[3]);
+	const permS3Expected = math.max(math.round(permS3Hamon * 1.175), 1);
+	assertInvariant(permS3Hits.size() === 1 && permS3Hits[0] === permS3Expected, "Fixture permutada: Luck & Pluck no S3 usa ×2,20 do slot S3");
 
-	// 5. Permutação com Overdrive no S1: 3 hits, 2 cargas, ×1,80 (e NÃO ×1,30 do slot 1!)
+	// 5. Permutação com Overdrive no S1: 3 hits, 2 cargas, usa roll de S1 e Hamon ×1,30 do slot S1
 	const overdriveInS1: SkillDataSlots = [skills[2], skills[0], skills[1]];
-	assertOverdriveBehavior(1, overdriveInS1, "Fixture permutada Overdrive no S1");
+	assertOverdriveBehavior(1, overdriveInS1, "Fixture permutada Overdrive no S1 (×1,30)");
 
 	// 6. BattleSessionPresentation transmite skillIds no BattleStarted e skillId no AttackStarted
 	const p1 = { Parent: Players, Name: "N311PermP1", UserId: 993111 } as unknown as Player;

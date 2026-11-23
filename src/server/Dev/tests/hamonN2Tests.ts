@@ -3,7 +3,7 @@ import {
 	ATB_MAX, BASE_ATB_SPEED, FLOAT_TOLERANCE,
 	HAMON_DEFAULT_DURATION_SECONDS, HAMON_DEFAULT_MAX_CHARGES, HAMON_DEFAULT_SLOT_MULTIPLIERS,
 } from "../../../shared/Config";
-import { calcDano, calcSkillSlotRoll } from "../../../shared/MathUtils";
+import { calcDano, calcHamonDamage, calcSkillSlotRoll, distributeDamageAcrossHits } from "../../../shared/MathUtils";
 import type { BattleEndedPayload, EffectAppliedPayload, EffectExpiredPayload, HitResolvedPayload } from "../../../shared/Remotes";
 import type { SkillDataSlots } from "../../../shared/SkillData";
 import type { HamonConfig, SkillSlot, SkillSlots, StatBlock, StatusEffect } from "../../../shared/TypeDefs";
@@ -154,16 +154,17 @@ export function validateN2HamonSystem(): void {
 		battle.events.hitResolved.connect((h) => hitDamages.push(h.damage));
 		battle.events.effectApplied.connect((e) => appliedEvents.push(e));
 
-		const expectedBaseDamage = (slot: SkillSlot, share: number, mult: number): number => {
-			const base = calcDano(attacker.stats.atk, attacker.slots[slot - 1].mult, attacker.level) * share * mult;
-			return math.max(math.round(base), 1);
+		const expectedHitsFor = (slot: SkillSlot, shares: readonly number[], mult: number): number[] => {
+			const slotDmg = calcDano(attacker.stats.atk, attacker.slots[slot - 1].mult, attacker.level);
+			const totalDmg = calcHamonDamage(slotDmg, mult);
+			return distributeDamageAcrossHits(totalDmg, shares);
 		};
 
 		// Item 7: Zero cargas -> dano normal
 		sideA.setAtb(ATB_MAX);
 		assertInvariant(battle.requestSkill(sideA, 1), "S1 sem Hamon aceito");
 		battle.step(0.55);
-		const normalS1Damage = expectedBaseDamage(1, 1, 1);
+		const normalS1Damage = expectedHitsFor(1, [1], 1)[0];
 		assertInvariant(
 			hitDamages.size() === 1 && hitDamages[0] === normalS1Damage && attacker.getHamonCharges() === 0,
 			`7. Zero cargas causa dano normal (${normalS1Damage})`,
@@ -186,13 +187,13 @@ export function validateN2HamonSystem(): void {
 		assertInvariant(attacker.getHamonCharges() === 2, "16. Cargas permanecem em 2 durante ATTACK");
 		battle.step(0.5);
 		assertInvariant(battle.state === "IDLE", "volta a IDLE após S1");
-		const hamonS1Damage = expectedBaseDamage(1, 1, HAMON_DEFAULT_SLOT_MULTIPLIERS[1]);
+		const hamonS1Damage = expectedHitsFor(1, [1], HAMON_DEFAULT_SLOT_MULTIPLIERS[1])[0];
 		assertInvariant(
 			hitDamages.size() === 1 && hitDamages[0] === hamonS1Damage && hamonS1Damage > normalS1Damage,
-			`4/8. S1 com Hamon aplica multiplicador ×1.30 no dano base (${hamonS1Damage} vs ${normalS1Damage})`,
+			`4/8. S1 com Hamon aplica multiplicador ×1.30 sobre D_slot (${hamonS1Damage} vs ${normalS1Damage})`,
 		);
 
-		// Item 5, 8 (Slot 2 ×1.80) & 9 (3 hits mesmo bônus)
+		// Item 5, 8 (Slot 2 ×1.80) & 9 (3 hits com distribuição exata do total bonificado)
 		hitDamages.clear();
 		appliedEvents.clear();
 		defender.statusEffects.clear();
@@ -205,11 +206,11 @@ export function validateN2HamonSystem(): void {
 		);
 		battle.step(1.1);
 		assertInvariant(battle.state === "IDLE", "volta a IDLE após S2");
-		const expectedS2Hit = expectedBaseDamage(2, 1 / 3, HAMON_DEFAULT_SLOT_MULTIPLIERS[2]);
+		const expectedS2Hits = expectedHitsFor(2, [1 / 3, 1 / 3, 1 / 3], HAMON_DEFAULT_SLOT_MULTIPLIERS[2]);
 		assertInvariant(
 			hitDamages.size() === 3 &&
-				hitDamages[0] === expectedS2Hit && hitDamages[1] === expectedS2Hit && hitDamages[2] === expectedS2Hit,
-			`5/8/9. Todos os 3 hits recebem o mesmo bônus ×1.80 (${expectedS2Hit}) de uma única ativação`,
+				hitDamages[0] === expectedS2Hits[0] && hitDamages[1] === expectedS2Hits[1] && hitDamages[2] === expectedS2Hits[2],
+			"5/8/9. Todos os 3 hits recebem a distribuição exata do total bonificado ×1.80",
 		);
 		assertInvariant(defender.hasStatusEffect("Burn"), "5. Efeito condicional ao Hamon (Burn) aplicado quando Hamon foi consumido");
 
@@ -223,10 +224,10 @@ export function validateN2HamonSystem(): void {
 		assertInvariant(attacker.getHamonCharges() === 1, "6. S2 com 1 carga não consome a carga restante");
 		battle.step(1.1);
 		assertInvariant(battle.state === "IDLE", "volta a IDLE após S2 sem bônus");
-		const normalS2Hit = expectedBaseDamage(2, 1 / 3, 1);
+		const normalS2Hits = expectedHitsFor(2, [1 / 3, 1 / 3, 1 / 3], 1);
 		assertInvariant(
 			hitDamages.size() === 3 &&
-				hitDamages[0] === normalS2Hit && hitDamages[1] === normalS2Hit && hitDamages[2] === normalS2Hit &&
+				hitDamages[0] === normalS2Hits[0] && hitDamages[1] === normalS2Hits[1] && hitDamages[2] === normalS2Hits[2] &&
 				attacker.getHamonCharges() === 1 && !defender.hasStatusEffect("Burn") && appliedEvents.size() === 0,
 			"6. Multi-hit com 1 carga causa dano normal nos 3 hits, preserva a carga e não aplica bônus nem Burn condicional",
 		);
@@ -237,7 +238,7 @@ export function validateN2HamonSystem(): void {
 		assertInvariant(battle.requestSkill(sideA, 3), "8. S3 ofensiva de 1 hit com 1 carga aceita");
 		assertInvariant(attacker.getHamonCharges() === 0, "8. S3 ofensiva de 1 hit consome a 1 carga restante");
 		battle.step(0.5);
-		const expectedS3Damage = expectedBaseDamage(3, 1, HAMON_DEFAULT_SLOT_MULTIPLIERS[3]);
+		const expectedS3Damage = expectedHitsFor(3, [1], HAMON_DEFAULT_SLOT_MULTIPLIERS[3])[0];
 		assertInvariant(
 			hitDamages.size() === 1 && hitDamages[0] === expectedS3Damage,
 			`8. Slot 3 aplica multiplicador ×2.20 (${expectedS3Damage})`,
@@ -274,13 +275,15 @@ export function validateN2HamonSystem(): void {
 		assertInvariant(!attacker.hasHamon(), "Hamon removido durante a resolução do multi-hit");
 		battle.step(0.7);
 		assertInvariant(battle.state === "IDLE", "S2 concluído e voltou a IDLE");
-		const expectedBoostedHit = math.max(
-			math.round(calcDano(attacker.stats.atk, attacker.slots[1].mult, attacker.level) * (1 / 3) * HAMON_DEFAULT_SLOT_MULTIPLIERS[2]),
-			1,
+		const expectedBoostedHits = distributeDamageAcrossHits(
+			calcHamonDamage(calcDano(attacker.stats.atk, attacker.slots[1].mult, attacker.level), HAMON_DEFAULT_SLOT_MULTIPLIERS[2]),
+			[1 / 3, 1 / 3, 1 / 3],
 		);
 		assertInvariant(
 			hitDamages.size() === 3 &&
-				hitDamages[0] === expectedBoostedHit && hitDamages[1] === expectedBoostedHit && hitDamages[2] === expectedBoostedHit,
+				hitDamages[0] === expectedBoostedHits[0] &&
+				hitDamages[1] === expectedBoostedHits[1] &&
+				hitDamages[2] === expectedBoostedHits[2],
 			"11. Bônus calculado no início permanece congelado para todos os hits mesmo se o buff expirar durante a resolução",
 		);
 

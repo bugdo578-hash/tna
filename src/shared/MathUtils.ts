@@ -90,6 +90,67 @@ export function calcDano(atkFinal: number, mult: number, level: number): number 
 }
 
 /**
+ * Aplica o multiplicador de Hamon sobre o dano já arredondado do slot (`D_slot`),
+ * convertendo o resultado para dano inteiro com a política padrão (`math.round`).
+ */
+export function calcHamonDamage(slotDamage: number, hamonMultiplier = 1): number {
+	const safeSlotDamage = math.max(math.round(slotDamage), 0);
+	if (safeSlotDamage <= 0 || hamonMultiplier === 1) return safeSlotDamage;
+	return math.max(math.round(safeSlotDamage * hamonMultiplier), 0);
+}
+
+/**
+ * Distribui um total inteiro de dano entre hits usando `damageShares` pelo método
+ * determinístico de maiores resíduos (desempate pela ordem dos hits: índice menor primeiro).
+ * Garante `sum(resultado) === totalDamage`, inclusive para totais menores que o número de hits,
+ * sem inventar piso mínimo de 1 por hit.
+ */
+export function distributeDamageAcrossHits(totalDamage: number, damageShares: readonly number[]): number[] {
+	const count = damageShares.size();
+	if (count === 0) return [];
+	const safeTotal = math.max(math.round(totalDamage), 0);
+	if (safeTotal <= 0) {
+		const zeros: number[] = [];
+		for (const _ of $range(1, count)) zeros.push(0);
+		return zeros;
+	}
+
+	let weightSum = 0;
+	for (const share of damageShares) {
+		weightSum += math.max(share, 0);
+	}
+	const useUniform = weightSum <= 0;
+	const denom = useUniform ? count : weightSum;
+	const targetTotal = useUniform || math.abs(weightSum - 1) <= 1e-6
+		? safeTotal
+		: math.max(math.round(safeTotal * weightSum), 0);
+
+	const allocations: number[] = [];
+	const entries: Array<{ readonly index: number; readonly remainder: number }> = [];
+	let allocatedSum = 0;
+	for (const i of $range(0, count - 1)) {
+		const weight = useUniform ? 1 : math.max(damageShares[i], 0);
+		const exact = targetTotal * (weight / denom);
+		const base = math.floor(exact);
+		allocations.push(base);
+		allocatedSum += base;
+		entries.push({ index: i, remainder: exact - base });
+	}
+
+	const leftover = targetTotal - allocatedSum;
+	if (leftover > 0) {
+		table.sort(entries, (a, b) => {
+			if (math.abs(a.remainder - b.remainder) > 1e-9) return a.remainder > b.remainder;
+			return a.index < b.index;
+		});
+		for (const i of $range(0, math.min(leftover, count) - 1)) {
+			allocations[entries[i].index] += 1;
+		}
+	}
+	return allocations;
+}
+
+/**
  * Calcula o `ATK_cura` usado exclusivamente na fórmula de cura híbrida:
  * `ATK_cura = base + alocado + chips` (sem buffs temporários e sem levelScale).
  */

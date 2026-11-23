@@ -39,7 +39,7 @@ import {
 	type DayNightLightingLike,
 } from "../../../shared/DayNightCycle";
 import { FIGHTER_DATA } from "../../../shared/FighterData";
-import { calcDano } from "../../../shared/MathUtils";
+import { calcDano, distributeDamageAcrossHits } from "../../../shared/MathUtils";
 import type { BattleEndedPayload, BattleStartedPayload } from "../../../shared/Remotes";
 import type { SkillSlot } from "../../../shared/TypeDefs";
 import { BattleSide, type FighterIndex, type FighterLineup } from "../../Components/BattleSide";
@@ -423,10 +423,16 @@ export function validateJotaroAndAnubis(): void {
 	oraSideA.setAtb(ATB_MAX);
 	assertInvariant(oraBattle.requestSkill(oraSideA, 2), "Jotaro S2 (Barragem_estelar) deve iniciar");
 	oraBattle.step(1.2);
-	const expectedOraHit = math.max(math.round((calcDano(oraJotaro.stats.atk, oraJotaro.slots[1].mult, oraJotaro.level) / 3) * 1.175), 1);
+	const oraTotal = calcDano(oraJotaro.stats.atk, oraJotaro.slots[1].mult, oraJotaro.level);
+	const expectedOraHits = distributeDamageAcrossHits(oraTotal, [1 / 3, 1 / 3, 1 / 3]).map((d) =>
+		d <= 0 ? 0 : math.max(math.round(d * 1.175), 1),
+	);
 	assertInvariant(
-		oraHits.size() === 3 && oraHits.every((damage) => damage === expectedOraHit),
-		`Jotaro S2 deve resolver 3 hits de ${expectedOraHit} cada`,
+		oraHits.size() === 3 &&
+			oraHits[0] === expectedOraHits[0] &&
+			oraHits[1] === expectedOraHits[1] &&
+			oraHits[2] === expectedOraHits[2],
+		`Jotaro S2 deve resolver 3 hits distribuídos corretamente (${expectedOraHits.join(",")})`,
 	);
 	assertInvariant(jotaroDef.skills[2].hits.size() === 1, "Jotaro S3 Time Stop provisório deve ter 1 hit");
 	assertInvariant(
@@ -1335,7 +1341,9 @@ export function validateMultiHitDeath(): void {
 		const target = makeDummyFighter("Menace");
 		const replacement = makeDummyFighter("Menace");
 		const timeline = attacker.skillData[1];
-		const hitDamage = new DamageService().resolveHit(attacker, target, 2, timeline.hits[0].damageShare, rng).damage;
+		const damageSvc = new DamageService();
+		const plan = damageSvc.planAttackDamage(attacker, 2, timeline);
+		const hitDamage = damageSvc.resolvePlannedHit(attacker, target, plan.hitDamages[0], rng).damage;
 		target.hp = hitDamage + 1;
 		const initialHp = target.hp;
 		target.applyStatusEffect("Root", 3, 10);

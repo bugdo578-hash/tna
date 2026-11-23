@@ -36,8 +36,6 @@ export interface SkillData {
 	readonly hamonConfig?: HamonConfig;
 	/** Custo explícito de cargas de Hamon desta habilidade (fallback: 1 para single-hit, 2 para multi-hit). */
 	readonly hamonChargeCost?: number;
-	/** Multiplicador de dano base específico desta skill quando consome Hamon (sobrescreve o slot do buff). */
-	readonly hamonDamageMultiplier?: number;
 	/**
 	 * Efeitos de status aplicados pela skill com base no dano real dos hits que conectaram.
 	 */

@@ -3,6 +3,7 @@ import { validateArenaPlayerTransportL3 } from "./tests/arenaPlayerTransportTest
 import { validateArenaRegistry } from "./tests/arenaRegistryTests";
 import { validateArenaSelectionL16 } from "./tests/arenaSelectionTests";
 import { validateBattlePreparation } from "./tests/battlePreparationTests";
+import { validateDamageAuditSlotsHamonMultihit } from "./tests/damageAuditTests";
 import { validateN1DotSessions, validateN1DotSkillTimeline, validateN1DotTicks } from "./tests/dotN1Tests";
 import { validateN2HamonSystem } from "./tests/hamonN2Tests";
 import { validateJonathanN31 } from "./tests/jonathanN31Tests";
@@ -87,6 +88,7 @@ export { validateSlowAutosaveLogoutRetry } from "./tests/persistenceTests";
 export { validateJsonRoundTripPersistence, validateLoadExhaustionKick } from "./tests/dataStoreIntegrityTests";
 
 export function runSimulation(): void {
+	validateDamageAuditSlotsHamonMultihit();
 	validateJonathanN31();
 	validateBattlePreparation();
 	validateSkillRegistry();

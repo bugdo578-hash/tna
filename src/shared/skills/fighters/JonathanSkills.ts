@@ -6,7 +6,7 @@ export const JONATHAN_SKILL_DATA: SkillDataSlots = [
 		id: "jonathan_luck_and_pluck",
 		name: "Luck & Pluck", prepareTime: 0.25,
 		hits: [{ time: 0.15, damageShare: 1, followUp: false }],
-		returnTime: 0.25, dodgeReturnTime: 0.12, hamonChargeCost: 1, hamonDamageMultiplier: 1.3,
+		returnTime: 0.25, dodgeReturnTime: 0.12, hamonChargeCost: 1,
 	},
 	{
 		id: "jonathan_hamon_breathing",
@@ -23,6 +23,6 @@ export const JONATHAN_SKILL_DATA: SkillDataSlots = [
 			{ time: 0.25, damageShare: 1 / 3, followUp: true },
 			{ time: 0.4, damageShare: 1 / 3, followUp: false, hamonStatusEffects: ["Burn"], hamonEffectCondition: "vampireOrClassCounter" },
 		],
-		returnTime: 0.3, dodgeReturnTime: 0.15, hamonChargeCost: 2, hamonDamageMultiplier: 1.8,
+		returnTime: 0.3, dodgeReturnTime: 0.15, hamonChargeCost: 2,
 	},
 ];
