@@ -69,36 +69,41 @@ if run:IsClient() then
 				continue
 			end
 			if modifier == 1 then row.hidden = true end
-			if highlight then
+			if highlight and not row.endAt then
 				row.startAt = row.startAt or now
 				row.correctAdornee = (row.correctAdornee ~= false) and highlight.Adornee == model and highlight.Enabled
 				row.minFill = math.min(row.minFill or 1, highlight.FillTransparency)
 				row.maxFill = math.max(row.maxFill or 0, highlight.FillTransparency)
 				row.faded = row.faded or modifier > 0 and modifier < 1
+			end
+			if highlight and modifier > 0 and not row.endAt then
 				local anchorName = if row.slot == 0 then "Current_Fighter_" .. sideLetter else "AoE_Target_" .. sideLetter .. "_" .. row.slot
 				local anchor = side[anchorName]
 				local foot = model.PrimaryPart.CFrame * CFrame.new(row.offset)
 				row.feetAligned = (row.feetAligned ~= false) and checkFrame(foot, anchor)
-				for _, container in stage:GetChildren() do
-					local clone = container.Name == "BattleSpawnVfx" and container:FindFirstChild("spawnvfx")
-					local source = clone and clone:FindFirstChild("Highligthspawn")
-					local adornee = source and source:FindFirstChild("Adornee")
-					if adornee and adornee.Value == model then
-						row.vfxAligned = (row.vfxAligned ~= false) and checkFrame(clone:GetPivot(), anchor)
-						row.placeholderSeen = row.placeholderSeen or clone:FindFirstChild("Fighter_placeHolder") ~= nil
-						row.retainedTarget = clone.gelu.modevents.HOMING_TARGET.Value == clone.coloquenotorsodosfigthers
-							and clone.gelu.AccelTarget.Value == clone.coloquenotorsodosfigthers
-							and clone.gelu.modevents.EFEITO_IMPACTO.Value == clone.b1["sange bloco"]
-						row.emitters = row.emitters or {}
-						for _, emitted in partIcles.ActiveEmits do
-							local emitter = emitted._sourceItem
-							if emitter and emitter:IsDescendantOf(clone) and emitted.VisualPart and emitted.VisualPart.Parent then
-								row.emitters[emitter.Name] = true
-							end
-						end
+			end
+			for _, container in stage:GetChildren() do
+				local clone = container.Name == "BattleSpawnVfx" and container:FindFirstChild("spawnvfx")
+				local source = clone and clone:FindFirstChild("Highligthspawn")
+				local adornee = source and source:FindFirstChild("Adornee")
+				if not adornee or adornee.Value ~= model then continue end
+				local anchorName = if row.slot == 0 then "Current_Fighter_" .. sideLetter else "AoE_Target_" .. sideLetter .. "_" .. row.slot
+				row.vfxAligned = (row.vfxAligned ~= false) and checkFrame(clone:GetPivot(), side[anchorName])
+				row.placeholderSeen = row.placeholderSeen or clone:FindFirstChild("Fighter_placeHolder") ~= nil
+				row.retainedTarget = clone.gelu.modevents.HOMING_TARGET.Value == clone.coloquenotorsodosfigthers
+					and clone.gelu.AccelTarget.Value == clone.coloquenotorsodosfigthers
+					and clone.gelu.modevents.EFEITO_IMPACTO.Value == clone.b1["sange bloco"]
+				row.emitters = row.emitters or {}
+				for _, emitted in partIcles.ActiveEmits do
+					local emitter = emitted._sourceItem
+					local visual = emitted.VisualPart
+					if emitter and visual and visual:IsDescendantOf(container) then
+						row.emitters[emitter.Name] = true
+						if row.endAt then row.particleTail = true end
 					end
 				end
-			elseif row.startAt and modifier == 0 and not row.endAt then
+			end
+			if row.startAt and modifier == 0 and not row.endAt then
 				row.endAt = now
 				local anchorName = if row.slot == 0 then "Current_Fighter_" .. sideLetter
 					elseif row.slot == 1 then "Waiting_Fighter_" .. sideLetter else "Waiting_Fighter_" .. sideLetter .. "_2"
@@ -388,7 +393,8 @@ local ok, result = xpcall(function()
 			assert(fighter.vfxAligned and fighter.feetAligned and fighter.home and not fighter.placeholderSeen,
 				"incorrect VFX, feet or bench placement: " .. game:GetService("HttpService"):JSONEncode(fighter))
 			local emitters = fighter.emitters or {}
-			assert(fighter.retainedTarget and emitters["growing wind"] and emitters.b1 and emitters.gelu and emitters.Part,
+			assert(fighter.retainedTarget and emitters["growing wind"] and emitters.b1 and emitters.gelu and emitters.Part
+				and emitters["sange bloco"] and fighter.particleTail,
 				"incomplete authored VFX: " .. game:GetService("HttpService"):JSONEncode(fighter))
 			assert(math.abs(fighter.endAt - fighter.startAt - 1.5) <= 0.12 and fighter.endAt <= row.goAt - 0.15, "materialization timing")
 			own[fighter.slot] = fighter

@@ -2,6 +2,8 @@
 
 /** Nome do ModuleScript de terceiros em `ReplicatedStorage`. */
 export const VFX_MODULE_NAME = "Part_Icles";
+export const VFX_TEMPLATES_FOLDER_NAME = "vfxs";
+export const BATTLE_SPAWN_VFX_TEMPLATE_NAME = "spawnvfx";
 
 /** Nome do RemoteEvent opcional de VFX de mundo em `ReplicatedStorage`. */
 export const VFX_REMOTE_EVENT_NAME = "VFXEvent";

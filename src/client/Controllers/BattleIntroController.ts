@@ -113,8 +113,9 @@ export class BattleIntroController {
 	}
 
 	public release(id: number): void {
-		this.cancelMaterialization(id);
-		if (this.current?.id === id) this.current.released = true;
+		if (this.current?.id !== id) return;
+		this.current.materialization?.finishReveal();
+		this.current.released = true;
 	}
 
 	/**
@@ -241,11 +242,11 @@ export class BattleIntroController {
 		const remaining = schedule.goAt - now;
 		const materialization = state.materialization;
 		if (materialization !== undefined) {
-			const [ok, done] = pcall(() => materialization.step(now, schedule.goAt));
+			const [ok, failure] = pcall(() => materialization.step(now, schedule.goAt));
 			if (!ok) {
 				this.cancelMaterialization(state.id);
-				warn(`[BattleIntro] Materialização: ${tostring(done)}`);
-			} else if (done) state.materialization = undefined;
+				warn(`[BattleIntro] Materialização: ${tostring(failure)}`);
+			}
 		}
 		if (remaining > 0 && remaining <= BATTLE_COUNTDOWN_SECONDS) {
 			const number = math.ceil(remaining);

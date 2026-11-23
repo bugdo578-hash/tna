@@ -1,7 +1,6 @@
 import { ReplicatedStorage } from "@rbxts/services";
-import { BATTLE_SPAWN_VFX_TEMPLATE_NAME } from "../../shared/configs/BattleIntro";
 import { FIGHTER_MATERIALIZATION_SECONDS } from "../UI/CombatVisualConfig";
-import { VFX_MODULE_NAME } from "../UI/VFXConfig";
+import { BATTLE_SPAWN_VFX_TEMPLATE_NAME, VFX_MODULE_NAME, VFX_TEMPLATES_FOLDER_NAME } from "../UI/VFXConfig";
 import type { PartIclesApi } from "../types/Part_Icles";
 import { battleCleanupStep } from "./BattleCleanup";
 
@@ -14,7 +13,7 @@ interface SpawnPartIcles extends PartIclesApi {
 
 export class BattleSpawnVfx {
 	public static load(): BattleSpawnVfx | undefined {
-		const template = ReplicatedStorage.FindFirstChild(BATTLE_SPAWN_VFX_TEMPLATE_NAME);
+		const template = ReplicatedStorage.FindFirstChild(VFX_TEMPLATES_FOLDER_NAME)?.FindFirstChild(BATTLE_SPAWN_VFX_TEMPLATE_NAME);
 		const module = ReplicatedStorage.FindFirstChild(VFX_MODULE_NAME);
 		if (!template?.IsA("Model") || !module?.IsA("ModuleScript")) return undefined;
 		const [ok, api] = pcall(() => {
@@ -44,9 +43,18 @@ export class BattleSpawnVfx {
 
 		const particles = new Instance("Folder");
 		particles.Name = "BattleSpawnVfx";
+		const visuals = new Instance("Folder");
+		visuals.Name = "Particles";
+		visuals.Parent = particles;
 		const highlights = new Instance("Folder");
 		highlights.Name = "BattleSpawnHighlight";
+		let tail: thread | undefined;
+		let disposed = false;
 		const cleanup = () => {
+			if (disposed) return;
+			disposed = true;
+			if (tail !== undefined) task.cancel(tail);
+			tail = undefined;
 			battleCleanupStep("spawn particles stop", () => this.api.Disable(clone));
 			battleCleanupStep("spawn particles destroy", () => particles.Destroy());
 			battleCleanupStep("spawn highlight destroy", () => highlights.Destroy());
@@ -63,6 +71,8 @@ export class BattleSpawnVfx {
 			placeholder?.Destroy();
 
 			clone.PivotTo(frame);
+			const homingTarget = clone.FindFirstChild("gelu")?.FindFirstChild("modevents")?.FindFirstChild("HOMING_TARGET");
+			const impactSurface = homingTarget?.IsA("ObjectValue") ? homingTarget.Value : undefined;
 			for (const child of clone.GetChildren()) {
 				if (!child.IsA("BasePart")) continue;
 				child.Anchored = true;
@@ -71,14 +81,15 @@ export class BattleSpawnVfx {
 				if (!descendant.IsA("BasePart")) continue;
 				descendant.CanCollide = false;
 				descendant.CanTouch = false;
-				descendant.CanQuery = false;
+				if (descendant !== impactSurface) descendant.CanQuery = false;
 			}
 			for (const descendant of clone.GetDescendants()) {
 				if (descendant.GetAttribute("Transformed") !== true) continue;
 				// A emissão aninhada no RenderTemplate do b1 adota o seu próprio parent.
 				let parent = descendant.Parent;
 				while (parent !== undefined && parent !== clone && parent.Name !== "RenderTemplate") parent = parent.Parent;
-				if (parent === clone) this.api.SetEmitParent(descendant, descendant === highlight ? highlights : particles);
+				// O raycast do Qwinkle exclui o EmitParent inteiro. O alvo de impacto fica no clone fonte.
+				if (parent === clone) this.api.SetEmitParent(descendant, descendant === highlight ? highlights : visuals);
 			}
 
 			const lifetime = highlight.FindFirstChild("PartIcleProperties")?.GetAttribute("Lifetime");
@@ -88,7 +99,14 @@ export class BattleSpawnVfx {
 			highlights.Parent = fighter;
 			clone.Parent = particles;
 			particles.Parent = stage;
-			this.api.AbsoluteEmit(clone);
+			const duration = this.api.AbsoluteEmit(clone) ?? FIGHTER_MATERIALIZATION_SECONDS;
+			tail = task.delay(math.max(duration, FIGHTER_MATERIALIZATION_SECONDS), () => {
+				// Um impacto no fim da emissão pode ter suas próprias partículas em andamento.
+				const deadline = os.clock() + duration;
+				while (visuals.GetChildren().size() > 0 && os.clock() < deadline) task.wait();
+				tail = undefined;
+				cleanup();
+			});
 		});
 		if (!ok) {
 			cleanup();

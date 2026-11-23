@@ -53,3 +53,9 @@ Roblox (`Players`, `Workspace`, `ReplicatedStorage`, `RunService`).
 - Todo evento de rede validado no server, com rate limit e resposta privada.
 - Testes novos vão em `src/server/Dev/tests/` (ou `tools/` para client), nunca num arquivo único.
 - Docs: `HANDOFF` só o estado atual; histórico vai para `CHANGELOG`; `repo_map` atualizado quando criar ou mover arquivo.
+
+Exceção à regra "script só em src/": o LocalScript de VFX decorativo das arenas "ArenaAmbientVFX" vive no Studio, em StarterPlayerScripts, fora do Rojo. É só visual, client, sem gameplay. Não criar, editar nem apagar por MCP ou Rojo.
+Contrato que ele assume (não quebrar ao mexer na arena):
+- As arenas ativas ficam como Model em Workspace.ActiveArenas.
+- Estrutura: Arena_bases/Time A/Current_Fighter_A/Current_Figther_A_vfx_green e Arena_bases/Time B/Current_Fighter_B/Current_Figther_B_vfx_red (com "Figther" mesmo).
+- Depende do módulo Part_Icles em ReplicatedStorage.

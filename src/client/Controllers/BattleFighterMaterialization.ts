@@ -104,10 +104,10 @@ export class BattleFighterMaterialization {
 	) {}
 
 	/** Segue o mesmo relógio do countdown e abre mão do efeito se um frame perder a janela. */
-	public step(now: number, goAt: number): boolean {
+	public step(now: number, goAt: number): void {
 		if (!this.isCurrent() || !this.stage.IsDescendantOf(Workspace) || !this.anchors.root.IsDescendantOf(Workspace)) {
 			this.cancel();
-			return true;
+			return;
 		}
 		const readyBy = goAt - FIGHTER_MATERIALIZATION_GO_MARGIN_SECONDS;
 		for (const entry of this.entries) {
@@ -130,18 +130,23 @@ export class BattleFighterMaterialization {
 			if (progress >= 1) this.finish(entry);
 			else setHidden(entry, 1 - progress);
 		}
-		return this.entries.every((entry) => entry.finished);
+	}
+
+	public finishReveal(): void {
+		for (const entry of this.entries) this.finish(entry);
 	}
 
 	public cancel(): void {
-		for (const entry of this.entries) this.finish(entry);
+		for (const entry of this.entries) {
+			entry.disposeVfx?.();
+			entry.disposeVfx = undefined;
+			this.finish(entry);
+		}
 	}
 
 	private finish(entry: MaterializingFighter): void {
 		if (entry.finished) return;
 		entry.finished = true;
-		entry.disposeVfx?.();
-		entry.disposeVfx = undefined;
 		battleCleanupStep("fighter intro transparency", () => setHidden(entry, 0));
 		battleCleanupStep("fighter intro effects", () => {
 			for (const [visual, wasEnabled] of entry.enabled) {

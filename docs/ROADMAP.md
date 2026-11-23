@@ -163,15 +163,6 @@ Fila automática por elo, desafio manual, IA com score, Rival adaptativo.
 ## T12 — Kits dos 19 bonecos · esforço médio (um boneco por prompt)
 Um boneco por vez, só com efeitos já implementados. Efeito futuro: simplificar ou adiar (perguntar ao autor).
 
----
-
-## Decisões pendentes do autor (perguntar, não inventar)
-- Cadência final de Burn/Bleed (3s vs 9s).
-- S3 só no Lv5: o que acontece no Lv1–4?
-- Kits que usam efeitos futuros (Stun, Vulnerabilidade, Clean).
-- Dupla Bruford/Tarkus: custo e slot de Alternar.
-- Pesos da Caixa de Sorte.
-- Crítico ×1.5 e timeouts: provisórios.
 
 ## Feito só no Studio (autor)
 Rigs, animações e markers (`Hit1..N`, `FollowUp`, `End`), VFX, UI final, arena, sons.

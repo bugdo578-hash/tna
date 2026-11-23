@@ -7,6 +7,12 @@ Proibido hardcoding: não introduzir tempos mágicos, IDs específicos de lutado
 3. Este arquivo: estado atual e ordem de trabalho.
 4. `docs/GDD.md`: somente a seção necessária.
 
+Exceção à regra "script só em src/": o LocalScript de VFX decorativo das arenas "ArenaAmbientVFX" vive no Studio, em StarterPlayerScripts, fora do Rojo. É só visual, client, sem gameplay. Não criar, editar nem apagar por MCP ou Rojo.
+Contrato que ele assume (não quebrar ao mexer na arena):
+- As arenas ativas ficam como Model em Workspace.ActiveArenas.
+- Estrutura: Arena_bases/Time A/Current_Fighter_A/Current_Figther_A_vfx_green e Arena_bases/Time B/Current_Fighter_B/Current_Figther_B_vfx_red (com "Figther" mesmo).
+- Depende do módulo Part_Icles em ReplicatedStorage.
+
 Histórico recente de correções, detalhes de APIs/payloads/assets e resultados anteriores: [CHANGELOG.md](CHANGELOG.md); histórico consolidado anterior a 2026-11-14: [CHANGELOG_ARCHIVE.md](CHANGELOG_ARCHIVE.md). Não perder as regras e decisões registradas ali ao implementar a próxima tarefa.
 
 ## Stack e fluxo
