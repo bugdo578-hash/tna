@@ -2,6 +2,11 @@
 
 Registro conciso de mudanças a partir de `2026-11-14` (ordem cronológica reversa). Histórico anterior a `2026-11-14` (base inicial T1–T5, T7.1, T7.2 e primeira correção de DataStore/autosave): [CHANGELOG_ARCHIVE.md](CHANGELOG_ARCHIVE.md). Estado operacional atual: [HANDOFF.md](HANDOFF.md).
 
+## 2026-11-24 — QA L1.2 de pose após troca
+
+- Um atraso de quadro reproduziu a asserção prematura da L1. A pose ainda era a do banco com o tween em `Playing` e chegou ao anchor correto quando o TweenService sinalizou `Completed`.
+- A L1 passou a aguardar a conclusão da movimentação com timeout e mantém as tolerâncias originais. A sonda de estabilidade verifica trocas consecutivas, KO, interrupções e callbacks atrasados em ambos os lados físicos. [Registro das execuções](qa/l1-2-runs.json).
+
 ## 2026-11-24 — QA complementar de interrupções e introdução
 
 - O Pause PvE suspende também as cópias de Sound que o Part_Icles hospeda fora do palco, identificadas pela fonte de cada emissão. Quit e fim de batalha encerram essas cópias durante a limpeza do palco.

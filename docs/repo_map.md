@@ -75,6 +75,7 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `Controllers/CombatHitQueue.ts`: fila de resultados de hits recebidos do servidor (`hitResultsByIndex`, `consumedHitIndices`, `activePendingHits`), espera com cancelamento/timeout, consumo único e limpeza entre ataques/batalhas.
 - `tools/combat-interruptions-client-qa.luau` e `tools/combat-interruptions-play-qa.luau`: sondas de interrupção com sequência isolada no cliente e com sessões PvE/PvP em Studio Multiplayer.
 - `tools/combat-attack-sound-play-qa.luau`: sonda PvE com um Sound existente emitido pelo Part_Icles durante uma habilidade, verificando TimePosition, retomada e limpeza em Quit e vitória.
+- `tools/combat-arena-anchors-l1-qa.luau` e `tools/combat-switch-stability-l1-2-qa.luau`: sondas de pose e estabilidade de trocas no Studio. [Registro das execuções L1.2](qa/l1-2-runs.json).
 - `Controllers/CombatStandMotion.ts`: posicionamento e pulsos do `StandJoint` (`standAttackC1`, `positionStandForAttack`, `pulseStandStrike`, `restoreStandBase` por geração sem drift) e tweens placeholder de sequência de ataque, reação de hit/esquiva e movimento de modelo (`tweenModelTo`).
 - `Controllers/CombatVfxBridge.ts`: ponte entre `CombatController` e `VFXController` (preload/deload por geração, VFX de skill/hit/crit/KO, cópias temporárias e carriers).
 - `Controllers/CombatVfxAudio.ts`: pausa e encerra sons de habilidades, incluindo cópias que o Part_Icles hospeda fora da árvore do efeito.

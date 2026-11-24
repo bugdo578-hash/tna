@@ -11,6 +11,8 @@ local checks = 0
 local scenarios = {}
 local TOL = config.COMBAT_POSITION_TOLERANCE_STUDS
 local ROT_DOT_MIN = 0.9999
+local MOVEMENT_TIMEOUT = 4 * (config.HIT_RESULT_WAIT_SECONDS + config.PLACEHOLDER_SWITCH_TWEEN_SECONDS)
+local maxPositionError, maxAngleError = 0, 0
 
 local function check(condition, message)
 	checks += 1
@@ -22,6 +24,9 @@ local function assertCFrameClose(actual, expected, posTol, rotDotMin, label)
 	local lookDot = actual.LookVector:Dot(expected.LookVector)
 	local rightDot = actual.RightVector:Dot(expected.RightVector)
 	local upDot = actual.UpVector:Dot(expected.UpVector)
+	local angleError = math.deg(math.acos(math.clamp((lookDot + rightDot + upDot - 1) / 2, -1, 1)))
+	maxPositionError = math.max(maxPositionError, posErr)
+	maxAngleError = math.max(maxAngleError, angleError)
 	check(
 		posErr <= posTol and lookDot >= rotDotMin and rightDot >= rotDotMin and upDot >= rotDotMin,
 		string.format(
@@ -33,6 +38,42 @@ local function assertCFrameClose(actual, expected, posTol, rotDotMin, label)
 			upDot
 		)
 	)
+end
+
+local function awaitMovement(isSettled, label)
+	local deadline = os.clock() + MOVEMENT_TIMEOUT
+	while not isSettled() do
+		assert(os.clock() < deadline, label .. ": timeout aguardando a apresentação")
+		task.wait()
+	end
+end
+
+local function switchAndWait(controller, payload)
+	local existing = table.clone(controller.battleTweens)
+	controller:onSwitchPerformed(payload)
+	local tweens = {}
+	for tween in controller.battleTweens do
+		if not existing[tween] then table.insert(tweens, tween) end
+	end
+	-- Estes cenários voluntários movem dois lutadores vivos.
+	assert(#tweens == 2, "troca voluntária precisa iniciar os dois tweens")
+	awaitMovement(function()
+		local completed = true
+		for _, tween in tweens do
+			local state = tween.PlaybackState
+			assert(state ~= Enum.PlaybackState.Cancelled, "tween da troca voluntária cancelado")
+			completed = completed and state == Enum.PlaybackState.Completed
+		end
+		return completed
+	end, payload.activeFighterId)
+end
+
+local function awaitAttackAndMovement(controller, label)
+	awaitMovement(function()
+		return controller.activeAttack == nil and controller.activePendingHits == 0
+			and not controller.attackFinalizer:hasActiveKoAnimations()
+			and #controller.pendingSwitches == 0 and next(controller.battleTweens) == nil
+	end, label)
 end
 
 local function assertAlignedToAnchor(actual, anchorPart, fighter, label)
@@ -186,23 +227,20 @@ local ok, failure = pcall(function()
 		assertAlignedToAnchor(b3.rootPart.CFrame, anchorParts.waitB2, b3, "S1: b3 rootPart == Waiting_Fighter_B_2")
 
 		-- Troca voluntária com reserva 2 (a1 <-> a3): a1 deve ocupar Waiting_Fighter_A_2, a2 permanece em Waiting_Fighter_A
-		c:onSwitchPerformed({ sideId = "A", previousFighterId = "a1", activeFighterId = "a3" })
-		task.wait(config.PLACEHOLDER_SWITCH_TWEEN_SECONDS + 0.08)
+		switchAndWait(c, { sideId = "A", previousFighterId = "a1", activeFighterId = "a3" })
 		check(resolveCalls == 1, "S1: voluntary switch must reuse cached anchors without re-resolving")
 		assertAlignedToAnchor(a3.rootPart.CFrame, anchorParts.activeA, a3, "S1: a3 active after voluntary switch")
 		assertAlignedToAnchor(a1.rootPart.CFrame, anchorParts.waitA2, a1, "S1: a1 moved to vacated Waiting_Fighter_A_2")
 		assertAlignedToAnchor(a2.rootPart.CFrame, anchorParts.waitA1, a2, "S1: a2 untouched at Waiting_Fighter_A")
 
 		-- Troca voluntária com reserva 1 (a3 <-> a2): a3 deve ocupar Waiting_Fighter_A, a1 permanece em Waiting_Fighter_A_2
-		c:onSwitchPerformed({ sideId = "A", previousFighterId = "a3", activeFighterId = "a2" })
-		task.wait(config.PLACEHOLDER_SWITCH_TWEEN_SECONDS + 0.08)
+		switchAndWait(c, { sideId = "A", previousFighterId = "a3", activeFighterId = "a2" })
 		assertAlignedToAnchor(a2.rootPart.CFrame, anchorParts.activeA, a2, "S1: a2 active after second voluntary switch")
 		assertAlignedToAnchor(a3.rootPart.CFrame, anchorParts.waitA1, a3, "S1: a3 moved to vacated Waiting_Fighter_A")
 		assertAlignedToAnchor(a1.rootPart.CFrame, anchorParts.waitA2, a1, "S1: a1 untouched at Waiting_Fighter_A_2")
 
 		-- Volta a1 (Jotaro com Stand) para ativo para validar ataque ORA ORA + retorno do atacante/Stand
-		c:onSwitchPerformed({ sideId = "A", previousFighterId = "a2", activeFighterId = "a1" })
-		task.wait(config.PLACEHOLDER_SWITCH_TWEEN_SECONDS + 0.08)
+		switchAndWait(c, { sideId = "A", previousFighterId = "a2", activeFighterId = "a1" })
 		assertAlignedToAnchor(a1.rootPart.CFrame, anchorParts.activeA, a1, "S1: a1 active before ORA ORA")
 
 		check(a1.standMotion ~= nil and a1.standMotion.joint.Part1 ~= nil, "S1: Jotaro requires real StandJoint")
@@ -222,17 +260,16 @@ local ok, failure = pcall(function()
 				})
 			end)
 		end
-		task.wait(oraTimeline.hits[#oraTimeline.hits].time + oraTimeline.returnTime + config.HIT_RESULT_WAIT_SECONDS)
+		awaitAttackAndMovement(c, "S1 ORA")
 		assertAlignedToAnchor(a1.rootPart.CFrame, anchorParts.activeA, a1, "S1: attacker returned to Current_Fighter_A")
 		assertCFrameClose(a1.standMotion.joint.C1, standBaseC1, TOL, ROT_DOT_MIN, "S1: Stand joint C1 returned to base")
 		assertCFrameClose(a1.standMotion.joint.Part1.CFrame, standWorldBase, TOL, ROT_DOT_MIN, "S1: Stand world CFrame returned to base")
 
 		-- KO de b1 com substituto automático b2 (Waiting_Fighter_B -> Current_Fighter_B, b1 morto -> Waiting_Fighter_B, b3 permanece em Waiting_Fighter_B_2)
-		local s1Timeline = SkillData.JOTARO_SKILL_DATA[1]
 		c:onAttackStarted({ attackerId = "a1", targetId = "b1", slot = 1 })
 		c:onHitResolved({ attackerId = "a1", targetId = "b1", hitIndex = 1, hit = true, damage = 200, crit = false })
 		c:onFighterDied({ sideId = "B", fighterId = "b1", nextActive = "b2" })
-		task.wait(s1Timeline.hits[1].time + s1Timeline.returnTime + config.PLACEHOLDER_KO_TWEEN_SECONDS + config.PLACEHOLDER_SWITCH_TWEEN_SECONDS + 0.2)
+		awaitAttackAndMovement(c, "S1 KO")
 		check(b1.dead and not b1.active and b2.active and not b2.dead, "S1: b1 dead and b2 promoted after KO")
 		assertAlignedToAnchor(b1.rootPart.CFrame, anchorParts.waitB1, b1, "S1: dead b1 moved to Waiting_Fighter_B")
 		assertAlignedToAnchor(b2.rootPart.CFrame, anchorParts.activeB, b2, "S1: substitute b2 moved to Current_Fighter_B")
@@ -280,11 +317,10 @@ local ok, failure = pcall(function()
 		-- Troca + KO + retorno do atacante/Stand na arena girada e transladada
 		local standBaseC1 = a1.standMotion.baseC1
 		local standWorldBase = a1.standMotion.joint.Part1.CFrame
-		local s1Timeline = SkillData.JOTARO_SKILL_DATA[1]
 		c:onAttackStarted({ attackerId = "a1", targetId = "b1", slot = 1 })
 		c:onHitResolved({ attackerId = "a1", targetId = "b1", hitIndex = 1, hit = true, damage = 200, crit = false })
 		c:onFighterDied({ sideId = "B", fighterId = "b1", nextActive = "b3" })
-		task.wait(s1Timeline.hits[1].time + s1Timeline.returnTime + config.PLACEHOLDER_KO_TWEEN_SECONDS + config.PLACEHOLDER_SWITCH_TWEEN_SECONDS + 0.2)
+		awaitAttackAndMovement(c, "S2 KO")
 
 		assertAlignedToAnchor(a1.rootPart.CFrame, anchorParts.activeA, a1, "S2: transformed attacker returned")
 		assertCFrameClose(a1.standMotion.joint.C1, standBaseC1, TOL, ROT_DOT_MIN, "S2: transformed Stand C1 returned")
@@ -323,8 +359,7 @@ local ok, failure = pcall(function()
 		assertAlignedToAnchor(opp2.rootPart.CFrame, anchorParts.waitB1, opp2, "S3: PvP opponent wait 1 at Waiting_Fighter_B")
 		assertAlignedToAnchor(opp3.rootPart.CFrame, anchorParts.waitB2, opp3, "S3: PvP opponent wait 2 at Waiting_Fighter_B_2")
 
-		c:onSwitchPerformed({ sideId = "B", previousFighterId = "a1", activeFighterId = "a2" })
-		task.wait(config.PLACEHOLDER_SWITCH_TWEEN_SECONDS + 0.08)
+		switchAndWait(c, { sideId = "B", previousFighterId = "a1", activeFighterId = "a2" })
 		assertAlignedToAnchor(local2.rootPart.CFrame, anchorParts.activeA, local2, "S3: PvP local switch active at Current_Fighter_A")
 		assertAlignedToAnchor(local1.rootPart.CFrame, anchorParts.waitA1, local1, "S3: PvP local switch bench at Waiting_Fighter_A")
 
@@ -442,4 +477,5 @@ if c.poolContainer then
 	c.poolContainer:Destroy()
 end
 assert(ok, failure)
-return { result = "L1_ARENA_ANCHORS_QA_PASSED", checks = checks, scenarios = scenarios }
+return { result = "L1_ARENA_ANCHORS_QA_PASSED", checks = checks, scenarios = scenarios,
+	maxPositionError = maxPositionError, maxAngleError = maxAngleError }

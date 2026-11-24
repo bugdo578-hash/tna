@@ -1,0 +1,1412 @@
+{
+  "baseCommit": "a23844c",
+  "studio": "Roblox Studio Play, cliente local",
+  "historico": {
+    "assertion": "S1: a2 active after second voluntary switch",
+    "positionErrorStuds": 4.5936,
+    "lookDot": 0.28751,
+    "rightDot": 0.28751,
+    "upDot": 1,
+    "angleDegreesApprox": 73.29105806939823
+  },
+  "l1Antes": {
+    "rodadas": [
+      {
+        "controlledFrameStall": false,
+        "checks": 121,
+        "deviationAtSecondSwitch": {
+          "tween": "Completed",
+          "positionStuds": 0,
+          "angleDegrees": 0
+        },
+        "round": 1,
+        "passed": true
+      },
+      {
+        "controlledFrameStall": false,
+        "checks": 121,
+        "deviationAtSecondSwitch": {
+          "tween": "Completed",
+          "positionStuds": 0,
+          "angleDegrees": 0
+        },
+        "round": 2,
+        "passed": true
+      },
+      {
+        "controlledFrameStall": false,
+        "checks": 121,
+        "deviationAtSecondSwitch": {
+          "tween": "Completed",
+          "positionStuds": 0,
+          "angleDegrees": 0
+        },
+        "round": 3,
+        "passed": true
+      },
+      {
+        "controlledFrameStall": false,
+        "checks": 121,
+        "deviationAtSecondSwitch": {
+          "tween": "Completed",
+          "positionStuds": 0,
+          "angleDegrees": 0
+        },
+        "round": 4,
+        "passed": true
+      },
+      {
+        "controlledFrameStall": false,
+        "checks": 121,
+        "deviationAtSecondSwitch": {
+          "tween": "Completed",
+          "positionStuds": 0,
+          "angleDegrees": 0
+        },
+        "round": 5,
+        "passed": true
+      },
+      {
+        "controlledFrameStall": false,
+        "checks": 121,
+        "deviationAtSecondSwitch": {
+          "tween": "Completed",
+          "positionStuds": 0,
+          "angleDegrees": 0
+        },
+        "round": 6,
+        "passed": true
+      },
+      {
+        "controlledFrameStall": false,
+        "checks": 121,
+        "deviationAtSecondSwitch": {
+          "tween": "Completed",
+          "positionStuds": 0,
+          "angleDegrees": 0
+        },
+        "round": 7,
+        "passed": true
+      },
+      {
+        "controlledFrameStall": true,
+        "deviationAtSecondSwitch": {
+          "tween": "Completed",
+          "positionStuds": 0,
+          "angleDegrees": 0
+        },
+        "round": 8,
+        "passed": false,
+        "failure": "AssistantCommand:505: AssistantCommand:21: S1: attacker returned to Current_Fighter_A (posErr=4.52930, lookDot=1.00000, rightDot=1.00000, upDot=1.00000)"
+      },
+      {
+        "controlledFrameStall": true,
+        "deviationAtSecondSwitch": {
+          "tween": "Playing",
+          "positionStuds": 5.640865802764893,
+          "angleDegrees": 90.00000250447816
+        },
+        "round": 9,
+        "passed": false,
+        "failure": "AssistantCommand:505: AssistantCommand:258: AssistantCommand:21: S1: a2 active after second voluntary switch (posErr=5.64087, lookDot=0.00000, rightDot=0.00000, upDot=1.00000)"
+      },
+      {
+        "controlledFrameStall": true,
+        "checks": 122,
+        "deviationAtSecondSwitch": {
+          "tween": "Completed",
+          "positionStuds": 0,
+          "angleDegrees": 0
+        },
+        "round": 10,
+        "passed": true
+      }
+    ],
+    "reproducao": [
+      {
+        "active": false,
+        "dt": 0.0029983529821038246,
+        "battle": 1,
+        "home": [
+          11228.9013671875,
+          8.620741844177246,
+          138.70001220703125,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1
+        ],
+        "anchor": "Waiting_Fighter_A",
+        "expected": [
+          11228.9013671875,
+          8.620741844177246,
+          138.70001220703125,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1
+        ],
+        "hits": 0,
+        "fighter": "a2",
+        "studs": 0,
+        "t": 0.5812472999999727,
+        "event": "before",
+        "degrees": 0,
+        "actual": [
+          11228.9013671875,
+          8.620741844177246,
+          138.70001220703125,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1
+        ],
+        "anchorFrame": [
+          11228.9013671875,
+          7.3957414627075195,
+          138.70001220703125,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1
+        ],
+        "groundContact": "0, -1.2000000476837158, 0",
+        "bench": 0,
+        "fighterId": "anubis",
+        "queued": 0,
+        "attack": 2
+      },
+      {
+        "active": true,
+        "dt": 0.0029983529821038246,
+        "battle": 1,
+        "home": [
+          11228.4013671875,
+          11.699544906616211,
+          134,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "anchor": "Current_Fighter_A",
+        "expected": [
+          11228.4013671875,
+          11.699544906616211,
+          134,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "hits": 0,
+        "fighter": "a3",
+        "studs": 0,
+        "t": 0.5812621999999692,
+        "event": "leaving-before",
+        "degrees": 0,
+        "actual": [
+          11228.4013671875,
+          11.699544906616211,
+          134,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "anchorFrame": [
+          11228.4013671875,
+          10.474581718444824,
+          134,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "groundContact": "0, -1.1999636888504028, 0",
+        "bench": 1,
+        "fighterId": "jotaro",
+        "queued": 0,
+        "attack": 2
+      },
+      {
+        "tween": "Begin",
+        "active": false,
+        "dt": 0.0029983529821038246,
+        "battle": 1,
+        "home": [
+          11228.9013671875,
+          8.620705604553223,
+          138.70001220703125,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1
+        ],
+        "anchor": "Waiting_Fighter_A",
+        "expected": [
+          11228.9013671875,
+          8.620705604553223,
+          138.70001220703125,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1
+        ],
+        "hits": 0,
+        "fighter": "a3",
+        "studs": 5.640865802764893,
+        "t": 0.5814212000000225,
+        "event": "created",
+        "degrees": 90.00000250447816,
+        "actual": [
+          11228.4013671875,
+          11.699544906616211,
+          134,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "anchorFrame": [
+          11228.9013671875,
+          7.3957414627075195,
+          138.70001220703125,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1
+        ],
+        "groundContact": "0, -1.1999636888504028, 0",
+        "bench": 0,
+        "fighterId": "jotaro",
+        "queued": 0,
+        "attack": 2
+      },
+      {
+        "tween": "Begin",
+        "active": true,
+        "dt": 0.0029983529821038246,
+        "battle": 1,
+        "home": [
+          11228.4013671875,
+          11.699581146240234,
+          134,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "anchor": "Current_Fighter_A",
+        "expected": [
+          11228.4013671875,
+          11.699581146240234,
+          134,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "hits": 0,
+        "fighter": "a2",
+        "studs": 5.640865802764893,
+        "t": 0.5814881000000014,
+        "event": "created",
+        "degrees": 90.00000250447816,
+        "actual": [
+          11228.9013671875,
+          8.620741844177246,
+          138.70001220703125,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1
+        ],
+        "anchorFrame": [
+          11228.4013671875,
+          10.474581718444824,
+          134,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "groundContact": "0, -1.2000000476837158, 0",
+        "bench": 0,
+        "fighterId": "anubis",
+        "queued": 0,
+        "attack": 2
+      },
+      {
+        "tween": "Playing",
+        "active": true,
+        "dt": 0.0029983529821038246,
+        "battle": 1,
+        "home": [
+          11228.4013671875,
+          11.699581146240234,
+          134,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "anchor": "Current_Fighter_A",
+        "expected": [
+          11228.4013671875,
+          11.699581146240234,
+          134,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "hits": 0,
+        "fighter": "a2",
+        "studs": 5.640865802764893,
+        "t": 0.5814993000000186,
+        "event": "dispatched",
+        "degrees": 90.00000250447816,
+        "actual": [
+          11228.9013671875,
+          8.620741844177246,
+          138.70001220703125,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1
+        ],
+        "anchorFrame": [
+          11228.4013671875,
+          10.474581718444824,
+          134,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "groundContact": "0, -1.2000000476837158, 0",
+        "bench": 0,
+        "fighterId": "anubis",
+        "queued": 0,
+        "attack": 2
+      },
+      {
+        "tween": "Playing",
+        "active": true,
+        "dt": 0.003997804131358862,
+        "battle": 1,
+        "home": [
+          11228.4013671875,
+          11.699581146240234,
+          134,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "anchor": "Current_Fighter_A",
+        "expected": [
+          11228.4013671875,
+          11.699581146240234,
+          134,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "hits": 0,
+        "fighter": "a2",
+        "studs": 5.640865802764893,
+        "t": 0.8838458000000173,
+        "event": "assertion",
+        "degrees": 90.00000250447816,
+        "actual": [
+          11228.9013671875,
+          8.620741844177246,
+          138.70001220703125,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1
+        ],
+        "anchorFrame": [
+          11228.4013671875,
+          10.474581718444824,
+          134,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "groundContact": "0, -1.2000000476837158, 0",
+        "bench": 0,
+        "fighterId": "anubis",
+        "queued": 0,
+        "attack": 2
+      },
+      {
+        "tween": "Completed",
+        "active": true,
+        "dt": 0.0029983199201524258,
+        "battle": 1,
+        "home": [
+          11228.4013671875,
+          11.699581146240234,
+          134,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "anchor": "Current_Fighter_A",
+        "expected": [
+          11228.4013671875,
+          11.699581146240234,
+          134,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "hits": 0,
+        "fighter": "a2",
+        "studs": 0,
+        "t": 0.8871120999999675,
+        "event": "terminal-Completed",
+        "degrees": 0,
+        "actual": [
+          11228.4013671875,
+          11.699581146240234,
+          134,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "anchorFrame": [
+          11228.4013671875,
+          10.474581718444824,
+          134,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "groundContact": "0, -1.2000000476837158, 0",
+        "bench": 0,
+        "fighterId": "anubis",
+        "queued": 0,
+        "attack": 2
+      },
+      {
+        "tween": "Completed",
+        "active": false,
+        "dt": 0.0029983199201524258,
+        "battle": 1,
+        "home": [
+          11228.9013671875,
+          8.620705604553223,
+          138.70001220703125,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1
+        ],
+        "anchor": "Waiting_Fighter_A",
+        "expected": [
+          11228.9013671875,
+          8.620705604553223,
+          138.70001220703125,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1
+        ],
+        "hits": 0,
+        "fighter": "a3",
+        "studs": 0,
+        "t": 0.8871864000000187,
+        "event": "terminal-Completed",
+        "degrees": 0,
+        "actual": [
+          11228.9013671875,
+          8.620705604553223,
+          138.70001220703125,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1
+        ],
+        "anchorFrame": [
+          11228.9013671875,
+          7.3957414627075195,
+          138.70001220703125,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1
+        ],
+        "groundContact": "0, -1.1999636888504028, 0",
+        "bench": 0,
+        "fighterId": "jotaro",
+        "queued": 0,
+        "attack": 2
+      },
+      {
+        "tween": "Completed",
+        "active": true,
+        "dt": 0.0029983199201524258,
+        "battle": 1,
+        "home": [
+          11228.4013671875,
+          11.699581146240234,
+          134,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "anchor": "Current_Fighter_A",
+        "expected": [
+          11228.4013671875,
+          11.699581146240234,
+          134,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "hits": 0,
+        "fighter": "a2",
+        "studs": 0,
+        "t": 0.8936022000000321,
+        "event": "after-terminal",
+        "degrees": 0,
+        "actual": [
+          11228.4013671875,
+          11.699581146240234,
+          134,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "anchorFrame": [
+          11228.4013671875,
+          10.474581718444824,
+          134,
+          0,
+          0,
+          1,
+          0,
+          1,
+          0,
+          -1,
+          0,
+          0
+        ],
+        "groundContact": "0, -1.2000000476837158, 0",
+        "bench": 0,
+        "fighterId": "anubis",
+        "queued": 0,
+        "attack": 2
+      }
+    ],
+    "diagnosticoOra": {
+      "rodadas": 1,
+      "checks": 121,
+      "hitsPendentesNaJanelaAntiga": 3,
+      "hitsPendentesAposConclusao": 0,
+      "posicaoFinalStuds": 0,
+      "anguloFinalGraus": 0
+    }
+  },
+  "l1Depois": [
+    {
+      "rodada": 1,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.594665900000109,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 2,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.6333755999999084,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 3,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.6255579000001035,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 4,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.666602699999885,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 5,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.624876600000107,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 6,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.555334099999982,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 7,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.640002200000026,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 8,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.702223199999935,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 9,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.527104300000019,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 10,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.622511900000063,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 11,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.6167204999999285,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 12,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.5657827,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 13,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.659480900000062,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 14,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.592186099999935,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 15,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.760170000000016,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 16,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.796419399999877,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 17,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.754907700000103,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 18,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.787876099999949,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 19,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.690751099999943,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 20,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.636338100000103,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 21,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.591976599999953,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 22,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.62019969999983,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 23,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.82197199999996,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 24,
+      "passou": true,
+      "atrasoControlado": false,
+      "duracaoSegundos": 4.899861600000122,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 25,
+      "passou": true,
+      "atrasoControlado": true,
+      "duracaoSegundos": 4.75943929999994,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 26,
+      "passou": true,
+      "atrasoControlado": true,
+      "duracaoSegundos": 4.75407250000012,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 27,
+      "passou": true,
+      "atrasoControlado": true,
+      "duracaoSegundos": 4.738216299999976,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 28,
+      "passou": true,
+      "atrasoControlado": true,
+      "duracaoSegundos": 5.203214300000127,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 29,
+      "passou": true,
+      "atrasoControlado": true,
+      "duracaoSegundos": 4.700073099999827,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 30,
+      "passou": true,
+      "atrasoControlado": true,
+      "duracaoSegundos": 4.802727499999946,
+      "checks": 121,
+      "maiorDesvioStuds": 0,
+      "maiorDesvioGraus": 0.019782341029446364
+    },
+    {
+      "rodada": 31,
+      "passou": false,
+      "atrasoControlado": false,
+      "controleNegativo": "space",
+      "duracaoSegundos": 0.592381400000022,
+      "falha": "AssistantCommand:492: AssistantCommand:21: S1: a2 active after second voluntary switch (posErr=0.00999, lookDot=1.00000, rightDot=1.00000, upDot=1.00000)"
+    },
+    {
+      "rodada": 32,
+      "passou": false,
+      "atrasoControlado": false,
+      "controleNegativo": "angle",
+      "duracaoSegundos": 0.6277772999999343,
+      "falha": "AssistantCommand:492: AssistantCommand:21: S1: a2 active after second voluntary switch (posErr=0.00000, lookDot=0.99960, rightDot=0.99960, upDot=1.00000)"
+    }
+  ],
+  "ciclos": {
+    "primeiraExecucao": {
+      "passou": 80,
+      "porCenario": {
+        "frame_hitch": {
+          "passed": 10,
+          "failed": 0
+        },
+        "pause_resume": {
+          "passed": 10,
+          "failed": 0
+        },
+        "voluntary": {
+          "passed": 20,
+          "failed": 0
+        },
+        "multihit_ko": {
+          "passed": 10,
+          "failed": 0
+        },
+        "automatic_ko": {
+          "passed": 10,
+          "failed": 0
+        },
+        "late_reaction": {
+          "passed": 10,
+          "failed": 0
+        },
+        "consecutive_cancelled": {
+          "passed": 0,
+          "failed": 20
+        },
+        "quit_restart": {
+          "passed": 10,
+          "failed": 0
+        }
+      },
+      "falhas": [
+        {
+          "cenario": "consecutive_cancelled",
+          "ciclo": 1,
+          "motivo": "AssistantCommand:142: tween obsoleto sobreviveu"
+        },
+        {
+          "cenario": "consecutive_cancelled",
+          "ciclo": 2,
+          "motivo": "AssistantCommand:142: tween obsoleto sobreviveu"
+        },
+        {
+          "cenario": "consecutive_cancelled",
+          "ciclo": 3,
+          "motivo": "AssistantCommand:142: tween obsoleto sobreviveu"
+        },
+        {
+          "cenario": "consecutive_cancelled",
+          "ciclo": 4,
+          "motivo": "AssistantCommand:142: tween obsoleto sobreviveu"
+        },
+        {
+          "cenario": "consecutive_cancelled",
+          "ciclo": 5,
+          "motivo": "AssistantCommand:142: tween obsoleto sobreviveu"
+        },
+        {
+          "cenario": "consecutive_cancelled",
+          "ciclo": 6,
+          "motivo": "AssistantCommand:142: tween obsoleto sobreviveu"
+        },
+        {
+          "cenario": "consecutive_cancelled",
+          "ciclo": 7,
+          "motivo": "AssistantCommand:142: tween obsoleto sobreviveu"
+        },
+        {
+          "cenario": "consecutive_cancelled",
+          "ciclo": 8,
+          "motivo": "AssistantCommand:142: tween obsoleto sobreviveu"
+        },
+        {
+          "cenario": "consecutive_cancelled",
+          "ciclo": 9,
+          "motivo": "AssistantCommand:142: tween obsoleto sobreviveu"
+        },
+        {
+          "cenario": "consecutive_cancelled",
+          "ciclo": 10,
+          "motivo": "AssistantCommand:142: tween obsoleto sobreviveu"
+        },
+        {
+          "cenario": "consecutive_cancelled",
+          "ciclo": 11,
+          "motivo": "AssistantCommand:142: tween obsoleto sobreviveu"
+        },
+        {
+          "cenario": "consecutive_cancelled",
+          "ciclo": 12,
+          "motivo": "AssistantCommand:142: tween obsoleto sobreviveu"
+        },
+        {
+          "cenario": "consecutive_cancelled",
+          "ciclo": 13,
+          "motivo": "AssistantCommand:142: tween obsoleto sobreviveu"
+        },
+        {
+          "cenario": "consecutive_cancelled",
+          "ciclo": 14,
+          "motivo": "AssistantCommand:142: tween obsoleto sobreviveu"
+        },
+        {
+          "cenario": "consecutive_cancelled",
+          "ciclo": 15,
+          "motivo": "AssistantCommand:142: tween obsoleto sobreviveu"
+        },
+        {
+          "cenario": "consecutive_cancelled",
+          "ciclo": 16,
+          "motivo": "AssistantCommand:142: tween obsoleto sobreviveu"
+        },
+        {
+          "cenario": "consecutive_cancelled",
+          "ciclo": 17,
+          "motivo": "AssistantCommand:142: tween obsoleto sobreviveu"
+        },
+        {
+          "cenario": "consecutive_cancelled",
+          "ciclo": 18,
+          "motivo": "AssistantCommand:142: tween obsoleto sobreviveu"
+        },
+        {
+          "cenario": "consecutive_cancelled",
+          "ciclo": 19,
+          "motivo": "AssistantCommand:142: tween obsoleto sobreviveu"
+        },
+        {
+          "cenario": "consecutive_cancelled",
+          "ciclo": 20,
+          "motivo": "AssistantCommand:142: tween obsoleto sobreviveu"
+        }
+      ]
+    },
+    "diagnosticoDaSobreposicao": [
+      {
+        "immediate": [
+          "Playing",
+          "Playing"
+        ],
+        "first": [
+          "Playing",
+          "Playing"
+        ],
+        "nextFrame": [
+          "Playing",
+          "Playing"
+        ],
+        "settled": [
+          "Cancelled",
+          "Cancelled"
+        ]
+      },
+      {
+        "immediate": [
+          "Playing",
+          "Playing"
+        ],
+        "first": [
+          "Playing",
+          "Playing"
+        ],
+        "nextFrame": [
+          "Playing",
+          "Playing"
+        ],
+        "settled": [
+          "Cancelled",
+          "Cancelled"
+        ]
+      },
+      {
+        "immediate": [
+          "Playing",
+          "Playing"
+        ],
+        "first": [
+          "Playing",
+          "Playing"
+        ],
+        "nextFrame": [
+          "Playing",
+          "Playing"
+        ],
+        "settled": [
+          "Cancelled",
+          "Cancelled"
+        ]
+      },
+      {
+        "immediate": [
+          "Playing",
+          "Playing"
+        ],
+        "first": [
+          "Playing",
+          "Playing"
+        ],
+        "nextFrame": [
+          "Playing",
+          "Playing"
+        ],
+        "settled": [
+          "Cancelled",
+          "Cancelled"
+        ]
+      }
+    ],
+    "execucaoFinal": {
+      "maxHitch": 0.2700063999998292,
+      "maxGround": 2.384185791015625e-7,
+      "passed": 100,
+      "maxPosition": 0,
+      "outcomes": {
+        "quit_restart": {
+          "passed": 10,
+          "failed": 0
+        },
+        "consecutive_cancelled": {
+          "passed": 20,
+          "failed": 0
+        },
+        "automatic_ko": {
+          "passed": 10,
+          "failed": 0
+        },
+        "multihit_ko": {
+          "passed": 10,
+          "failed": 0
+        },
+        "late_reaction": {
+          "passed": 10,
+          "failed": 0
+        },
+        "voluntary": {
+          "passed": 20,
+          "failed": 0
+        },
+        "pause_resume": {
+          "passed": 10,
+          "failed": 0
+        },
+        "frame_hitch": {
+          "passed": 10,
+          "failed": 0
+        }
+      },
+      "maxFrame": 0.28658100962638855,
+      "maxAngle": 0.013988227454926254,
+      "failures": [],
+      "result": "L1_2_COMBAT_SWITCH_STABILITY_PASSED"
+    }
+  },
+  "regressoesCliente": {
+    "combat-interruptions-client": {
+      "ok": true,
+      "result": {
+        "result": "COMBAT_INTERRUPTIONS_CLIENT_QA_PASSED",
+        "checks": 38
+      }
+    },
+    "combat-k2-edge-probe": {
+      "ok": true,
+      "result": {
+        "passed": 16,
+        "checks": 16
+      }
+    },
+    "ora-return-client": {
+      "ok": true,
+      "result": {
+        "result": "ORA_RETURN_CLIENT_PASSED",
+        "checks": 105
+      }
+    },
+    "vfx-controller": {
+      "ok": true,
+      "result": {
+        "result": "VFX_CONTROLLER_QA_PASSED",
+        "checks": 179
+      }
+    },
+    "battle-teardown-client": {
+      "ok": true,
+      "result": {
+        "result": "BATTLE_TEARDOWN_CLIENT_PASSED",
+        "checks": 804
+      }
+    },
+    "combat-hit-queue-generation": {
+      "ok": true,
+      "result": {
+        "result": "K1_HIT_QUEUE_GENERATION_QA_PASSED",
+        "checks": 49
+      }
+    },
+    "combat-fighter-grounding-l1-1": {
+      "ok": true,
+      "result": {
+        "result": "L1_1_FIGHTER_GROUNDING_QA_PASSED",
+        "checks": 144
+      }
+    },
+    "combat-k2-multihit-ko-switch": {
+      "ok": true,
+      "result": {
+        "result": "K2_MULTIHIT_KO_SWITCH_QA_PASSED",
+        "checks": 56
+      }
+    }
+  },
+  "outrasValidacoes": {
+    "simulador": "SIMULATION_ALL_PASSED",
+    "rbxtsc": "passou",
+    "gitDiffCheck": "passou",
+    "checkStructure": "executado, mesmos apontamentos do baseline",
+    "multiplayerReal": "fora do diagnóstico: a reprodução usa apenas a ordem local entre o teste e o TweenService"
+  }
+}
