@@ -9,6 +9,8 @@ local SkillData = require(game.ReplicatedStorage.TS.SkillData)
 
 local checks = 0
 local scenarios = {}
+local TOL = config.COMBAT_POSITION_TOLERANCE_STUDS
+local ROT_DOT_MIN = 0.9999
 
 local function check(condition, message)
 	checks += 1
@@ -37,9 +39,6 @@ local function assertAlignedToAnchor(actual, anchorPart, fighter, label)
 	local expected = CombatFighterGrounding.alignFighterCFrameToAnchor(anchorPart, fighter.groundContactOffset)
 	assertCFrameClose(actual, expected, TOL, ROT_DOT_MIN, label)
 end
-
-local TOL = config.COMBAT_POSITION_TOLERANCE_STUDS
-local ROT_DOT_MIN = 0.9999
 
 local arena = workspace:FindFirstChild(config.ARENA_BASES_NAME)
 check(arena ~= nil, "Workspace.Arena_bases must exist in Studio")

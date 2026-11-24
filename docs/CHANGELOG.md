@@ -2,6 +2,12 @@
 
 Registro conciso de mudanças a partir de `2026-11-14` (ordem cronológica reversa). Histórico anterior a `2026-11-14` (base inicial T1–T5, T7.1, T7.2 e primeira correção de DataStore/autosave): [CHANGELOG_ARCHIVE.md](CHANGELOG_ARCHIVE.md). Estado operacional atual: [HANDOFF.md](HANDOFF.md).
 
+## 2026-11-24 — QA complementar de interrupções e introdução
+
+- O Pause PvE suspende também as cópias de Sound que o Part_Icles hospeda fora do palco, identificadas pela fonte de cada emissão. Quit e fim de batalha encerram essas cópias durante a limpeza do palco.
+- A sonda multiplayer valida a liberação em IDLE e uma S1 pedida pelo HUD em cada cliente após o countdown completo e a materialização L5.1. A sonda de áudio usa um Sound existente em duas rodadas PvE e verifica o TimePosition e a limpeza em Quit e vitória.
+- As tolerâncias da sonda L1 foram movidas para antes do helper que as utiliza.
+
 ## 2026-11-24 — Interrupções cinematográficas de combate
 
 - A apresentação recebe a identidade da sessão e a sequência do ataque. A fila deduplica resultados por hit e alvo e usa o resultado autoritativo quando ele chega depois do timeout visual do marker.

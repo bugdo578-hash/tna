@@ -74,8 +74,10 @@ Roblox RPG ATB 1v1 com tag (até 3 bonecos/lado). `roblox-ts` + Rojo (`npm run w
 - `Controllers/CombatFighterGrounding.ts`: resolve o ponto físico de contato com o solo (`GroundContact` opcional ou menor ponto das partes físicas do corpo, ignorando Stand/acessórios/VFX/partículas/hitboxes) e alinha o `CFrame` do lutador ao plano superior do anchor preservando sua orientação 3D.
 - `Controllers/CombatHitQueue.ts`: fila de resultados de hits recebidos do servidor (`hitResultsByIndex`, `consumedHitIndices`, `activePendingHits`), espera com cancelamento/timeout, consumo único e limpeza entre ataques/batalhas.
 - `tools/combat-interruptions-client-qa.luau` e `tools/combat-interruptions-play-qa.luau`: sondas de interrupção com sequência isolada no cliente e com sessões PvE/PvP em Studio Multiplayer.
+- `tools/combat-attack-sound-play-qa.luau`: sonda PvE com um Sound existente emitido pelo Part_Icles durante uma habilidade, verificando TimePosition, retomada e limpeza em Quit e vitória.
 - `Controllers/CombatStandMotion.ts`: posicionamento e pulsos do `StandJoint` (`standAttackC1`, `positionStandForAttack`, `pulseStandStrike`, `restoreStandBase` por geração sem drift) e tweens placeholder de sequência de ataque, reação de hit/esquiva e movimento de modelo (`tweenModelTo`).
 - `Controllers/CombatVfxBridge.ts`: ponte entre `CombatController` e `VFXController` (preload/deload por geração, VFX de skill/hit/crit/KO, cópias temporárias e carriers).
+- `Controllers/CombatVfxAudio.ts`: pausa e encerra sons de habilidades, incluindo cópias que o Part_Icles hospeda fora da árvore do efeito.
 - `Controllers/DayNightController.ts`: lê perfis no `MaterialService` e interpola `Lighting`/efeitos/`Sky` no `Heartbeat`.
 - `Controllers/InventoryController.ts`: painel de inventário, seleção de `activeTeam` e alocação sem mutação otimista.
 - `Controllers/PvpController.ts`: popup de convite PVP (`Aceitar`/`Recusar`) e banner de status do desafio.

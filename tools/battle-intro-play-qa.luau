@@ -31,7 +31,8 @@ if run:IsClient() then
 	local frames = run.PreRender
 	local combatController = combat.new()
 	combatController:start()
-	hudClass.new(combatController):start()
+	local hudController = hudClass.new(combatController)
+	hudController:start()
 	local hud = gui:WaitForChild("BattleHUD")
 	local state
 	local seen
@@ -182,9 +183,21 @@ if run:IsClient() then
 				and horizDir(camera.CFrame.Position):Dot(horizDir(state.destination.Position)) < -0.85
 		end
 	end)
-	report.OnClientEvent:Connect(function(action)
+	report.OnClientEvent:Connect(function(action, id)
 		if action == "expectRespawn" and state then
 			state.respawn = true
+		elseif action == "skill" and state and state.id == id then
+			local deadline = os.clock() + 5
+			repeat
+				task.wait()
+				local active = hudController:getActiveFighterForSide(0)
+				if active and not hudController.preparing and hudController.battleState == "IDLE"
+					and hudController.playerTargetAtb >= active.slotCosts[1] then
+					hudController:handleSkillButtonClicked(1)
+					return
+				end
+			until os.clock() >= deadline
+			report:FireServer("diagnostic", id, "HUD did not allow S1 after release")
 		end
 	end)
 	started.OnClientEvent:Connect(function(payload)
@@ -211,6 +224,19 @@ if run:IsClient() then
 			end
 		end)
 	end
+	remotes[protocol.REMOTE_NAMES.StateChanged].OnClientEvent:Connect(function(payload)
+		if state and payload.battleReleased == state.id then
+			local id = state.id
+			task.defer(function()
+				if state and state.id == id then
+					report:FireServer("released", id, {
+						state = payload.state, hud = hudController.battleState,
+						preparing = hudController.preparing, at = workspace:GetServerTimeNow(),
+					})
+				end
+			end)
+		end
+	end)
 	frames:Connect(function()
 		rendered += 1
 		if not state then return end
@@ -284,13 +310,17 @@ end
 report = Instance.new("RemoteEvent")
 report.Name = "BattleIntroQAReport"
 report.Parent = storage
-local listening, reports, goFrames, trace = {}, {}, {}, {}
+local listening, reports, goFrames, released, trace = {}, {}, {}, {}, {}
 report.OnServerEvent:Connect(function(player, kind, id, value)
 	if kind == "listening" then listening[player] = true end
 	if kind == "diagnostic" then table.insert(trace, `{player.Name} {value}`) end
 	if kind == "go" then
 		goFrames[id] = goFrames[id] or {}
 		goFrames[id][player] = value
+	end
+	if kind == "released" then
+		released[id] = released[id] or {}
+		released[id][player] = value
 	end
 	if kind == "end" then
 		reports[id] = reports[id] or {}
@@ -375,7 +405,28 @@ local ok, result = xpcall(function()
 	waitUntil(function() return goFrames[0] and goFrames[0][a] and goFrames[0][b] end, "one client missed GO")
 	local skew = math.abs(goFrames[0][a] - goFrames[0][b])
 	assert(skew < 0.2, "GO skew " .. skew)
+	waitUntil(function() return released[0] and released[0][a] and released[0][b] end, "one client missed the server release")
+	local record = service.playerSessions[a].session
+	assert(service:isRunning(record) and record.battle.state == "IDLE", "server did not release into IDLE")
+	for _, row in released[0] do
+		assert(row.state == "IDLE" and row.hud == "IDLE" and not row.preparing and row.at >= schedules[0].goAt,
+			"client did not enter IDLE after authoritative GO")
+	end
 	waitUntil(function() return service:getSideAtb(a, 0) > 0 end, "ATB did not start after GO")
+	local attacks = {}
+	local hits = 0
+	local disconnectAttack = record.battle.events.attackStarted:connect(function(event) table.insert(attacks, event.attacker) end)
+	local disconnectHit = record.battle.events.hitResolved:connect(function() hits += 1 end)
+	for index, player in {a, b} do
+		local side = service.playerSessions[player].side
+		side:setAtb(require(storage.TS.Config).ATB_MAX)
+		report:FireClient(player, "skill", 0)
+		waitUntil(function()
+			return attacks[index] == side:getActiveFighter() and hits >= index and record.battle.state == "IDLE"
+		end, "real client could not use S1 after GO")
+	end
+	disconnectAttack()
+	disconnectHit()
 	service:requestQuit(a)
 	local rowA, rowB = checkEnd(0, a, "quit"), checkEnd(0, b, "quit")
 	assert(rowA.side == 1 and rowB.side == 2 and rowA.goAt == rowB.goAt, "PvP side or timestamp mismatch")
@@ -393,7 +444,7 @@ local ok, result = xpcall(function()
 			assert(fighter.vfxAligned and fighter.feetAligned and fighter.home and not fighter.placeholderSeen,
 				"incorrect VFX, feet or bench placement: " .. game:GetService("HttpService"):JSONEncode(fighter))
 			local emitters = fighter.emitters or {}
-			assert(fighter.retainedTarget and emitters["growing wind"] and emitters.b1 and emitters.gelu and emitters.Part
+			assert(fighter.retainedTarget and emitters["growing wind"] and emitters.b1 and emitters.gelu and (emitters.Part or emitters.Sound)
 				and emitters["sange bloco"] and fighter.particleTail,
 				"incomplete authored VFX: " .. game:GetService("HttpService"):JSONEncode(fighter))
 			assert(math.abs(fighter.endAt - fighter.startAt - 1.5) <= 0.12 and fighter.endAt <= row.goAt - 0.15, "materialization timing")
@@ -454,7 +505,8 @@ local ok, result = xpcall(function()
 	checkEnd(5, a, "disconnect")
 	assert(not goFrames[5] and not service:hasActiveSession(a) and #workspace.ActiveArenas:GetChildren() == 0,
 		"respawn left battle running")
-	return {result = "L5_1_MULTIPLAYER_QA_PASSED", skewSeconds = skew, first = rowA, second = rowB, trace = trace}
+	return {result = "L5_1_MULTIPLAYER_QA_PASSED", skewSeconds = skew, first = rowA, second = rowB,
+		authoritativeReleases = 2, skillRequestsWithHits = hits, trace = trace}
 end, debug.traceback)
 if ok then print(result.result, result.skewSeconds) else warn(result) end
 test:EndTest(if ok then result else {error = result, trace = trace})

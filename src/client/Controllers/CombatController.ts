@@ -454,8 +454,8 @@ export class CombatController {
 	private onStateChanged(payload: StateChangedPayload): void {
 		if (payload.sessionId !== undefined && payload.sessionId !== this.sessionId) return;
 		if (!this.battleEnded && payload.paused !== undefined && payload.paused !== this.resources.isPaused()) {
+			battleCleanupStep("attack sound pause", () => this.vfxBridge.setAttackPaused(payload.paused!));
 			this.resources.setPaused(payload.paused);
-			this.vfxBridge.setAttackPaused(payload.paused);
 		}
 		if (payload.battleReleased === undefined) return;
 		this.introduction.release(payload.battleReleased);
@@ -1319,6 +1319,7 @@ export class CombatController {
 		battleCleanupStep("status vfx clear", () => this.statusVfx.clearAll());
 		battleCleanupStep("cutscene reset", () => this.cutsceneController.resetForBattle());
 		battleCleanupStep("camera restore", () => this.cameraController.restore());
+		battleCleanupStep("battle vfx working copies", () => this.vfxBridge.clearWorkingCopies());
 		battleCleanupStep("stage destroy", () => this.stageFolder?.Destroy());
 		this.stageFolder = undefined;
 		this.fightersByTargetId.clear();
@@ -1330,7 +1331,6 @@ export class CombatController {
 		this.lastAttackSequence = 0;
 		this.physicalSideIds = ["", ""];
 		this.attackFinalizer.clear();
-		this.vfxBridge.clearWorkingCopies();
 		this.vfxBridge.clearActiveVfx();
 		battleCleanupStep("vfx deload", () => this.deloadBattleVfx(generation));
 		return generation;

@@ -11,6 +11,7 @@ import {
 	VFX_PRIORIDADE_ESSENCIAL,
 } from "../UI/VFXConfig";
 import { battleCleanupStep } from "./BattleCleanup";
+import { CombatVfxAudio } from "./CombatVfxAudio";
 import type { VFXController, VfxOrigem, VfxPrioridade } from "./VFXController";
 
 export interface PreloadedVfxEntry {
@@ -55,7 +56,7 @@ export class CombatVfxBridge {
 	public readonly vfxCarrierParts = new Map<Instance, BasePart>();
 	private readonly vfxSpatialLayouts = new Map<Instance, readonly WorkingVfxSpatialTarget[]>();
 	private readonly attackEffects = new Set<Instance>();
-	private readonly pausedSounds = new Set<Sound>();
+	private readonly audio = new CombatVfxAudio(() => this.host.getVfxController()?.getSoundRuntime());
 
 	private battleVfxGeneration = 0;
 
@@ -91,33 +92,18 @@ export class CombatVfxBridge {
 	}
 
 	public interruptAttackVfx(): void {
+		this.audio.interrupt(this.attackEffects);
 		for (const effect of this.attackEffects) {
 			battleCleanupStep("attack vfx", () => this.host.getVfxController()?.cancelEmission(effect));
-			for (const child of effect.GetDescendants()) {
-				if (child.IsA("Sound")) battleCleanupStep("attack sound", () => child.Stop());
-			}
 		}
 		this.attackEffects.clear();
-		this.pausedSounds.clear();
 	}
 
 	public setAttackPaused(paused: boolean): void {
-		if (!paused) {
-			for (const sound of this.pausedSounds) {
-				if (sound.Parent !== undefined) sound.Resume();
-			}
-			this.pausedSounds.clear();
-			return;
+		if (paused) {
+			for (const effect of this.attackEffects) this.host.getVfxController()?.cancelEmission(effect, true);
 		}
-		for (const effect of this.attackEffects) {
-			this.host.getVfxController()?.cancelEmission(effect, true);
-			for (const child of effect.GetDescendants()) {
-				if (child.IsA("Sound") && child.IsPlaying) {
-					child.Pause();
-					this.pausedSounds.add(child);
-				}
-			}
-		}
+		this.audio.setPaused(this.attackEffects, paused);
 	}
 
 	public clearActiveVfx(): void {

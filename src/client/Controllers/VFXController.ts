@@ -1,5 +1,5 @@
 import { ReplicatedStorage, RunService, UserInputService, Workspace } from "@rbxts/services";
-import type { PartIclesApi } from "../types/Part_Icles";
+import type { PartIclesApi, PartIclesSoundRuntime } from "../types/Part_Icles";
 import { WORKSPACE_BATTLE_FOLDER_NAME } from "../UI/CombatVisualConfig";
 import {
 	VFX_ATTR_IGNORAR_CULLING,
@@ -388,6 +388,10 @@ export class VFXController {
 
 	public getActiveCount(): number {
 		return this.ativos.size();
+	}
+
+	public getSoundRuntime(): PartIclesSoundRuntime | undefined {
+		return this.partIcles;
 	}
 
 	public cancelEmission(folder: Instance, pendingOnly = false): void {
