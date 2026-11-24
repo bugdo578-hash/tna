@@ -383,19 +383,16 @@ export class VFXController {
 
 	/** Retorna cópia dos contadores de descarte por motivo para diagnóstico no client. */
 	public debugStats(): VfxDebugStats {
-		return {
-			culling: this.descartes.culling,
-			orcamento: this.descartes.orcamento,
-			pastaInvalida: this.descartes.pastaInvalida,
-			moduloAusente: this.descartes.moduloAusente,
-			emitFalhou: this.descartes.emitFalhou,
-			origemInvalida: this.descartes.origemInvalida,
-			rateLimit: this.descartes.rateLimit,
-		};
+		return { ...this.descartes };
 	}
 
 	public getActiveCount(): number {
 		return this.ativos.size();
+	}
+
+	public cancelEmission(folder: Instance, pendingOnly = false): void {
+		const active = this.ativos.get(folder);
+		if (active !== undefined && (!pendingOnly || active.estado.pendingReemit)) this.desativarEntrada(folder, active, true);
 	}
 
 	public getBudgetSnapshot(): {

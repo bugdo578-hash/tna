@@ -6,6 +6,8 @@ export interface CombatHitQueueHost {
 	/** Verdadeiro enquanto `attackToken` for o ataque atual de uma batalha não encerrada. */
 	readonly isAttackCurrent: (attackToken: number) => boolean;
 	readonly isFollowUpCancelled: () => boolean;
+	readonly now?: () => number;
+	readonly awaitResume?: () => void;
 	/** Mantém `CombatController.activePendingHits` sincronizado para compatibilidade com os QAs Luau. */
 	readonly onPendingHitsChanged?: (activePendingHits: number) => void;
 }
@@ -18,6 +20,8 @@ export class CombatHitQueue {
 	private activePendingHits = 0;
 	private expectedTotalHits = 0;
 	private attackFinalized = false;
+	private attackSequence?: number;
+	private readonly expiredWaits = new Set<number>();
 
 	public constructor(private readonly host: CombatHitQueueHost) {}
 
@@ -71,21 +75,25 @@ export class CombatHitQueue {
 		this.setActivePendingHits(0);
 	}
 
-	public recordHitResult(payload: HitResolvedPayload): void {
-		if (this.host.isBattleEnded()) return;
+	public recordHitResult(payload: HitResolvedPayload): boolean {
+		if (this.host.isBattleEnded() || this.attackFinalized || payload.attackSequence !== this.attackSequence) return false;
+		if (payload.hitIndex < 1 || payload.hitIndex > this.expectedTotalHits || this.isHitConsumed(payload.hitIndex)) return false;
 		let bucket = this.hitResultsByIndex.get(payload.hitIndex);
 		if (bucket === undefined) {
 			bucket = [];
 			this.hitResultsByIndex.set(payload.hitIndex, bucket);
 		}
-		bucket.push(payload);
+		if (!bucket.some((result) => result.targetId === payload.targetId)) bucket.push(payload);
+		return this.expiredWaits.delete(payload.hitIndex);
 	}
 
-	public beginAttack(totalHits: number): void {
+	public beginAttack(totalHits: number, attackSequence?: number): void {
 		const normalizedTotal = math.max(totalHits, 0);
 		this.hitResultsByIndex.clear();
 		this.consumedHitIndices.clear();
+		this.expiredWaits.clear();
 		this.expectedTotalHits = normalizedTotal;
+		this.attackSequence = attackSequence;
 		this.attackFinalized = false;
 		this.setActivePendingHits(normalizedTotal);
 	}
@@ -93,7 +101,9 @@ export class CombatHitQueue {
 	public clear(): void {
 		this.hitResultsByIndex.clear();
 		this.consumedHitIndices.clear();
+		this.expiredWaits.clear();
 		this.expectedTotalHits = 0;
+		this.attackSequence = undefined;
 		this.attackFinalized = false;
 		this.setActivePendingHits(0);
 	}
@@ -113,18 +123,25 @@ export class CombatHitQueue {
 			return false;
 		}
 
-		const deadline = os.clock() + HIT_RESULT_WAIT_SECONDS;
-		while (this.hitResultsByIndex.get(hitIndex) === undefined && !isTargetDead() && os.clock() < deadline) {
+		const now = this.host.now ?? os.clock;
+		const deadline = now() + HIT_RESULT_WAIT_SECONDS;
+		this.host.awaitResume?.();
+		while (this.hitResultsByIndex.get(hitIndex) === undefined && !isTargetDead() && now() < deadline) {
 			if (this.attackFinalized || !this.host.isAttackCurrent(attackToken)) return false;
 			task.wait(HIT_WAIT_POLL_INTERVAL_SECONDS);
+			this.host.awaitResume?.();
 		}
 
 		if (this.attackFinalized || this.consumedHitIndices.has(hitIndex) || !this.host.isAttackCurrent(attackToken)) {
 			return false;
 		}
-		this.consumedHitIndices.add(hitIndex);
-
 		const results = this.hitResultsByIndex.get(hitIndex) ?? [];
+		if (results.isEmpty() && !isTargetDead()) {
+			this.expiredWaits.add(hitIndex);
+			return false;
+		}
+		this.expiredWaits.delete(hitIndex);
+		this.consumedHitIndices.add(hitIndex);
 		consumeResults(results);
 
 		if (this.attackFinalized || !this.host.isAttackCurrent(attackToken)) {

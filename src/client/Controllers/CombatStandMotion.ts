@@ -1,5 +1,6 @@
 import type { SkillData } from "../../shared/SkillData";
 import type { SkillSlot } from "../../shared/TypeDefs";
+import { battleCleanupStep } from "./BattleCleanup";
 import {
 	PLACEHOLDER_ADVANCE_FRACTION,
 	PLACEHOLDER_DODGE_OFFSET_STUDS,
@@ -29,6 +30,7 @@ export interface StandMotionFighter {
 	readonly standModel: Model | undefined;
 	readonly standMotion: StandMotionState | undefined;
 	readonly dead: boolean;
+	readonly active?: boolean;
 	readonly homeCFrame: CFrame;
 }
 
@@ -39,6 +41,8 @@ export interface CombatStandMotionHost {
 		goal: Partial<ExtractMembers<T, Tweenable>>,
 	) => Tween;
 	readonly delayBattle: (seconds: number, callback: () => void) => void;
+	readonly trackConnection?: (connection: RBXScriptConnection) => void;
+	readonly untrackConnection?: (connection: RBXScriptConnection) => void;
 	/** Verdadeiro enquanto `attackToken` for o ataque atual de uma batalha não encerrada. */
 	readonly isAttackCurrent: (attackToken: number) => boolean;
 	readonly isFollowUpCancelled: () => boolean;
@@ -51,6 +55,7 @@ function isBarrageAdvanceSkill(attacker: StandMotionFighter, timeline: SkillData
 
 /** Movimentação e animações placeholder de corpo/Stand; recursos registrados pelo host. */
 export class CombatStandMotion {
+	private readonly temporaryMoves = new Map<Model, TemporaryMove>();
 	public constructor(private readonly host: CombatStandMotionHost) {}
 
 	public runPlaceholderAttackSequence(
@@ -71,11 +76,11 @@ export class CombatStandMotion {
 				? PLACEHOLDER_ORA_ADVANCE_FRACTION
 				: PLACEHOLDER_ADVANCE_FRACTION;
 		const approachPos = startCFrame.Position.Lerp(targetPos, advanceFraction);
-		const strikeBaseCFrame = isSelfOnly ? startCFrame : CFrame.lookAt(approachPos, targetPos);
+		const strikeBaseCFrame = isSelfOnly ? startCFrame : CFrame.lookAt(approachPos, targetPos, startCFrame.UpVector);
 
 		const firstHitTime = timeline.hits.size() > 0 ? math.max(timeline.hits[0].time, 0.05) : 0.1;
 		if (!isSelfOnly) {
-			this.tweenModelTo(attacker.model, strikeBaseCFrame, firstHitTime * 0.8);
+			this.moveTemporarily(attacker, strikeBaseCFrame, firstHitTime * 0.8);
 		}
 
 		const totalHits = timeline.hits.size();
@@ -94,7 +99,7 @@ export class CombatStandMotion {
 					// Pequeno avanço/soco a cada hit do slot (inclusive multi-hit como Barragem_estelar)
 					const punchOffset = strikeBaseCFrame.LookVector.mul(index % 2 === 1 ? 0.55 : 0.35);
 					const punchCFrame = strikeBaseCFrame.add(punchOffset);
-					this.tweenModelTo(attacker.model, punchCFrame, PLACEHOLDER_STRIKE_TWEEN_SECONDS);
+					this.moveTemporarily(attacker, punchCFrame, PLACEHOLDER_STRIKE_TWEEN_SECONDS);
 
 					// Se tiver Stand (ex.: Star Platinum), projeta o Stand levemente à frente no golpe
 					const extraAdvance = isBarrageAdvance ? PLACEHOLDER_ORA_EXTRA_ADVANCE_STUDS : 0;
@@ -180,24 +185,84 @@ export class CombatStandMotion {
 		const knockbackDist = isCrit ? PLACEHOLDER_HIT_KNOCKBACK_STUDS * 1.4 : PLACEHOLDER_HIT_KNOCKBACK_STUDS;
 		const knockedCF = baseCF.add(baseCF.LookVector.mul(-knockbackDist));
 
-		this.tweenModelTo(target.model, knockedCF, PLACEHOLDER_HIT_REACT_TWEEN_SECONDS);
-		this.host.delayBattle(PLACEHOLDER_HIT_REACT_TWEEN_SECONDS, () => {
-			if (!target.dead && target.model.Parent !== undefined) {
-				this.tweenModelTo(target.model, target.homeCFrame, PLACEHOLDER_HIT_REACT_TWEEN_SECONDS);
-			}
-		});
+		this.reactAndReturn(target, knockedCF, PLACEHOLDER_HIT_REACT_TWEEN_SECONDS);
 	}
 
 	public playDodgeReaction(target: StandMotionFighter): void {
 		const baseCF = target.homeCFrame;
 		const dodgeCF = baseCF.add(baseCF.RightVector.mul(PLACEHOLDER_DODGE_OFFSET_STUDS));
 
-		this.tweenModelTo(target.model, dodgeCF, PLACEHOLDER_DODGE_TWEEN_SECONDS);
-		this.host.delayBattle(PLACEHOLDER_DODGE_TWEEN_SECONDS, () => {
-			if (!target.dead && target.model.Parent !== undefined) {
-				this.tweenModelTo(target.model, target.homeCFrame, PLACEHOLDER_DODGE_TWEEN_SECONDS);
+		this.reactAndReturn(target, dodgeCF, PLACEHOLDER_DODGE_TWEEN_SECONDS);
+	}
+
+	private reactAndReturn(fighter: StandMotionFighter, pose: CFrame, seconds: number): void {
+		const move = this.moveTemporarily(fighter, pose, seconds, true);
+		if (move === undefined) return;
+		this.host.delayBattle(seconds, () => {
+			if (this.temporaryMoves.get(fighter.model) === move && this.canRestore(move)) {
+				this.returnMove(move, seconds);
 			}
 		});
+	}
+
+	/** Usa o home calculado pelos anchors, sem recapturar a pose atual. */
+	public moveTemporarily(fighter: StandMotionFighter, pose: CFrame, duration: number, reaction = false): TemporaryMove | undefined {
+		const move: TemporaryMove = { fighter, home: fighter.homeCFrame, reaction };
+		if (!this.canRestore(move)) return undefined;
+		this.releaseTemporaryMove(fighter.model);
+		move.tween = this.tweenModelTo(fighter.model, pose, duration);
+		this.temporaryMoves.set(fighter.model, move);
+		return move;
+	}
+
+	public releaseTemporaryMove(model: Model): void {
+		const move = this.temporaryMoves.get(model);
+		this.temporaryMoves.delete(model);
+		move?.tween?.Cancel();
+	}
+
+	public returnFromAttack(fighter: StandMotionFighter, duration: number): void {
+		if (!this.temporaryMoves.has(fighter.model) && fighter.model.GetPivot() !== fighter.homeCFrame) {
+			this.temporaryMoves.set(fighter.model, { fighter, home: fighter.homeCFrame, reaction: false });
+		}
+		this.restoreTemporaryMoves(duration, false);
+	}
+
+	public restoreTemporaryMoves(duration = 0, includeReactions = true): void {
+		for (const [, move] of this.temporaryMoves) {
+			if (move.reaction && !includeReactions) continue;
+			this.returnMove(move, duration);
+		}
+	}
+
+	private returnMove(move: TemporaryMove, duration: number): void {
+		const model = move.fighter.model;
+		move.tween?.Cancel();
+		const tween = this.canRestore(move) ? this.tweenModelTo(model, move.home, duration) : undefined;
+		if (tween === undefined) {
+			this.temporaryMoves.delete(model);
+			return;
+		}
+		move.tween = tween;
+		const connection = tween.Completed.Once(() => {
+			this.host.untrackConnection?.(connection);
+			if (this.temporaryMoves.get(model) === move && move.tween === tween) this.temporaryMoves.delete(model);
+		});
+		this.host.trackConnection?.(connection);
+	}
+
+	public resetStage(fighters: ReadonlyMap<string, StandMotionFighter>): void {
+		this.temporaryMoves.clear();
+		for (const [, fighter] of fighters) {
+			if (fighter.dead) continue;
+			battleCleanupStep("stand base", () => this.restoreStandBase(fighter));
+			battleCleanupStep("fighter base", () => fighter.model.PivotTo(fighter.homeCFrame));
+		}
+	}
+
+	private canRestore(move: TemporaryMove): boolean {
+		const { fighter, home } = move;
+		return !fighter.dead && fighter.active !== false && fighter.model.Parent !== undefined && fighter.homeCFrame === home;
 	}
 
 	public tweenModelTo(model: Model, targetCFrame: CFrame, duration: number): Tween | undefined {
@@ -215,4 +280,11 @@ export class CombatStandMotion {
 		tween.Play();
 		return tween;
 	}
+}
+
+interface TemporaryMove {
+	readonly fighter: StandMotionFighter;
+	readonly home: CFrame;
+	readonly reaction: boolean;
+	tween?: Tween;
 }

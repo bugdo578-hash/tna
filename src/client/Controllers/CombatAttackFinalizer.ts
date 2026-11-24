@@ -34,6 +34,8 @@ export interface CombatAttackFinalizerHost<TFighter extends AttackFinalizerFight
 	readonly hasUnconsumedHitForTarget?: (targetId: string) => boolean;
 	readonly getFighter: (targetId: string) => TFighter | undefined;
 	readonly restoreStandBase: (entry: TFighter, duration?: number) => void;
+	readonly restoreAttackMovement?: (entry: TFighter, duration: number) => void;
+	readonly releaseAttackMovement?: (entry: TFighter) => void;
 	readonly tweenModelTo: (model: Model, targetCFrame: CFrame, duration: number) => Tween | undefined;
 	readonly delayBattle: (seconds: number, callback: () => void) => thread;
 	readonly cancelBattleTask?: (taskThread: thread) => void;
@@ -92,15 +94,19 @@ export class CombatAttackFinalizer<TFighter extends AttackFinalizerFighter> {
 	 * retorno visual de Stand/corpo, flush de mortes pendentes e aplicação de trocas pendentes
 	 * somente quando a sequência e eventuais quedas de KO permitirem.
 	 */
-	public finalizeAttack(attacker: TFighter, timeline: SkillData): void {
+	public finalizeAttack(attacker: TFighter, timeline: SkillData, interrupted = false): number {
 		const returnDuration = this.host.isFollowUpCancelled()
 			? timeline.dodgeReturnTime
 			: timeline.returnTime;
-		const clampedReturnDuration = math.max(returnDuration, 0.08);
-		this.host.restoreStandBase(attacker, clampedReturnDuration);
-		this.host.tweenModelTo(attacker.model, attacker.homeCFrame, clampedReturnDuration);
+		const duration = interrupted ? 0 : math.max(returnDuration, 0.08);
+		if (attacker.active && !attacker.dead && !this.hasPendingDeath(attacker.targetId)) {
+			this.host.restoreStandBase(attacker, duration);
+			if (this.host.restoreAttackMovement !== undefined) this.host.restoreAttackMovement(attacker, duration);
+			else this.host.tweenModelTo(attacker.model, attacker.homeCFrame, duration);
+		}
 		this.flushPendingDeaths();
 		this.flushPendingSwitchesIfReady();
+		return duration;
 	}
 
 	/**
@@ -115,6 +121,7 @@ export class CombatAttackFinalizer<TFighter extends AttackFinalizerFighter> {
 
 	public handleFighterDied(payload: FighterDiedPayload): void {
 		if (this.host.isBattleEnded()) return;
+		if (this.host.getFighter(payload.fighterId)?.dead || this.pendingDeaths.has(payload.fighterId)) return;
 		this.pendingDeaths.set(payload.fighterId, { payload });
 		this.flushReadyPendingDeaths();
 	}
@@ -149,6 +156,7 @@ export class CombatAttackFinalizer<TFighter extends AttackFinalizerFighter> {
 		if (this.host.isBattleEnded()) return;
 		const deadFighter = this.host.getFighter(deadTargetId);
 		if (deadFighter !== undefined && !deadFighter.dead) {
+			this.host.releaseAttackMovement?.(deadFighter);
 			this.host.restoreStandBase(deadFighter);
 			deadFighter.dead = true;
 			deadFighter.active = false;
@@ -165,7 +173,7 @@ export class CombatAttackFinalizer<TFighter extends AttackFinalizerFighter> {
 
 			// Animação placeholder de KO (tomba para trás)
 			const koCFrame = deadFighter.homeCFrame
-				.add(new Vector3(0, -0.6, 0))
+				.mul(new CFrame(0, -0.6, 0))
 				.mul(CFrame.Angles(math.rad(-80), 0, 0));
 			const koTween = this.host.tweenModelTo(deadFighter.model, koCFrame, PLACEHOLDER_KO_TWEEN_SECONDS);
 			const generation = this.finalizerGeneration;
@@ -292,12 +300,15 @@ export class CombatAttackFinalizer<TFighter extends AttackFinalizerFighter> {
 
 		const previous = this.host.getFighter(payload.previousFighterId);
 		const nextActive = this.host.getFighter(payload.activeFighterId);
+		if (previous === nextActive || nextActive?.active || previous?.sideIndex !== nextActive?.sideIndex) return;
 
 		if (previous !== undefined && nextActive !== undefined && !nextActive.dead) {
 			previous.benchIndex = nextActive.benchIndex;
 		}
 
 		if (previous !== undefined) {
+			this.host.releaseAttackMovement?.(previous);
+			this.host.restoreStandBase(previous);
 			const activeKoTween = this.activeKoTweens.get(previous.targetId);
 			if (activeKoTween !== undefined) {
 				if (activeKoTween.PlaybackState === Enum.PlaybackState.Playing) {
@@ -330,6 +341,7 @@ export class CombatAttackFinalizer<TFighter extends AttackFinalizerFighter> {
 		}
 
 		if (nextActive !== undefined && !nextActive.dead) {
+			this.host.releaseAttackMovement?.(nextActive);
 			nextActive.active = true;
 			const activeCFrame = this.host.computeActiveSlotCFrame(
 				nextActive.sideIndex,

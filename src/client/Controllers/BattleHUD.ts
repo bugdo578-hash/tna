@@ -73,6 +73,7 @@ export class BattleHUD {
 	private pauseAllowedAfterIntro = false;
 	private canPause = false;
 	private isPaused = false;
+	private sessionId?: number;
 	private lastPauseToggleClock = 0;
 	private battleActive = false;
 	private battleEnded = false;
@@ -98,8 +99,8 @@ export class BattleHUD {
 			getResultScreenGui: () => this.resultScreenGui,
 			getPauseOverlay: () => this.pauseOverlay,
 			getResultOverlay: () => this.resultOverlay,
-			resetQuitConfirmState: () => this.resetQuitConfirmState(),
-			cancelQuitRetry: () => this.cancelQuitRetry(),
+			resetQuitConfirmState: () => this.quitController.resetQuitConfirmState(),
+			cancelQuitRetry: () => this.quitController.cancelQuitRetry(),
 			clearHpTweens: () => this.clearHpTweens(),
 			clearXpCards: () => this.xpCards.clear(),
 			battleDisconnectors: this.battleDisconnectors,
@@ -359,6 +360,7 @@ export class BattleHUD {
 		this.introId = payload.transitionId;
 		this.preparing = this.introId !== undefined;
 		this.pauseAllowedAfterIntro = payload.canPause === true || payload.mode === "PVE";
+		this.sessionId = payload.sessionId;
 		this.canPause = !this.preparing && this.pauseAllowedAfterIntro;
 		this.isPaused = false;
 		this.lastPauseToggleClock = 0;
@@ -470,6 +472,7 @@ export class BattleHUD {
 
 	private onStateChanged(payload: StateChangedPayload): void {
 		if (!this.battleActive || this.battleEnded) return;
+		if (payload.sessionId !== undefined && payload.sessionId !== this.sessionId) return;
 		if (payload.battleReleased !== undefined && payload.battleReleased !== this.introId) return;
 		if (this.preparing) {
 			if (payload.battleReleased === undefined) return;
@@ -478,7 +481,10 @@ export class BattleHUD {
 			this.refreshSessionControlsLayout();
 			this.refreshPauseVisuals();
 		}
-		this.clearPauseIfServerProgressed();
+		if (payload.paused !== undefined && this.canPause) {
+			this.isPaused = payload.paused;
+			this.refreshPauseVisuals();
+		} else if (this.sessionId === undefined) this.clearPauseIfServerProgressed();
 		this.battleState = payload.state;
 		this.refreshStateBanner();
 		this.refreshSkillButtons();
@@ -487,7 +493,7 @@ export class BattleHUD {
 
 	private onAtbSync(payload: AtbSyncPayload): void {
 		if (!this.battleActive || this.battleEnded || this.preparing) return;
-		this.clearPauseIfServerProgressed();
+		if (this.sessionId === undefined) this.clearPauseIfServerProgressed();
 		const clampedAtb = clamp(payload.atb, ATB_MIN, ATB_MAX);
 		if (payload.sideId === this.ownSideId) {
 			this.playerTargetAtb = clampedAtb;
@@ -498,7 +504,7 @@ export class BattleHUD {
 	}
 
 	private onSwitchPerformed(payload: SwitchPerformedPayload): void {
-		if (!this.battleActive || this.battleEnded) return;
+		if (!this.battleActive || this.battleEnded || (payload.sessionId !== undefined && payload.sessionId !== this.sessionId)) return;
 		const prev = this.fightersByTargetId.get(payload.previousFighterId);
 		const nextActive = this.fightersByTargetId.get(payload.activeFighterId);
 		if (prev !== undefined) {
@@ -511,7 +517,7 @@ export class BattleHUD {
 	}
 
 	private onEffectApplied(payload: EffectAppliedPayload): void {
-		if (!this.battleActive || this.battleEnded) return;
+		if (!this.battleActive || this.battleEnded || (payload.sessionId !== undefined && payload.sessionId !== this.sessionId)) return;
 		const fighter = this.fightersByTargetId.get(payload.targetId);
 		if (fighter === undefined || fighter.dead) return;
 		fighter.effects.add(payload.effect);
@@ -526,7 +532,7 @@ export class BattleHUD {
 	}
 
 	private onEffectExpired(payload: EffectExpiredPayload): void {
-		if (!this.battleActive) return;
+		if (!this.battleActive || (payload.sessionId !== undefined && payload.sessionId !== this.sessionId)) return;
 		const fighter = this.fightersByTargetId.get(payload.targetId);
 		if (fighter === undefined) return;
 		fighter.effects.delete(payload.effect);
@@ -584,6 +590,7 @@ export class BattleHUD {
 	}
 
 	private onBattleEnded(payload: BattleEndedPayload): void {
+		if (payload.sessionId !== undefined && payload.sessionId !== this.sessionId) return;
 		if (payload.transitionId !== undefined && this.combatController !== undefined) {
 			this.combatController.introduction.finish(payload.transitionId, () => this.finishBattle(payload));
 			return;
@@ -646,9 +653,10 @@ export class BattleHUD {
 
 	private handlePauseClicked(): void {
 		if (!this.battleActive || this.battleEnded || !this.canPause) return;
+		BattleRemotes.requestPause.FireServer();
+		if (this.sessionId !== undefined) return;
 		this.isPaused = !this.isPaused;
 		this.lastPauseToggleClock = os.clock();
-		BattleRemotes.requestPause.FireServer();
 		this.refreshPauseVisuals();
 		this.refreshSkillButtons();
 		this.refreshTagSlots();
@@ -658,16 +666,8 @@ export class BattleHUD {
 		this.quitController.handleQuitClicked();
 	}
 
-	private cancelQuitRetry(): void {
-		this.quitController.cancelQuitRetry();
-	}
-
 	private handleResultCloseAndRestart(): void {
 		this.battleResult.handleResultCloseAndRestart();
-	}
-
-	private resetQuitConfirmState(): void {
-		this.quitController.resetQuitConfirmState();
 	}
 
 	private clearPauseIfServerProgressed(): void {

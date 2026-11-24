@@ -582,7 +582,13 @@ local ok, runErr = pcall(function()
 		local enemyActiveCF = enemy1.homeCFrame
 		local enemy1BenchCF = c:computeBenchSlotCFrame(enemy1.sideIndex, enemy1.benchIndex, enemy1.groundContactOffset)
 		local enemy2BenchCF = enemy2.homeCFrame
-		local s2Timeline = SkillData.JOTARO_SKILL_DATA[2]
+		local times = { 0.08, 0.18, 0.28, 0.38, 0.48 }
+		local s2Timeline = { name = "K2.1 fixture", prepareTime = 0, returnTime = 0.30, dodgeReturnTime = 0.15, hits = {} }
+		for _, time in times do
+			table.insert(s2Timeline.hits, { time = time, damageShare = 1 / #times })
+		end
+		own1.equippedSkills = table.clone(own1.equippedSkills)
+		own1.equippedSkills[2] = s2Timeline
 
 		local t0 = os.clock()
 		local events, log = makeRecorder(t0)

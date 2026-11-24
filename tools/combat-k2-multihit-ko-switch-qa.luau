@@ -5,6 +5,18 @@ local Combat = require(ts.Controllers.CombatController).CombatController
 local config = require(ts.UI.CombatVisualConfig)
 local SkillData = require(game.ReplicatedStorage.TS.SkillData)
 
+-- Os cinco hits preservam as janelas de KO da sonda e são independentes do catálogo.
+local function equipMultiHitFixture(fighter)
+	local times = { 0.08, 0.18, 0.28, 0.38, 0.48 }
+	local timeline = { name = "K2 fixture", prepareTime = 0, returnTime = 0.30, dodgeReturnTime = 0.15, hits = {} }
+	for _, time in times do
+		table.insert(timeline.hits, { time = time, damageShare = 1 / #times })
+	end
+	fighter.equippedSkills = table.clone(fighter.equippedSkills)
+	fighter.equippedSkills[2] = timeline
+	return timeline
+end
+
 local checks = 0
 local scenarios = {}
 local function check(condition, message)
@@ -193,7 +205,7 @@ local ok, failure = pcall(function()
 		local own1Base = own1.homeCFrame
 		local own1StandBase = own1.standMotion.baseC1
 		local enemyActiveCFrame = enemy1.homeCFrame
-		local s2Timeline = SkillData.JOTARO_SKILL_DATA[2]
+		local s2Timeline = equipMultiHitFixture(own1)
 
 		local pulsesBeforeDead = 0
 		local pulsesAfterDead = 0
@@ -271,7 +283,7 @@ local ok, failure = pcall(function()
 		local own1Base = own1.homeCFrame
 		local own1StandBase = own1.standMotion.baseC1
 		local enemyActiveCFrame = enemy1.homeCFrame
-		local s2Timeline = SkillData.JOTARO_SKILL_DATA[2]
+		local s2Timeline = equipMultiHitFixture(own1)
 
 		local pulsesAfterDead = 0
 		local origPulse = c.standMotion.pulseStandStrike
@@ -317,7 +329,7 @@ local ok, failure = pcall(function()
 	do
 		local own1, own2, enemy1, enemy2 = startTwoEnemyBattle("K2_RegressionNormalQA", 100)
 		local own1Base = own1.homeCFrame
-		local s2Timeline = SkillData.JOTARO_SKILL_DATA[2]
+		local s2Timeline = equipMultiHitFixture(own1)
 
 		-- Troca normal sem ataque/KO aplica imediatamente
 		c:onSwitchPerformed({ sideId = "B", previousFighterId = "enemy-1", activeFighterId = "enemy-2" })

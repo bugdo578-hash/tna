@@ -1,4 +1,4 @@
-import { Players, ReplicatedStorage, TweenService, Workspace } from "@rbxts/services";
+import { Players, ReplicatedStorage, Workspace } from "@rbxts/services";
 import { ARENA_CLIENT_REPLICATION_TIMEOUT_SECONDS, ARENA_INSTANCE_ID_ATTRIBUTE, MIN_DAMAGE } from "../../shared/Config";
 import {
 	ASSETS_FOLDER_NAME,
@@ -53,6 +53,7 @@ import { CombatAttackFinalizer, type PendingDeathRecord } from "./CombatAttackFi
 import { CombatDamagePool, type BillboardPoolItem } from "./CombatDamagePool";
 import { resolveFighterGroundContact } from "./CombatFighterGrounding";
 import { CombatHitQueue } from "./CombatHitQueue";
+import { CombatPresentationResources } from "./CombatPresentationResources";
 import { CombatStandMotion, type StandMotionState } from "./CombatStandMotion";
 import { CombatVfxBridge, type PreloadedVfxEntry } from "./CombatVfxBridge";
 import type { VFXController } from "./VFXController";
@@ -116,10 +117,11 @@ export class CombatController {
 	private readonly billboardPool: BillboardPoolItem[];
 	private readonly hpVisualListeners = new Set<(targetId: string, hp: number, hpMax: number) => void>();
 	private readonly deathVisualListeners = new Set<(payload: FighterDiedPayload) => void>();
-	private readonly battleTweens = new Set<Tween>();
-	private readonly battleConnections = new Set<RBXScriptConnection>();
-	private readonly battleTasks = new Set<thread>();
-	private readonly battleTracks = new Set<AnimationTrack>();
+	private readonly resources = new CombatPresentationResources();
+	private readonly battleTweens = this.resources.tweens;
+	private readonly battleConnections = this.resources.connections;
+	private readonly battleTasks = this.resources.tasks;
+	private readonly battleTracks = this.resources.tracks;
 	private readonly preloadedVfxEntries: PreloadedVfxEntry[];
 	private readonly battleVfxWorkingCopies: Map<string, Instance>;
 	private readonly vfxCarrierParts: Map<Instance, BasePart>;
@@ -132,6 +134,8 @@ export class CombatController {
 	private activeBattleId = "";
 	private activeTransitionId: number | undefined;
 	private currentAttackToken = 0;
+	private sessionId?: number;
+	private lastAttackSequence = 0;
 	private activePendingHits = 0;
 	private activeAttack: ActiveAttackState | undefined;
 	private deferredAttack: ActiveAttackState | undefined;
@@ -158,6 +162,7 @@ export class CombatController {
 			isCurrentBattle: (generation, battleId) =>
 				!this.battleEnded && this.isCurrentBattle(generation) && this.activeBattleId === battleId,
 			isIntroBlocking: () => this.introduction.isBlockingCutscenes(),
+			isPaused: () => this.resources.isPaused(),
 			getCameraController: () => this.cameraController,
 			getArenaAnchors: () => this.arenaAnchors.getResolvedAnchors(),
 			isFighterValid: (fighter) => {
@@ -205,11 +210,15 @@ export class CombatController {
 		});
 		this.standMotion = new CombatStandMotion({
 			createBattleTween: (object, info, goal) => this.createBattleTween(object, info, goal),
-			delayBattle: (seconds, callback) => this.delayBattle(seconds, callback),
+			delayBattle: (seconds, callback) => this.resources.delay(seconds, callback, this.currentAttackToken),
+			trackConnection: (connection) => this.trackBattleConnection(connection),
+			untrackConnection: (connection) => this.untrackBattleConnection(connection),
 			isAttackCurrent: (attackToken) => this.currentAttackToken === attackToken && !this.battleEnded,
 			isFollowUpCancelled: () => this.followUpCancelledForCurrentAttack,
 		});
 		this.hitQueue = new CombatHitQueue({
+			now: () => this.resources.now(),
+			awaitResume: () => this.resources.awaitResume(),
 			isBattleEnded: () => this.battleEnded,
 			isAttackCurrent: (attackToken) => this.currentAttackToken === attackToken && !this.battleEnded,
 			isFollowUpCancelled: () => this.followUpCancelledForCurrentAttack,
@@ -226,6 +235,8 @@ export class CombatController {
 			hasUnconsumedHitForTarget: (targetId) => this.hitQueue.hasUnconsumedHitForTarget(targetId),
 			getFighter: (targetId) => this.fightersByTargetId.get(targetId),
 			restoreStandBase: (entry, duration) => this.restoreStandBase(entry, duration),
+			restoreAttackMovement: (entry, duration) => this.standMotion.returnFromAttack(entry, duration),
+			releaseAttackMovement: (entry) => this.standMotion.releaseTemporaryMove(entry.model),
 			tweenModelTo: (model, targetCFrame, duration) => this.tweenModelTo(model, targetCFrame, duration),
 			delayBattle: (seconds, callback) => this.delayBattle(seconds, callback),
 			cancelBattleTask: (taskThread) => this.cancelBattleTask(taskThread),
@@ -408,10 +419,6 @@ export class CombatController {
 		this.poolContainer = this.damagePool.initBillboardPool();
 	}
 
-	private acquireBillboard(): BillboardPoolItem {
-		return this.damagePool.acquireBillboard();
-	}
-
 	private showFloatingText(
 		adornee: Attachment | BasePart,
 		text: string,
@@ -431,7 +438,13 @@ export class CombatController {
 	}
 
 	private onBattleEnded(ended: BattleEndedPayload): void {
+		if (ended.sessionId !== undefined && ended.sessionId !== this.sessionId) return;
 		if (ended.transitionId === undefined || this.activeTransitionId === ended.transitionId) {
+			if (ended.reason !== "victory") {
+				this.battleEnded = true;
+				this.resources.clear();
+				this.vfxBridge.interruptAttackVfx();
+			}
 			this.introduction.cancelMaterialization(ended.transitionId);
 			this.cutsceneController.cancel("battle_end");
 			this.ambientVfxState.deactivateForBattleEnd(ended.transitionId);
@@ -439,6 +452,11 @@ export class CombatController {
 	}
 
 	private onStateChanged(payload: StateChangedPayload): void {
+		if (payload.sessionId !== undefined && payload.sessionId !== this.sessionId) return;
+		if (!this.battleEnded && payload.paused !== undefined && payload.paused !== this.resources.isPaused()) {
+			this.resources.setPaused(payload.paused);
+			this.vfxBridge.setAttackPaused(payload.paused);
+		}
 		if (payload.battleReleased === undefined) return;
 		this.introduction.release(payload.battleReleased);
 		if (
@@ -451,6 +469,7 @@ export class CombatController {
 	}
 
 	private onBattleStarted(payload: BattleStartedPayload): void {
+		if (payload.sessionId !== undefined && payload.sessionId === this.sessionId) return;
 		const transitionId = payload.transitionId;
 		if (transitionId === undefined) {
 			this.buildBattleStage(payload, this.cleanupStage());
@@ -472,6 +491,7 @@ export class CombatController {
 		this.physicalSideIds = physicalSides;
 		this.activeArenaInstanceId = payload.arena?.instanceId;
 		this.activeTransitionId = payload.transitionId;
+		this.sessionId = payload.sessionId;
 		this.activeBattleId = `${generation}:${payload.arena?.instanceId ?? "legacy"}:${payload.sides[0]}:${payload.sides[1]}`;
 		this.currentAttackToken += 1;
 		this.activeAttack = undefined;
@@ -645,7 +665,7 @@ export class CombatController {
 
 		if (transitionId !== undefined) {
 			this.preloadBattleVfx(payload, generation);
-			this.spawnBattle(prepare);
+			this.delayBattle(0, prepare);
 		} else {
 			prepare();
 			if (this.isCurrentBattle(generation) && !this.battleEnded && fightersReady) {
@@ -670,7 +690,7 @@ export class CombatController {
 		);
 		if (!withIntro) {
 			const initial = resolveSideCameraAnchor(sideFolder, sideIndex);
-			if (reserved && !initial.ok && !initial.fatal) this.spawnBattle(() => { resolve(); });
+			if (reserved && !initial.ok && !initial.fatal) this.delayBattle(0, () => { resolve(); });
 			else resolve();
 			return true;
 		}
@@ -854,11 +874,19 @@ export class CombatController {
 	}
 
 	private onHitResolved(payload: HitResolvedPayload): void {
-		this.hitQueue.recordHitResult(payload);
+		if (payload.sessionId !== undefined && payload.sessionId !== this.sessionId) return;
+		const markerTimedOut = this.hitQueue.recordHitResult(payload);
+		const attack = this.activeAttack;
+		if (markerTimedOut && attack !== undefined) {
+			const { attacker, target, timeline, token, slot } = attack;
+			this.resources.delay(0, () => this.waitForAndConsumeHitIndex(payload.hitIndex, attacker, target, timeline, token, slot), token);
+		}
 	}
 
 	private finalizeActiveAttackBeforeNext(): void {
 		this.cutsceneController.cancel("attack_replaced");
+		this.vfxBridge.interruptAttackVfx();
+		this.resources.cancelAttack(this.currentAttackToken);
 		const previousAttack = this.activeAttack;
 		this.activeAttack = undefined;
 		this.deferredAttack = undefined;
@@ -870,16 +898,7 @@ export class CombatController {
 		if (hadPendingHits) {
 			this.hitQueue.drainUnconsumedResults((results) => {
 				for (const result of results) {
-					const fallbackTarget = previousAttack?.target ?? this.fightersByTargetId.get(result.targetId);
-					if (fallbackTarget !== undefined) {
-						this.presentHitResult(
-							result,
-							fallbackTarget,
-							previousAttack?.attacker,
-							previousAttack?.timeline,
-							previousAttack?.slot,
-						);
-					}
+					this.presentHitResult(result, previousAttack?.attacker, previousAttack?.timeline, previousAttack?.slot, false);
 					if (result.followUpCancelled) {
 						this.followUpCancelledForCurrentAttack = true;
 					}
@@ -888,16 +907,20 @@ export class CombatController {
 			});
 		}
 		if (previousAttack !== undefined) {
-			this.attackFinalizer.finalizeAttack(previousAttack.attacker, previousAttack.timeline);
+			this.attackFinalizer.finalizeAttack(previousAttack.attacker, previousAttack.timeline, true);
 		}
+		this.standMotion.restoreTemporaryMoves();
 		this.attackFinalizer.forceCompletePendingForNextAttack();
 	}
 
 	private onAttackStarted(payload: AttackStartedPayload): void {
 		if (this.battleEnded) return;
+		if (payload.sessionId !== undefined && payload.sessionId !== this.sessionId) return;
+		if (payload.attackSequence !== undefined && payload.attackSequence <= this.lastAttackSequence) return;
 		const attacker = this.fightersByTargetId.get(payload.attackerId);
 		const target = this.fightersByTargetId.get(payload.targetId);
 		if (attacker === undefined || target === undefined) return;
+		this.lastAttackSequence = payload.attackSequence ?? this.lastAttackSequence;
 
 		this.finalizeActiveAttackBeforeNext();
 
@@ -909,7 +932,7 @@ export class CombatController {
 		const totalHits = timeline.hits.size();
 		const attackState: ActiveAttackState = { token: attackToken, attacker, target, timeline, slot: payload.slot };
 		this.activeAttack = attackState;
-		this.hitQueue.beginAttack(totalHits);
+		this.hitQueue.beginAttack(totalHits, payload.attackSequence);
 
 		if (this.attackFinalizer.hasActiveKoAnimations()) {
 			this.deferredAttack = attackState;
@@ -933,6 +956,10 @@ export class CombatController {
 
 	private startAttackPresentation(attackState: ActiveAttackState): void {
 		const { attacker, target, timeline, token, slot } = attackState;
+		if (this.resources.isPaused()) {
+			this.resources.delay(0, () => this.startAttackPresentation(attackState), token);
+			return;
+		}
 		this.cutsceneController.tryStartForAttack({
 			generation: this.battleVfxGeneration,
 			battleId: this.activeBattleId,
@@ -979,15 +1006,10 @@ export class CombatController {
 		const fighterAnim = findAnimationInstance(attacker.model);
 		if (fighterAnim === undefined) return undefined;
 
-		const humanoid = attacker.humanoid;
-		const animator = humanoid?.FindFirstChildOfClass("Animator");
+		const animator = attacker.humanoid?.FindFirstChildOfClass("Animator");
 		if (animator === undefined) return undefined;
-
-		const [ok, loadedTrack] = pcall(() => animator.LoadAnimation(fighterAnim));
-		if (!ok || loadedTrack === undefined) return undefined;
-
-		this.battleTracks.add(loadedTrack);
-		loadedTrack.Play(0.1, 1, 1);
+		const loadedTrack = this.resources.playAnimation(animator, fighterAnim, this.currentAttackToken);
+		if (loadedTrack === undefined) return undefined;
 
 		// Se o modelo tiver sub-modelo "Stand" com Animator e Animation correspondente, toca sincronizado
 		if (attacker.standModel !== undefined) {
@@ -995,11 +1017,7 @@ export class CombatController {
 			const standAnimator = standHumanoid?.FindFirstChildOfClass("Animator");
 			const standAnim = findAnimationInstance(attacker.standModel) ?? fighterAnim;
 			if (standAnimator !== undefined) {
-				pcall(() => {
-					const standTrack = standAnimator.LoadAnimation(standAnim);
-					this.battleTracks.add(standTrack);
-					standTrack.Play(0.1, 1, 1);
-				});
+				this.resources.playAnimation(standAnimator, standAnim, this.currentAttackToken);
 			}
 		}
 
@@ -1025,26 +1043,24 @@ export class CombatController {
 				scheduledHit?.noDamage === true ||
 				timeline.effectTarget === "self" ||
 				(scheduledHit !== undefined && scheduledHit.damageShare <= 0);
-			const markerName = `Hit${index}`;
-			this.battleConnections.add(track.GetMarkerReachedSignal(markerName).Connect(() => {
+			const consumeMarker = () => {
 				if (this.currentAttackToken !== attackToken || this.battleEnded) return;
 				if (this.hitQueue.isHitConsumed(index) || this.followUpCancelledForCurrentAttack) return;
 				if (!target.dead && !isNoDamageHit) {
 					this.pulseStandStrike(attacker, PLACEHOLDER_STAND_STRIKE_STUDS +
 						(isBarrageAdvance ? PLACEHOLDER_ORA_EXTRA_ADVANCE_STUDS : 0));
 				}
-				this.spawnBattle(() => {
-					this.waitForAndConsumeHitIndex(index, attacker, target, timeline, attackToken, slot);
-				});
-			}));
+				this.waitForAndConsumeHitIndex(index, attacker, target, timeline, attackToken, slot);
+			};
+			this.resources.bindMarker(track, `Hit${index}`, attackToken, consumeMarker);
 
 			// Fallback se o marker não disparar na AnimationTrack: usa o tempo de SkillData + HIT_RESULT_WAIT_SECONDS
-			this.delayBattle(scheduledHit.time + HIT_RESULT_WAIT_SECONDS, () => {
+			this.resources.delay(scheduledHit.time + HIT_RESULT_WAIT_SECONDS, () => {
 				if (this.currentAttackToken !== attackToken || this.battleEnded) return;
 				if (!this.hitQueue.isHitConsumed(index)) {
 					this.waitForAndConsumeHitIndex(index, attacker, target, timeline, attackToken, slot);
 				}
-			});
+			}, attackToken);
 		}
 	}
 
@@ -1088,7 +1104,7 @@ export class CombatController {
 			() => defaultTarget.dead,
 			(results) => {
 				for (const result of results) {
-					this.presentHitResult(result, defaultTarget, attacker, timeline, slot);
+					this.presentHitResult(result, attacker, timeline, slot);
 					if (result.followUpCancelled) {
 						this.followUpCancelledForCurrentAttack = true;
 					}
@@ -1097,21 +1113,24 @@ export class CombatController {
 			},
 		);
 		if (isLastHit) {
+			this.resources.finishMarkers(attackToken);
 			if (this.activeAttack?.token === attackToken) {
 				this.activeAttack = undefined;
 			}
-			this.attackFinalizer.finalizeAttack(attacker, timeline);
+			const recovery = this.attackFinalizer.finalizeAttack(attacker, timeline);
+			this.resources.delay(recovery, () => this.resources.finishReturn(attackToken), attackToken);
 		}
 	}
 
 	private presentHitResult(
 		result: HitResolvedPayload,
-		fallbackTarget: FighterVisualEntry,
 		attacker?: FighterVisualEntry,
 		timeline?: SkillData,
 		slot?: SkillSlot,
+		react = true,
 	): void {
-		const target = this.fightersByTargetId.get(result.targetId) ?? fallbackTarget;
+		const target = this.fightersByTargetId.get(result.targetId);
+		if (target === undefined || target.dead) return;
 		const scheduledHit = timeline?.hits[result.hitIndex - 1];
 		const isNoDamageHit =
 			result.noDamage === true ||
@@ -1126,7 +1145,7 @@ export class CombatController {
 		if (!result.hit) {
 			// Miss / Dodge: movimento lateral de esquiva + "DODGE" no BillboardGui, sem número e sem reduzir HP
 			this.damagePool.showDodge(target.attachments.Cabeca);
-			this.playDodgeReaction(target);
+			if (react) this.playDodgeReaction(target);
 			return;
 		}
 
@@ -1138,10 +1157,10 @@ export class CombatController {
 		this.notifyHpVisualChanged(target.targetId, target.hp, target.hpMax);
 
 		this.damagePool.showHitDamage(target.attachments.Peito, result.damage, result.crit);
-		if (attacker !== undefined && timeline !== undefined && slot !== undefined) {
-			this.emitHitVfx(attacker, target, timeline, slot, result.crit);
+		if (react && attacker !== undefined && timeline !== undefined && slot !== undefined) {
+			battleCleanupStep("hit vfx", () => this.emitHitVfx(attacker, target, timeline, slot, result.crit));
 		}
-		if (!target.dead && !this.attackFinalizer.hasPendingDeath(target.targetId)) {
+		if (react && !target.dead && !this.attackFinalizer.hasPendingDeath(target.targetId)) {
 			this.playHitReaction(target, result.crit);
 		}
 	}
@@ -1155,7 +1174,7 @@ export class CombatController {
 	}
 
 	private onEffectApplied(payload: EffectAppliedPayload): void {
-		if (this.battleEnded) return;
+		if (this.battleEnded || (payload.sessionId !== undefined && payload.sessionId !== this.sessionId)) return;
 		if (payload.effect === "Hamon") return;
 		const target = this.fightersByTargetId.get(payload.targetId);
 		if (target === undefined) return;
@@ -1189,7 +1208,11 @@ export class CombatController {
 	}
 
 	private onEffectTick(payload: EffectTickPayload): void {
-		if (this.battleEnded) return;
+		if (this.battleEnded || (payload.sessionId !== undefined && payload.sessionId !== this.sessionId)) return;
+		if (this.resources.isPaused()) {
+			this.delayBattle(0, () => this.onEffectTick(payload));
+			return;
+		}
 		const target = this.fightersByTargetId.get(payload.targetId);
 		if (target === undefined) return;
 
@@ -1205,6 +1228,7 @@ export class CombatController {
 	}
 
 	private onEffectExpired(payload: EffectExpiredPayload): void {
+		if (this.battleEnded || (payload.sessionId !== undefined && payload.sessionId !== this.sessionId)) return;
 		if (payload.effect === "Burn") {
 			this.statusVfx.removeBurn(payload.targetId);
 		}
@@ -1219,6 +1243,11 @@ export class CombatController {
 	}
 
 	private onFighterDied(payload: FighterDiedPayload): void {
+		if (this.battleEnded || (payload.sessionId !== undefined && payload.sessionId !== this.sessionId)) return;
+		if (this.resources.isPaused()) {
+			this.delayBattle(0, () => this.onFighterDied(payload));
+			return;
+		}
 		this.statusVfx.removeBurn(payload.fighterId);
 		if (!this.battleEnded && this.fightersByTargetId.has(payload.fighterId)) {
 			this.cutsceneController.notifyKo(this.battleVfxGeneration, this.activeBattleId);
@@ -1231,6 +1260,11 @@ export class CombatController {
 	}
 
 	private onSwitchPerformed(payload: SwitchPerformedPayload): void {
+		if (this.battleEnded || (payload.sessionId !== undefined && payload.sessionId !== this.sessionId)) return;
+		if (this.resources.isPaused()) {
+			this.delayBattle(0, () => this.onSwitchPerformed(payload));
+			return;
+		}
 		if (
 			!this.battleEnded &&
 			(this.fightersByTargetId.has(payload.previousFighterId) ||
@@ -1246,15 +1280,7 @@ export class CombatController {
 	}
 
 	private createBattleTween<T extends Instance>(object: T, info: TweenInfo, goal: Partial<ExtractMembers<T, Tweenable>>): Tween {
-		const tween = TweenService.Create(object, info, goal);
-		this.battleTweens.add(tween);
-		const connection = tween.Completed.Connect(() => {
-			connection.Disconnect();
-			this.battleConnections.delete(connection);
-			this.battleTweens.delete(tween);
-		});
-		this.battleConnections.add(connection);
-		return tween;
+		return this.resources.createTween(object, info, goal);
 	}
 
 	private trackBattleConnection(connection: RBXScriptConnection): void {
@@ -1266,27 +1292,11 @@ export class CombatController {
 	}
 
 	private delayBattle(seconds: number, callback: () => void): thread {
-		const pending = task.delay(seconds, () => {
-			this.battleTasks.delete(pending);
-			callback();
-		});
-		this.battleTasks.add(pending);
-		return pending;
+		return this.resources.delay(seconds, callback);
 	}
 
 	private cancelBattleTask(pending: thread): void {
-		if (!this.battleTasks.has(pending)) return;
-		this.battleTasks.delete(pending);
-		pcall(() => task.cancel(pending));
-	}
-
-	private spawnBattle(callback: () => void): void {
-		// defer registers the thread before it can yield waiting for a hit.
-		const pending = task.defer(() => {
-			callback();
-			this.battleTasks.delete(pending);
-		});
-		this.battleTasks.add(pending);
+		this.resources.cancelTask(pending);
 	}
 
 	/** Called only by the client teardown, or before replacing a stage on BattleStarted. */
@@ -1303,21 +1313,8 @@ export class CombatController {
 		this.activeAttack = undefined;
 		this.deferredAttack = undefined;
 		this.hitQueue.clear();
-		for (const connection of this.battleConnections) battleCleanupStep("combat connection", () => connection.Disconnect());
-		this.battleConnections.clear();
-		for (const pending of this.battleTasks) battleCleanupStep("combat task", () => task.cancel(pending));
-		this.battleTasks.clear();
-		for (const tween of this.battleTweens) battleCleanupStep("combat tween", () => tween.Cancel());
-		this.battleTweens.clear();
-		for (const track of this.battleTracks) {
-			battleCleanupStep("animation stop", () => track.Stop(0));
-			battleCleanupStep("animation destroy", () => track.Destroy());
-		}
-		this.battleTracks.clear();
-		for (const [, entry] of this.fightersByTargetId) {
-			battleCleanupStep("stand base", () => this.restoreStandBase(entry));
-			battleCleanupStep("fighter base", () => entry.model.PivotTo(entry.homeCFrame));
-		}
+		this.resources.clear();
+		this.standMotion.resetStage(this.fightersByTargetId);
 		this.damagePool.clear();
 		battleCleanupStep("status vfx clear", () => this.statusVfx.clearAll());
 		battleCleanupStep("cutscene reset", () => this.cutsceneController.resetForBattle());
@@ -1329,6 +1326,8 @@ export class CombatController {
 		this.activeArenaInstanceId = undefined;
 		this.activeBattleId = "";
 		this.activeTransitionId = undefined;
+		this.sessionId = undefined;
+		this.lastAttackSequence = 0;
 		this.physicalSideIds = ["", ""];
 		this.attackFinalizer.clear();
 		this.vfxBridge.clearWorkingCopies();

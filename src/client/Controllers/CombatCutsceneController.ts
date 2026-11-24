@@ -37,6 +37,7 @@ export interface CutsceneStartRequest {
 export interface CombatCutsceneHost {
 	readonly isCurrentBattle: (generation: number, battleId: string) => boolean;
 	readonly isIntroBlocking: () => boolean;
+	readonly isPaused?: () => boolean;
 	readonly getCameraController: () => CombatCameraController;
 	readonly getArenaAnchors: () => ResolvedArenaAnchors | undefined;
 	readonly isFighterValid: (fighter: CutsceneFighterRef) => boolean;
@@ -234,6 +235,7 @@ export class CombatCutsceneController {
 			return false;
 		}
 
+		if (this.host.isPaused?.()) return true;
 		const safeDt = dt === dt && dt > 0 && dt < math.huge ? dt : 0;
 
 		if (session.state === "playing") {

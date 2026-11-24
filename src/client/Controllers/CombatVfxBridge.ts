@@ -54,6 +54,8 @@ export class CombatVfxBridge {
 	public readonly battleVfxWorkingCopies = new Map<string, Instance>();
 	public readonly vfxCarrierParts = new Map<Instance, BasePart>();
 	private readonly vfxSpatialLayouts = new Map<Instance, readonly WorkingVfxSpatialTarget[]>();
+	private readonly attackEffects = new Set<Instance>();
+	private readonly pausedSounds = new Set<Sound>();
 
 	private battleVfxGeneration = 0;
 
@@ -82,9 +84,40 @@ export class CombatVfxBridge {
 	}
 
 	public clearWorkingCopies(): void {
+		this.interruptAttackVfx();
 		this.battleVfxWorkingCopies.clear();
 		this.vfxCarrierParts.clear();
 		this.vfxSpatialLayouts.clear();
+	}
+
+	public interruptAttackVfx(): void {
+		for (const effect of this.attackEffects) {
+			battleCleanupStep("attack vfx", () => this.host.getVfxController()?.cancelEmission(effect));
+			for (const child of effect.GetDescendants()) {
+				if (child.IsA("Sound")) battleCleanupStep("attack sound", () => child.Stop());
+			}
+		}
+		this.attackEffects.clear();
+		this.pausedSounds.clear();
+	}
+
+	public setAttackPaused(paused: boolean): void {
+		if (!paused) {
+			for (const sound of this.pausedSounds) {
+				if (sound.Parent !== undefined) sound.Resume();
+			}
+			this.pausedSounds.clear();
+			return;
+		}
+		for (const effect of this.attackEffects) {
+			this.host.getVfxController()?.cancelEmission(effect, true);
+			for (const child of effect.GetDescendants()) {
+				if (child.IsA("Sound") && child.IsPlaying) {
+					child.Pause();
+					this.pausedSounds.add(child);
+				}
+			}
+		}
 	}
 
 	public clearActiveVfx(): void {
@@ -238,7 +271,7 @@ export class CombatVfxBridge {
 
 		const skillVfx = this.resolveSkillVfx(attacker, timeline, slot);
 		if (skillVfx !== undefined) {
-			this.emitResolvedBattleVfx(skillVfx, origem, VFX_PRIORIDADE_ESSENCIAL);
+			this.emitResolvedBattleVfx(skillVfx, origem, VFX_PRIORIDADE_ESSENCIAL, true);
 		}
 
 		const impactName = isCrit ? VFX_GLOBAL_CRIT_NAME : VFX_GLOBAL_HIT_NAME;
@@ -247,7 +280,7 @@ export class CombatVfxBridge {
 			impactVfx = this.resolveNamedCombatVfx(attacker, VFX_GLOBAL_HIT_NAME);
 		}
 		if (impactVfx !== undefined) {
-			this.emitResolvedBattleVfx(impactVfx, origem, VFX_PRIORIDADE_ESSENCIAL);
+			this.emitResolvedBattleVfx(impactVfx, origem, VFX_PRIORIDADE_ESSENCIAL, true);
 		}
 	}
 
@@ -263,11 +296,13 @@ export class CombatVfxBridge {
 		resolved: ResolvedBattleVfx,
 		origem: VfxOrigem,
 		prioridade: VfxPrioridade,
+		attackEffect = false,
 	): void {
 		const vfx = this.host.getVfxController();
 		if (vfx === undefined || this.host.isBattleEnded()) return;
 		const working = this.getOrCreateWorkingVfxCopy(resolved.key, resolved.instance, origem);
 		if (working === undefined) return;
+		if (attackEffect) this.attackEffects.add(working);
 		vfx.emit(working, origem, prioridade, true);
 	}
 
@@ -277,6 +312,7 @@ export class CombatVfxBridge {
 
 		let working = this.battleVfxWorkingCopies.get(key);
 		if (working === undefined || !working.Parent) {
+			if (!template.Archivable) return undefined;
 			working = template.Clone();
 			working.Name = `BattleVFX_${key}`;
 			working.SetAttribute(VFX_ATTR_IGNORAR_CULLING, true);

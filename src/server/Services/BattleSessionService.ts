@@ -149,16 +149,9 @@ export class BattleSessionService {
 		const session = playerSession.session;
 		if (!this.isRunning(session) || session.mode !== "PVE") return false;
 
-		if (session.paused) {
-			session.paused = false;
-			return true;
-		}
-
-		if (session.pauseAccumulatedSeconds + FLOAT_TOLERANCE >= PVE_PAUSE_MAX_SECONDS) {
-			return false;
-		}
-		session.paused = true;
-		return true;
+		const changed = this.setPaused(player, !session.paused);
+		if (!changed) this.presentation.sendState(session);
+		return changed;
 	}
 
 	public setPaused(player: Player, paused: boolean): boolean {
@@ -168,6 +161,7 @@ export class BattleSessionService {
 		if (!this.isRunning(session) || session.mode !== "PVE") return false;
 		if (paused && session.pauseAccumulatedSeconds + FLOAT_TOLERANCE >= PVE_PAUSE_MAX_SECONDS) return false;
 		session.paused = paused;
+		this.presentation.sendState(session);
 		return true;
 	}
 
@@ -355,6 +349,7 @@ export class BattleSessionService {
 			}
 			session.pauseAccumulatedSeconds = PVE_PAUSE_MAX_SECONDS;
 			session.paused = false;
+			this.presentation.sendState(session);
 			remainingDt = math.max(remainingDt - remainingPauseBudget, 0);
 			if (remainingDt <= FLOAT_TOLERANCE) return false;
 		}
@@ -432,6 +427,7 @@ export class BattleSessionService {
 				(rewardSession, rewardParticipant, maxTotalXp) => this.awardSessionXp(rewardSession, rewardParticipant, maxTotalXp),
 			);
 			const [sent, sendError] = pcall(() => this.remoteService.sendBattleEnded(player, {
+				sessionId: session.id,
 				transitionId: session.preparation !== undefined ? session.id : undefined,
 				winnerSideId: winnerSide === undefined ? undefined : this.presentation.getSideId(session, winnerSide),
 				tinyesReward: session.mode === "PVP" && participant.side !== winnerSide ? undefined : tinyesReward,

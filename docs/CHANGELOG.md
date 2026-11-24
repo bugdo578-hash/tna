@@ -2,6 +2,13 @@
 
 Registro conciso de mudanças a partir de `2026-11-14` (ordem cronológica reversa). Histórico anterior a `2026-11-14` (base inicial T1–T5, T7.1, T7.2 e primeira correção de DataStore/autosave): [CHANGELOG_ARCHIVE.md](CHANGELOG_ARCHIVE.md). Estado operacional atual: [HANDOFF.md](HANDOFF.md).
 
+## 2026-11-24 — Interrupções cinematográficas de combate
+
+- A apresentação recebe a identidade da sessão e a sequência do ataque. A fila deduplica resultados por hit e alvo e usa o resultado autoritativo quando ele chega depois do timeout visual do marker.
+- O estado de Pause PvE vem do servidor, inclusive no auto-resume pelo teto existente. O cliente conserva a posição da cutscene, os tempos restantes de tarefas, a velocidade de animação e o progresso de tweens.
+- A apresentação reutiliza geração, token, fila de KO/trocas e teardown. Movimentos temporários usam o `homeCFrame` alinhado ao `GroundContact`. KO e troca assumem o controle do modelo antes de alterar seu estado ou anchor.
+- Sondas isoladas cobrem retorno, interrupção, atraso, recursos temporários e lados físicos. K2 e K2.1 usam uma timeline de cinco hits exclusiva do QA.
+
 ## 2026-11-23 — N1 · Burn e Bleed
 
 - O servidor mantém três ticks espaçados por um segundo de IDLE. Bleed usa 25% do dano real e Burn usa 20%. Cada reaplicação renova seu próprio efeito. Frações acumulam, o último tick garante pelo menos 1 e o relógio congela no Pause. O efeito acompanha o lutador para o banco. Verificada a correção A-05 do Lote M e completada a limpeza dos status no KO, incluindo Root.

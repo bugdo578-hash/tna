@@ -24,13 +24,12 @@ export class BattleSessionPresentation {
 
 	public connect(session: BattleSessionRecord, onVictory: (side: BattleSide | undefined) => void): void {
 		const events = session.battle.events;
+		let attackSequence = 0;
 		session.disconnectors.push(
-			events.state.connect((state) => {
-				const payload: StateChangedPayload = { state };
-				this.sendToParticipants(session, (player) => this.remoteService.sendStateChanged(player, payload));
-			}),
+			events.state.connect(() => this.sendState(session)),
 			events.switchPerformed.connect(({ side, previousFighter, activeFighter }) => {
 				const payload: SwitchPerformedPayload = {
+					sessionId: session.id,
 					sideId: this.getSideId(session, side),
 					previousFighterId: this.getFighterId(session, previousFighter),
 					activeFighterId: this.getFighterId(session, activeFighter),
@@ -39,6 +38,8 @@ export class BattleSessionPresentation {
 			}),
 			events.attackStarted.connect(({ attacker, target, slot, skillData }) => {
 				const payload: AttackStartedPayload = {
+					sessionId: session.id,
+					attackSequence: ++attackSequence,
 					attackerId: this.getFighterId(session, attacker),
 					targetId: this.getFighterId(session, target),
 					slot,
@@ -49,6 +50,8 @@ export class BattleSessionPresentation {
 			events.hitResolved.connect(({ hitIndex, hit, crit, damage, target, followUpCancelled, noDamage }) => {
 				session.resolvedHits++;
 				const payload: HitResolvedPayload = {
+					sessionId: session.id,
+					attackSequence,
 					hitIndex,
 					hit,
 					crit,
@@ -61,6 +64,7 @@ export class BattleSessionPresentation {
 			}),
 			events.effectApplied.connect(({ target, effect, duration, renewed, charges, maxCharges, remainingDuration }) => {
 				const payload: EffectAppliedPayload = {
+					sessionId: session.id,
 					targetId: this.getFighterId(session, target),
 					effect,
 					duration,
@@ -73,6 +77,7 @@ export class BattleSessionPresentation {
 			}),
 			events.effectTick.connect(({ target, effect, damage, remainingTicks }) => {
 				const payload: EffectTickPayload = {
+					sessionId: session.id,
 					targetId: this.getFighterId(session, target),
 					effect,
 					damage,
@@ -82,6 +87,7 @@ export class BattleSessionPresentation {
 			}),
 			events.effectExpired.connect(({ target, effect }) => {
 				const payload: EffectExpiredPayload = {
+					sessionId: session.id,
 					targetId: this.getFighterId(session, target),
 					effect,
 				};
@@ -89,6 +95,7 @@ export class BattleSessionPresentation {
 			}),
 			events.death.connect(({ side, fighter, nextActive }) => {
 				const payload: FighterDiedPayload = {
+					sessionId: session.id,
 					sideId: this.getSideId(session, side),
 					fighterId: this.getFighterId(session, fighter),
 					nextActive: nextActive === undefined ? undefined : this.getFighterId(session, nextActive),
@@ -101,8 +108,18 @@ export class BattleSessionPresentation {
 		);
 	}
 
+	public sendState(session: BattleSessionRecord): void {
+		const payload: StateChangedPayload = {
+			sessionId: session.id,
+			state: session.battle.state,
+			paused: session.mode === "PVE" ? session.paused : undefined,
+		};
+		this.sendToParticipants(session, (player) => this.remoteService.sendStateChanged(player, payload));
+	}
+
 	public sendReleased(session: BattleSessionRecord): void {
 		this.sendToParticipants(session, (player) => this.remoteService.sendStateChanged(player, {
+			sessionId: session.id,
 			state: session.battle.state,
 			battleReleased: session.id,
 		}));
@@ -141,6 +158,7 @@ export class BattleSessionPresentation {
 				physicalSides: session.sideIds,
 			};
 		const payload: BattleStartedPayload = {
+			sessionId: session.id,
 			transitionId: session.preparation !== undefined ? session.id : undefined,
 			sides: session.sideIds,
 			fighters,

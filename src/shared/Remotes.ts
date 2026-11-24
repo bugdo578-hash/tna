@@ -120,6 +120,7 @@ export interface BattleArenaPayload {
 }
 
 export interface BattleStartedPayload {
+	readonly sessionId?: number;
 	readonly transitionId?: number;
 	readonly sides: readonly [string, string];
 	readonly fighters: readonly BattleFighterSnapshot[];
@@ -131,17 +132,22 @@ export interface BattleStartedPayload {
 }
 
 export interface StateChangedPayload {
+	readonly sessionId?: number;
+	readonly paused?: boolean;
 	readonly state: BattleGlobalState;
 	readonly battleReleased?: number;
 }
 
 export interface SwitchPerformedPayload {
+	readonly sessionId?: number;
 	readonly sideId: string;
 	readonly previousFighterId: string;
 	readonly activeFighterId: string;
 }
 
 export interface AttackStartedPayload {
+	readonly sessionId?: number;
+	readonly attackSequence?: number;
 	readonly attackerId: string;
 	readonly targetId: string;
 	readonly slot: SkillSlot;
@@ -150,6 +156,8 @@ export interface AttackStartedPayload {
 }
 
 export interface HitResolvedPayload {
+	readonly sessionId?: number;
+	readonly attackSequence?: number;
 	readonly hitIndex: number;
 	readonly hit: boolean;
 	readonly crit: boolean;
@@ -160,6 +168,7 @@ export interface HitResolvedPayload {
 }
 
 export interface EffectAppliedPayload {
+	readonly sessionId?: number;
 	readonly targetId: string;
 	readonly effect: StatusEffect;
 	readonly duration: number;
@@ -170,6 +179,7 @@ export interface EffectAppliedPayload {
 }
 
 export interface EffectTickPayload {
+	readonly sessionId?: number;
 	readonly targetId: string;
 	readonly effect: "Bleed" | "Burn";
 	readonly damage: number;
@@ -177,17 +187,20 @@ export interface EffectTickPayload {
 }
 
 export interface EffectExpiredPayload {
+	readonly sessionId?: number;
 	readonly targetId: string;
 	readonly effect: StatusEffect;
 }
 
 export interface FighterDiedPayload {
+	readonly sessionId?: number;
 	readonly sideId: string;
 	readonly fighterId: string;
 	readonly nextActive: string | undefined;
 }
 
 export interface BattleEndedPayload {
+	readonly sessionId?: number;
 	readonly transitionId?: number;
 	readonly reason?: BattleEndReason;
 	readonly rewardBlockedReason?: RewardBlockedReason;
